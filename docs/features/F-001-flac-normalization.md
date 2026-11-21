@@ -17,6 +17,9 @@ depth; they still require a verified sample rate of at least 44.1 kHz and produc
 conversion cannot restore lost quality.
 Without `--overwrite`, existing targets are never replaced. Exit code 0 only if every planned item was preserved.
 The console reports conversion start, coarse progress and completion, along with meaningful warnings/errors. Before
+the preview, preparation reports per-library `Conversion discovery` progress (entries visited and convertible audio
+found, total unknown) and `Conversion planning` progress (destinations checked of the known total, with ETA), updated
+every second on an interactive console and every five seconds when redirected. Before
 converting tracks in a different folder, it shows the full source album folder path; root-level tracks and disc
 subfolders use their own containing folder. It also signals when audio conversion ends and unchanged files are being
 copied. Per-file success details and expected generated encoder/vendor normalization are available at debug level in
@@ -43,6 +46,7 @@ check (F-003).
 - [ ] Non-ASCII and >260-character paths convert on Windows.
 - [ ] A near-limit Windows output directory succeeds when marker and temporary filenames would exceed `MAX_PATH`.
 - [ ] Menu conversion accepts extended-prefix output paths with an FFmpeg launcher shim (see DESIGN's output anchoring).
+- [ ] Preparation logs `Conversion discovery` and `Conversion planning` phases ending in `[done]` before conversion starts.
 - [ ] An extended-prefix output below a mapped drive succeeds when its target descendants do not yet exist.
 - [ ] Replacing an output directory after validation cannot redirect writes into the source library.
 - [ ] `conversion-audit.json` exists with `status: completed` (see F-003).

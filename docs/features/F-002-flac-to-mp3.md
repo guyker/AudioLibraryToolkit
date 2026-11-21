@@ -9,7 +9,8 @@ keep their rate; others are resampled to 48 kHz. Multichannel sources are reject
 When enabled, a `.flac-metadata` sidecar beside each MP3 preserves the original FLAC metadata byte-for-byte;
 `MetadataSidecars` can select a readable `.flac-metadata.json` form or make it optional/disabled (disabled by
 default; F-007). Without a sidecar, conversion fails rather than lose metadata the output cannot represent.
-Non-FLAC audio is reported as skipped; companions are copied.
+Non-FLAC audio is reported as skipped; companions are copied. Preparation reports the same discovery and planning
+progress as FLAC conversion (F-001).
 
 ## Entry points
 - `FlacConvert convert <input> --to mp3 [--mp3-quality N] [--downmix-to-stereo] [--overwrite]` →

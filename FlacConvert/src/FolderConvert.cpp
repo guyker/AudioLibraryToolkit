@@ -28,6 +28,7 @@
 #include "JsonUtils.h"
 #include "MediaInformation.h"
 #include "MediaTrack.h"
+#include "RunLogging.h"
 #include <spdlog/spdlog.h>
 
 using namespace std;
@@ -260,6 +261,14 @@ void logAudit(const PlannedFileConversion& file, const PreservationAudit::Result
     spdlog::debug("Installed '{}': {} preservation checks, {} differences; see {}.",
         CommonUtils::path_to_utf8(file.target), audit.entries.size(), differences, auditFilename);
 }
+
+// Phase progress that logs a final "[stopped]" line when a planning phase exits early.
+class PreparationProgress : public RunLogging::PhaseProgress
+{
+public:
+    using PhaseProgress::PhaseProgress;
+    ~PreparationProgress() { Finish(false); }
+};
 }
 
 
@@ -398,7 +407,9 @@ int FolderConvert::PrepareConversion(
             }
         };
         try {
+            PreparationProgress discovery("Conversion discovery", std::nullopt, "entries", "audio files");
             for (const auto& entry : fs::recursive_directory_iterator(inputRoot)) {
+                discovery.Advance();
                 if (entry.path().lexically_relative(inputRoot).parent_path().empty()) {
                     const auto name = CommonUtils::path_to_utf8(entry.path().filename());
                     if (JsonUtils::caseInsensitiveEquals(name.c_str(), auditFilename) ||
@@ -438,6 +449,7 @@ int FolderConvert::PrepareConversion(
                     }
                     else {
                         audio.push_back(entry);
+                        discovery.AdvanceSecondary();
                         if (completeTree) count(entry.path(), true, true);
                     }
                 }
@@ -452,6 +464,7 @@ int FolderConvert::PrepareConversion(
                     }
                 }
             }
+            discovery.Finish();
         }
         catch (const fs::filesystem_error& error) {
             spdlog::error("Cannot enumerate files and directories: {}", error.what());
@@ -537,7 +550,10 @@ int FolderConvert::PrepareConversion(
         return true;
     };
 
+    PreparationProgress planning("Conversion planning",
+        plan.directories.size() + audio.size() + companions.size(), "destinations");
     for (const auto& directory : plan.directories) {
+        planning.Advance();
         const auto canonical = fs::weakly_canonical(directory, ec);
         if (ec || !isSameOrChildPath(canonical, output) || isSameOrChildPath(canonical, input)) {
             spdlog::error("Unsafe output directory: {}", CommonUtils::path_to_utf8(directory));
@@ -552,6 +568,7 @@ int FolderConvert::PrepareConversion(
     }
 
     for (const auto& entry : audio) {
+        planning.Advance();
         const fs::path source = entry.path();
         const fs::path relativePath = source.lexically_relative(inputRoot);
         if (relativePath.empty() || *relativePath.begin() == "..") {
@@ -584,6 +601,7 @@ int FolderConvert::PrepareConversion(
         plan.audio.push_back({ source, target, makeTemporaryOutputPath(target, ++nextTemporaryId) });
     }
     for (const auto& entry : companions) {
+        planning.Advance();
         const auto relative = entry.path().lexically_relative(inputRoot);
         if (relative.empty() || *relative.begin() == "..") {
             spdlog::error("Cannot resolve companion path: {}", CommonUtils::path_to_utf8(entry.path()));
@@ -595,6 +613,7 @@ int FolderConvert::PrepareConversion(
         }
         plan.companions.push_back({ entry.path(), target, makeTemporaryOutputPath(target, ++nextTemporaryId) });
     }
+    planning.Finish();
     return 0;
 }
 

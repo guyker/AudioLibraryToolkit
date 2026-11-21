@@ -105,7 +105,8 @@ Menu actions log every active source library before preparation, and CLI command
 (identified as catalog JSON for duplicate detection and database import). Conversion and scan transitions identify
 the current source library. `RunLogging` serializes transient progress with console log messages so warnings/errors
 end the progress line cleanly; transient redraws are not written to session logs or redirected output.
-Long phases use `RunLogging::PhaseProgress` (repair phases, scan discovery and scan track collection): it logs the
+Long phases use `RunLogging::PhaseProgress` (repair phases, conversion discovery and planning, scan discovery and scan
+track collection): it logs the
 phase start, redraws one line every second when interactive, logs a snapshot every five seconds when redirected, and
 logs a final `[done]`/`[stopped]` line with counts, elapsed time and, when the total is known, an ETA. Scan metadata
 progress spans every batch of a library rather than restarting per batch.
@@ -124,6 +125,9 @@ progress spans every batch of a library rather than restarting per batch.
    audio beside conversions and folders without audio (K-036). Directory links and non-regular entries fail FLAC
    planning anywhere, including inside skipped subtrees, rather than disappearing from output. MP3 mode retains its
    non-audio companion policy, skips non-FLAC audio and does nothing without convertible FLAC. Nothing is written.
+   Progress is reported per library: `Conversion discovery` (entries visited and convertible audio found; total
+   unknown) and `Conversion planning` (destinations checked out of the known total, with ETA); an early planning
+   failure logs the phase as `[stopped]`.
 2. **Preview** (menu only) – `ConvertConfiguredLibraries` plans *all* active libraries, checks cross-library overlap,
    prints `ShowConversionPreview`, and requires `RUN` (`ConfirmPreview`). Any conflict blocks the whole run (K-049).
 3. **Execute** – `FolderConvert::ExecuteConversion` creates the library folder (ownership = created by this run),

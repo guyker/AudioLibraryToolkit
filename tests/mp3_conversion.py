@@ -242,6 +242,11 @@ class ConversionTests(unittest.TestCase):
         self.assertNotIn("frame=", result.stdout + result.stderr)
         if success:
             self.assertIn("Conversion started:", result.stdout)
+            self.assertRegex(result.stdout,
+                             r"Conversion discovery: \d+ entries \(total unknown\), \d+ audio files, .* \[done\]")
+            self.assertRegex(result.stdout,
+                             r"Conversion planning: (\d+)/\1 destinations \(100%\), .* \[done\]")
+            self.assertLess(result.stdout.index("Conversion planning:"), result.stdout.index("Conversion started:"))
             self.assertIn("Conversion completed:", result.stdout)
             self.assertNotIn("Encoder/vendor text differs; this is an informational generated-field change.",
                              result.stdout)
