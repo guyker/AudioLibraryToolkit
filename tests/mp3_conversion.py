@@ -920,7 +920,8 @@ class ConversionTests(unittest.TestCase):
         self.assertTrue((output.parent / "repair-report.json").is_file())
         summary = (output.parent / "repair-summary.html").read_text(encoding="utf-8")
         self.assertIn("Repair summary:", result.stdout)
-        self.assertIn("Planned [flac.duplicate-comments]", result.stdout)
+        self.assertIn("flac.duplicate-comments: 1 repairable finding(s)", result.stdout)
+        self.assertLess(result.stdout.index("Repair preview:"), result.stdout.index("Repair installation:"))
         self.assertIn("<strong>album &amp; \u97f3</strong>", summary)
         self.assertIn("track.flac</strong> - Installed; audio verified unchanged | Low metadata risk", summary)
         self.assertIn("1 repaired, 3 copied unchanged", summary)
@@ -944,6 +945,38 @@ class ConversionTests(unittest.TestCase):
         self.assertNotIn("Repair installation:", result.stdout)
         self.assertFalse(self.output.exists())
         self.assertEqual(self.track.read_bytes(), before)
+
+    def test_manual_repair_preview_includes_all_findings_without_writing_repair_output(self):
+        contents = add_vorbis_comments(self.repair_fixture.read_bytes(), ["CDTOC=A", "CDTOC=A"])
+        self.track.unlink()
+        for index in range(27):
+            (self.source / f"track-{index:02}.flac").write_bytes(contents)
+        temp = self.work / "preview-temp"
+        temp.mkdir()
+        libraries = [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}]
+        result = self.legacy(libraries, "7\n\n\n\n",
+                             env=dict(os.environ, TEMP=str(temp), TMP=str(temp), TMPDIR=str(temp)))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("flac.duplicate-comments: 27 repairable finding(s)", result.stdout)
+        self.assertNotIn("track-00.flac", result.stdout)
+        self.assertNotIn("Repair installation:", result.stdout)
+        report, = temp.rglob("*.html")
+        preview = report.read_text(encoding="utf-8")
+        self.assertIn("No repairs have run", preview)
+        self.assertEqual(preview.count("Planned edit |"), 27)
+        self.assertIn("track-26.flac</strong> - Planned edit", preview)
+        self.assertIn("retaining the first occurrence: CDTOC", preview)
+        self.assertNotIn("Installed; audio verified unchanged", preview)
+        self.assertFalse(self.output.exists())
+        self.assertEqual(len(list(self.source.iterdir())), 27)
+        self.assertTrue(all(path.read_bytes() == contents for path in self.source.iterdir()))
+
+        result = self.legacy(libraries, "7\n\n\nRUN\n",
+                             env=dict(os.environ, TEMP=str(self.source), TMP=str(self.source),
+                                      TMPDIR=str(self.source)))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.output.exists())
+        self.assertEqual(len(list(self.source.iterdir())), 27)
 
     def test_manual_repair_can_opt_in_to_redundant_id3v1_removal(self):
         self.track.unlink()
@@ -1348,14 +1381,14 @@ class ConversionTests(unittest.TestCase):
                              for line in result.stdout.splitlines() if "Session log: " in line))
         self.assertEqual(log_path.read_text(encoding="utf-8").count("Copied companion file unchanged"), 2)
 
-    def legacy(self, libraries, selection="6\n" + DEFAULT_MP3_SETTINGS + "RUN\n", **extra_settings):
+    def legacy(self, libraries, selection="6\n" + DEFAULT_MP3_SETTINGS + "RUN\n", *, env=None, **extra_settings):
         settings = json.loads(self.config.read_text(encoding="utf-8"))
         settings.update({"OutDirectory": str(self.output), "MediaDirectoryList": libraries})
         settings.update(extra_settings)
         (self.work / "config.json").write_text(json.dumps(settings), encoding="utf-8")
         (self.work / "AppSettingsJsonPersistent.txt").write_text(
             "UTF8:" + str(self.work), encoding="utf-8")
-        return subprocess.run([str(ARGS.converter)], input=selection, cwd=self.work,
+        return subprocess.run([str(ARGS.converter)], input=selection, cwd=self.work, env=env,
                               capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     def test_manual_mp3_selection(self):

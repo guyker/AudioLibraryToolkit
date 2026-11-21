@@ -19,7 +19,7 @@ namespace PlatformUtils {
 
 		bool EnterValidatedDirectory(const std::filesystem::path& target,
 			const std::filesystem::path& sourceRoot, bool createDirectories,
-			bool* createdTargetDirectory = nullptr);
+			bool* createdTargetDirectory = nullptr, bool allowSourceAncestor = false);
 		std::filesystem::path ResolvePath(const std::filesystem::path& path) const;
 		bool IsAnchored(const std::filesystem::path& target) const;
 		bool Restore();

@@ -5,7 +5,7 @@ Status: active
 ## Behaviour
 Running with no arguments shows a numbered menu over the configured active libraries. Every mutating option prints
 an operation preview (inputs, outputs, counts, overwrite effects) and runs only after the user types exactly `RUN`;
-`BACK` returns to the menu; `EXIT`, Enter, any other text or EOF cancels without writing and ends the program.
+`BACK` returns to the menu; `EXIT`, Enter, any other text or EOF cancels without executing the operation.
 Conflicts block the run before installing output. After a started or failed operation a summary reports Completed, Partially
 completed or Failed with confirmed counts, and the program exits. Duplicate review also reports `Stopped by user`
 when ended early. `0` or EOF at the menu exits; `?` shows help.
@@ -36,7 +36,8 @@ system temporary directory and logs its location; it does not install a catalog.
   K-049 `RUN` after reusable previews and scan failure diagnostics, compact menu and contextual help
 
 ## Acceptance checks
-- [ ] Canceling at the confirmation writes nothing; a scan preview failure may write a temporary diagnostic report.
+- [ ] Canceling at the confirmation writes no operation output. Option 7 retains its temporary HTML preview;
+      a scan preview failure may write a temporary diagnostic report.
 - [ ] `BACK` returns to the menu; EOF on stdin exits cleanly.
 - [ ] Option 2 can enable or disable FLAC archives before the preview without changing the saved configuration.
 - [ ] Option 7 previews FLAC/MP3 repair findings and requires `RUN` before writing repaired copies.

@@ -1519,7 +1519,7 @@ int ConvertFLACToMP3(const std::vector<MediaDirectoryElement>& libraries, const 
     return ConvertConfiguredLibraries(libraries, outputRoot, summary, options, overwrite);
 }
 
-void PrintRepairFindings(const AudioRepair::Plan& plan)
+void PrintRepairFindingCounts(const AudioRepair::Plan& plan)
 {
     std::map<std::string, std::pair<std::size_t, std::size_t>> rules;
     for (const auto& finding : plan.findings) {
@@ -1527,21 +1527,8 @@ void PrintRepairFindings(const AudioRepair::Plan& plan)
         ++(finding.status == "repairable" ? counts.first : counts.second);
     }
     for (const auto& [rule, counts] : rules) {
-        std::cout << "    " << rule << ": " << counts.first << " file(s) to repair, "
-            << counts.second << " file(s) for review\n";
-    }
-    constexpr std::size_t kListed = 25;
-    for (std::size_t index = 0; index < plan.findings.size() && index < kListed; ++index) {
-        const auto& finding = plan.findings[index];
-        const auto impact = AudioRepair::DescribeFindingImpact(finding);
-        std::cout << "      " << (finding.status == "repairable" ? "Planned" : finding.status)
-            << " [" << finding.rule << "] "
-            << pathToUtf8(finding.source.lexically_relative(plan.input)) << " - " << finding.detail
-            << " (" << impact.label << ": " << impact.detail << ")\n";
-    }
-    if (plan.findings.size() > kListed) {
-        std::cout << "      ... " << plan.findings.size() - kListed
-            << " more finding(s); repair-report.json lists all of them.\n";
+        std::cout << "    " << rule << ": " << counts.first << " repairable finding(s), "
+            << counts.second << " finding(s) for review\n";
     }
 }
 
@@ -1611,7 +1598,7 @@ int RepairConfiguredLibraries(const std::vector<MediaDirectoryElement>& librarie
             << "  Overwrite: " << (overwrite ? "enabled" : "disabled") << '\n'
             << "  Remove redundant MP3 ID3v1: " << (removeId3v1 ? "enabled" : "disabled") << '\n'
             << "  Parallel workers: " << plan.workers << '\n';
-        PrintRepairFindings(plan);
+        PrintRepairFindingCounts(plan);
         for (const auto& conflict : plan.conflicts) {
             std::cout << "    COLLISION: " << pathToUtf8(conflict) << '\n';
         }
@@ -1639,6 +1626,8 @@ int RepairConfiguredLibraries(const std::vector<MediaDirectoryElement>& librarie
             }
         }
     }
+    if (!AudioRepair::WritePreviewReports(plans)) return 1;
+
     if (std::any_of(plans.begin(), plans.end(),
             [](const AudioRepair::Plan& plan) { return !plan.conflicts.empty(); })) {
         spdlog::error("Repair destination conflicts; no repair was started.");
@@ -3351,7 +3340,7 @@ int RunWithArgumentsImpl(const std::vector<const char*>& arguments)
                         return finding.status == "manual-review" || finding.status == "unreadable";
                     }) << '\n'
                 << "  Existing destination conflicts: " << plan.conflicts.size() << '\n';
-            PrintRepairFindings(plan);
+            PrintRepairFindingCounts(plan);
             const int result = AudioRepair::Execute(plan);
             return result == 0 ? 0 : 1;
         }

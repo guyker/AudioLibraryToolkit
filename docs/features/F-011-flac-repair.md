@@ -20,8 +20,10 @@ overlap each other or another library's source; the run fails before installing 
 `repair-report.json` records findings, file installation status, and whether audio or metadata changed.
 Open the printed `repair-summary.html` path to filter by album folder, track or repair. Expand a folder to see
 changes and rule-specific cautions. The report distinguishes verified installed repairs from failures, repairs not
-attempted and findings left for review; audio byte verification does not imply equal player compatibility. Preview
-details label fixes as planned. Existing
+attempted and findings left for review; audio byte verification does not imply equal player compatibility.
+Before `RUN`, option 7 shows only finding statistics in the console and saves a searchable HTML preview per library
+outside the source libraries. It includes every finding, with proposed edits, reasons and risk labels. Cancellation
+keeps the preview without creating repair output. Existing
 destinations are rejected unless `--overwrite` is specified. The CLI returns non-zero for manual-review findings or
 operation failures.
 `--dry-run` prints the full JSON findings and planned actions without writing repair output; normal session logging
@@ -53,6 +55,8 @@ of terminal control sequences. Phase boundaries are retained in the session log 
 - [ ] Re-running repair on repaired output finds nothing to repair; unknown `--rules` ids are rejected.
 - [ ] Only affected folders are copied and companion files remain byte-identical.
 - [ ] Menu option 7 requires `RUN` and reports the output and completed repair count.
+- [ ] A preview with more than 25 findings reports all of them in HTML without printing individual findings to the
+      console. Cancelling leaves sources and `FIXED` untouched, and an unsafe temporary location blocks repair.
 - [ ] The HTML summary groups track findings by folder, shows compatibility cautions and never claims a failed or
       unattempted repair was verified and installed.
 - [ ] Existing output is rejected by default; `--overwrite` allows eligible destinations to be replaced.

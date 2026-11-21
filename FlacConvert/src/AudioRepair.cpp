@@ -33,6 +33,7 @@
 #include <process.h>
 #include <windows.h>
 #else
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -201,7 +202,8 @@ std::string escapeHtml(std::string_view text)
     return escaped;
 }
 
-std::string summaryHtml(const AudioRepair::Plan& plan, std::string_view status, std::string_view error)
+std::string summaryHtml(const AudioRepair::Plan& plan, std::string_view status, std::string_view error,
+    bool preview = false)
 {
     using Risk = AudioRepair::FindingImpact::Risk;
     struct Album {
@@ -231,6 +233,10 @@ std::string summaryHtml(const AudioRepair::Plan& plan, std::string_view status, 
             if (album != albums.end()) ++(file.repair ? album->second.repaired : album->second.copied);
         }
         else if (file.status == "failed") ++totals.failed;
+        else if (preview && !file.repair) {
+            ++totals.copied;
+            if (album != albums.end()) ++album->second.copied;
+        }
         else if (file.repair) {
             ++totals.pending;
             if (album != albums.end()) ++album->second.pending;
@@ -239,8 +245,8 @@ std::string summaryHtml(const AudioRepair::Plan& plan, std::string_view status, 
 
     std::vector<const decltype(albums)::value_type*> ordered;
     for (const auto& entry : albums) ordered.push_back(&entry);
-    const auto priority = [](const Album& album) {
-        return album.failed || album.pending ? 3 : static_cast<int>(album.risk);
+    const auto priority = [preview](const Album& album) {
+        return !preview && (album.failed || album.pending) ? 3 : static_cast<int>(album.risk);
     };
     std::stable_sort(ordered.begin(), ordered.end(), [&](const auto* left, const auto* right) {
         return priority(left->second) > priority(right->second);
@@ -249,22 +255,31 @@ std::string summaryHtml(const AudioRepair::Plan& plan, std::string_view status, 
     std::ostringstream html;
     html << R"HTML(<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Audio repair summary</title>
+<title>)HTML" << (preview ? "Audio repair preview" : "Audio repair summary") << R"HTML(</title>
 <style>
 body {font: 1rem/1.5 system-ui, sans-serif; max-width: 72rem; margin: 2rem auto; padding: 0 1rem; overflow-wrap: anywhere}
 details {border: 1px solid #888; border-radius: .4rem; margin: .65rem 0; padding: .65rem}
 summary {cursor: pointer} input {font: inherit; width: min(28rem, 95%)} li {margin: .4rem 0}
 </style>
-</head><body><main><h1>Audio repair summary</h1>
+</head><body><main><h1>)HTML" << (preview ? "Audio repair preview" : "Audio repair summary") << R"HTML(</h1>
 )HTML";
-    html << "<p>Source: " << escapeHtml(utf8(plan.input)) << "<br>Run status: " << escapeHtml(status)
-         << "</p><p>" << totals.repaired << " repaired, " << totals.copied << " copied unchanged, "
-         << totals.failed << " failed, " << totals.pending << " repairs not attempted.</p>";
-    if (!error.empty()) html << "<p><strong>Error:</strong> " << escapeHtml(error) << "</p>";
-    html << R"HTML(
+    html << "<p>Source: " << escapeHtml(utf8(plan.input)) << "<br>Run status: " << escapeHtml(status) << "</p>";
+    if (preview) {
+        html << "<p>No repairs have run. The descriptions below show proposed edits, not changes made to your files.</p><p>"
+             << plan.inspectedFiles << " audio files inspected, " << totals.pending << " files planned for repair, "
+             << totals.copied << " files planned to be copied unchanged.</p>";
+    }
+    else {
+        html << "<p>" << totals.repaired << " repaired, " << totals.copied << " copied unchanged, "
+             << totals.failed << " failed, " << totals.pending << " repairs not attempted.</p>";
+        if (!error.empty()) html << "<p><strong>Error:</strong> " << escapeHtml(error) << "</p>";
+        html << R"HTML(
 <p>Installed repairs were verified against the original audio bytes. Risk labels describe metadata and player compatibility, not sound quality.
 Unresolved findings were not fixed; another repair may have changed the same file.
 See <a href="repair-report.json">the JSON report</a> for the full file inventory.</p>
+)HTML";
+    }
+    html << R"HTML(
 <label for="filter">Filter albums, tracks, or repairs</label><br>
 <input type="search" id="filter" hidden>
 <p id="matches" role="status"></p>
@@ -272,16 +287,19 @@ See <a href="repair-report.json">the JSON report</a> for the full file inventory
     if (ordered.empty()) html << "<p>No album findings.</p>";
     for (const auto* entry : ordered) {
         const auto& [folder, album] = *entry;
-        const auto* label = album.failed ? "Failed" : album.pending ? "Incomplete" :
+        const auto* label = album.failed ? "Failed" : !preview && album.pending ? "Incomplete" :
             album.risk == Risk::Review ? "Needs review" :
             album.risk == Risk::Compatibility ? "Compatibility caution" : "Low metadata risk";
         html << "<details><summary><strong>" << escapeHtml(folder.empty() ? "(Library root)" : utf8(folder))
-             << "</strong> - " << label << " | " << album.repaired << " repaired, " << album.copied
-             << " copied unchanged</summary><ul>";
+             << "</strong> - " << label << " | ";
+        if (preview) html << album.pending << " planned for repair, " << album.copied << " planned unchanged copies";
+        else html << album.repaired << " repaired, " << album.copied << " copied unchanged";
+        html << "</summary><ul>";
         for (const auto* finding : album.findings) {
             const auto impact = AudioRepair::DescribeFindingImpact(*finding);
-            const char* result = "Not repaired";
+            const char* result = preview ? "No fix planned for this finding" : "Not repaired";
             if (finding->status == "repaired") result = "Installed; audio verified unchanged";
+            else if (preview && finding->status == "repairable") result = "Planned edit";
             else if (finding->status == "repairable") {
                 const auto file = files.find(finding->source);
                 result = file != files.end() && file->second->status == "failed" ?
@@ -618,6 +636,59 @@ int PrintDryRunReport(const Plan& plan)
     const bool attention = std::any_of(plan.findings.begin(), plan.findings.end(),
         [](const Finding& finding) { return finding.status == "manual-review" || finding.status == "unreadable"; });
     return attention ? 1 : 0;
+}
+
+bool WritePreviewReports(const std::vector<Plan>& plans)
+{
+    if (plans.empty()) return true;
+    std::error_code ec;
+    auto root = fs::temp_directory_path(ec);
+    if (!ec) root = fs::absolute(root, ec);
+    if (ec) {
+        spdlog::error("Cannot locate a directory for repair previews: {}", ec.message());
+        return false;
+    }
+    if (root.has_relative_path() && root.filename().empty()) root = root.parent_path();
+
+    PlatformUtils::ScopedCurrentDirectory directory;
+    // A system temporary directory may contain a library, but the new preview must be outside it.
+    if (!directory.EnterValidatedDirectory(root, plans.front().input, false, nullptr,
+            /*allowSourceAncestor=*/true)) return false;
+    const auto canonicalRoot = fs::canonical(root, ec);
+    if (ec || !directory.IsAnchored(root)) {
+        spdlog::error("Cannot validate the repair preview directory.");
+        return false;
+    }
+    for (const auto& plan : plans) {
+        const auto source = fs::canonical(plan.input, ec);
+        if (ec || isSameOrChildPath(canonicalRoot, source)) {
+            spdlog::error("Cannot save repair previews: temporary directory overlaps a source library or its path cannot be verified.");
+            return false;
+        }
+    }
+
+    for (const auto& plan : plans) {
+        auto name = temporaryPath("repair-preview.html").filename();
+#ifdef _WIN32
+        name.replace_extension(".preview.html");
+#else
+        name.replace_extension(".preview");
+        if (::mkdir(directory.ResolvePath(name).c_str(), S_IRWXU) != 0) {
+            spdlog::error("Cannot reserve private repair preview directory '{}'.", utf8(root / name));
+            return false;
+        }
+        name /= "repair-preview.html";
+#endif
+        if (!writeReport(directory.ResolvePath(name), summaryHtml(plan, "preview", {}, true), false)) {
+#ifndef _WIN32
+            fs::remove(directory.ResolvePath(name.parent_path()), ec);
+#endif
+            spdlog::error("Cannot save repair preview '{}'. No repairs were started.", utf8(root / name));
+            return false;
+        }
+        spdlog::info("Repair preview: '{}'.", utf8(root / name));
+    }
+    return directory.Restore();
 }
 
 int Execute(Plan& plan, std::size_t* repaired, std::size_t* copied)

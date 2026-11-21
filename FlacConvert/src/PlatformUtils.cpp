@@ -158,7 +158,7 @@ bool ScopedCurrentDirectory::EnterValidatedDirectory(
     const std::filesystem::path& target,
     const std::filesystem::path& sourceRoot,
     bool createDirectories,
-    bool* createdTargetDirectory)
+    bool* createdTargetDirectory, bool allowSourceAncestor)
 {
     namespace fs = std::filesystem;
     if (createdTargetDirectory != nullptr) *createdTargetDirectory = false;
@@ -257,7 +257,7 @@ bool ScopedCurrentDirectory::EnterValidatedDirectory(
     }
     const fs::path canonicalTarget = components.empty() ? canonicalAnchor : expectedPrefixes.back();
     if (isSameOrChildPath(canonicalTarget, canonicalSource) ||
-        isSameOrChildPath(canonicalSource, canonicalTarget)) {
+        ((!allowSourceAncestor || createDirectories) && isSameOrChildPath(canonicalSource, canonicalTarget))) {
         spdlog::error("Output directory overlaps the source library: '{}'.",
             CommonUtils::path_to_utf8(target));
         return false;

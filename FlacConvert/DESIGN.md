@@ -208,6 +208,10 @@ files and a percentage once discovery establishes the total. Execution progress 
 files, including unchanged companions, not merely staged files. Progress is per library and per phase; phases with
 a known total add a rough ETA from the phase's average rate after five seconds. Interactive progress updates one line every second; redirected output
 receives periodic five-second snapshots instead. Phase boundaries are logged in both modes. Preparation remains read-only.
+After preparation, menu option 7 shows finding counts by rule and saves one searchable HTML preview per library
+in the system temporary directory, validated to be outside every active source library. Preview reports identify
+proposed per-track edits and unresolved findings; they are retained on cancellation. If the preview cannot be saved
+safely, repair does not start. Only `RUN` authorizes writing to `FIXED`; CLI `repair --dry-run` still prints JSON.
 
 Output is a separate `FIXED/<library-name>` tree. In the menu, a library's repair output may not overlap another active
 library's source or another library's repair output (for example, two libraries with the same `mediaName`); either
@@ -226,8 +230,8 @@ still apply. An in-progress marker and
 rules, installation status and audio/metadata impact. After the JSON report is installed, `AudioRepair::Execute`
 writes an offline `repair-summary.html` from the same execution state, including on partial failure when report
 writing is possible. It groups findings by the source file's containing folder, ranks incomplete and higher-risk
-albums first, and only claims unchanged audio for verified, installed repairs. The preview uses the same risk
-descriptions for planned fixes. Both report names are reserved at the output root and follow the normal overwrite
+albums first, and only claims unchanged audio for verified, installed repairs. The HTML preview uses the same risk
+descriptions for planned fixes. Both execution report names are reserved at the output root and follow the normal overwrite
 policy. A summary write failure is reported without discarding the JSON report or installed files. The
 CLI returns non-zero when there are findings requiring manual review or when an operation fails.
 

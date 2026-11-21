@@ -1340,7 +1340,7 @@ Analysis analyzeMp3(Reader& reader, const std::set<std::string>& enabled)
         }
         if (context.On("mp3.text-encoding")) {
             std::size_t fixed = 0, review = 0;
-            std::set<std::string> ids;
+            std::set<std::string> encodingChanges;
             for (auto& frame : tag.frames) {
                 const bool described = frame.id == "TXXX" || frame.id == "COMM" || frame.id == "USLT";
                 if ((!textFrame(frame) && !described) || !plainFrame(tag, frame) || frame.data.empty()) continue;
@@ -1368,13 +1368,14 @@ Analysis analyzeMp3(Reader& reader, const std::set<std::string>& enabled)
                 }
                 if (terminated) data.insert(data.end(), { 0, 0 });
                 frame.data = std::move(data);
-                ids.insert(frame.id);
+                encodingChanges.insert(frame.id + (encoding == 2 ? ": UTF-16BE" : ": UTF-8") +
+                    " -> UTF-16 with BOM");
                 ++fixed;
             }
             firstModified = firstModified || fixed != 0;
             context.Add("mp3.text-encoding", true, fixed,
-                "Re-encoded ID3v2.3 text frame(s) that used an ID3v2.4-only encoding as UTF-16 with BOM: " +
-                    joined(ids) + ".");
+                "Changed ID3v2.3 text encoding (text unchanged) because the original encoding is only valid in ID3v2.4: " +
+                    joined(encodingChanges) + ".");
             context.Add("mp3.text-encoding", false, review,
                 "ID3v2 text frame(s) use an unknown encoding or invalid text; unchanged.");
         }
