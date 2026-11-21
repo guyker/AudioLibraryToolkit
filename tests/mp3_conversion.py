@@ -546,6 +546,9 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(report["status"], "completed-with-findings")
         self.assertEqual([(item["rule"], item["status"]) for item in report["findings"]],
                          [("flac.duplicate-comments", "manual-review")])
+        summary = (report_path.parent / "repair-summary.html").read_text(encoding="utf-8")
+        self.assertIn("conflict.flac</strong> - Not repaired | Needs review", summary)
+        self.assertNotIn("Installed; audio verified unchanged", summary)
         self.assertEqual(source.read_bytes(), original)
         self.assertFalse((report_path.parent / source.name).exists())
 
@@ -857,6 +860,11 @@ class ConversionTests(unittest.TestCase):
         self.assertFalse((target / "b.flac").exists())
         self.assertFalse(list(target.glob(".afc-repair-*.tmp")))
         self.assertTrue((target / ".repair-in-progress").exists())
+        summary = (target / "repair-summary.html").read_text(encoding="utf-8")
+        self.assertIn("Run status: failed", summary)
+        self.assertIn("a.flac</strong> - Failed; repair not verified as installed", summary)
+        self.assertIn("b.flac</strong> - Not attempted", summary)
+        self.assertNotIn("Installed; audio verified unchanged", summary)
         self.assertEqual((self.source / "a.flac").read_bytes(), data)
         self.assertEqual((self.source / "b.flac").read_bytes(), data)
         self.assertRegex(result.stdout, r"Repair installation: 0/2 verified files installed \(0%\).*\[stopped\]")
@@ -885,7 +893,7 @@ class ConversionTests(unittest.TestCase):
 
     def test_manual_repair_uses_confirmation_and_copies_affected_folder(self):
         self.track.write_bytes(self.repair_fixture.read_bytes())
-        album = self.source / "album"
+        album = self.source / "album & \u97f3"
         album.mkdir()
         track = album / "track.flac"
         track.write_bytes(add_vorbis_comments(self.repair_fixture.read_bytes(),
@@ -901,7 +909,7 @@ class ConversionTests(unittest.TestCase):
         libraries = [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}]
         result = self.legacy(libraries, "7\n\n\nRUN\n")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        output = self.output / "FIXED" / "Library" / "album"
+        output = self.output / "FIXED" / "Library" / album.name
         self.assertEqual((output / "notes.txt").read_bytes(), b"keep unchanged")
         self.assertEqual((output / cover.name).read_bytes(), cover.read_bytes())
         self.assertEqual((output / cue.name).read_bytes(), cue.read_bytes())
@@ -910,6 +918,12 @@ class ConversionTests(unittest.TestCase):
                           for path in self.source.rglob("*") if path.is_file()}, before)
         self.assertIn("Output location: " + str(self.output / "FIXED" / "Library"), result.stdout)
         self.assertTrue((output.parent / "repair-report.json").is_file())
+        summary = (output.parent / "repair-summary.html").read_text(encoding="utf-8")
+        self.assertIn("Repair summary:", result.stdout)
+        self.assertIn("Planned [flac.duplicate-comments]", result.stdout)
+        self.assertIn("<strong>album &amp; \u97f3</strong>", summary)
+        self.assertIn("track.flac</strong> - Installed; audio verified unchanged | Low metadata risk", summary)
+        self.assertIn("1 repaired, 3 copied unchanged", summary)
         self.assertFalse(list(self.output.rglob(".afc-convert-*")))
         self.assertFalse((output.parent / self.track.name).exists())
         self.assertLess(result.stdout.index("Repair discovery:"),
@@ -947,6 +961,26 @@ class ConversionTests(unittest.TestCase):
         _, end = parse_id3v23(target.read_bytes())
         self.assertEqual(target.read_bytes()[end:], audio)
         self.assertEqual(track.read_bytes(), original)
+        summary = (target.parent / "repair-summary.html").read_text(encoding="utf-8")
+        self.assertIn("song.mp3</strong> - Installed; audio verified unchanged | Compatibility caution", summary)
+        self.assertIn("Players that only read ID3v1 may no longer show tags.", summary)
+
+    def test_repair_summary_destination_conflict_preserves_existing_file(self):
+        self.track.write_bytes(add_vorbis_comments(
+            self.repair_fixture.read_bytes(), ["CDTOC=A", "CDTOC=A"]))
+        target = self.output / "FIXED" / self.source.name
+        target.mkdir(parents=True)
+        summary = target / "repair-summary.html"
+        summary.write_text("existing summary", encoding="utf-8")
+        self.assertNotEqual(self.repair().returncode, 0)
+        self.assertEqual(summary.read_text(encoding="utf-8"), "existing summary")
+        self.assertFalse((target / self.track.name).exists())
+        (self.source / summary.name).write_text("source companion", encoding="utf-8")
+        result = self.repair(self.source, "--overwrite")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("reserved report", result.stdout + result.stderr)
+        self.assertEqual(summary.read_text(encoding="utf-8"), "existing summary")
+        self.assertEqual((self.source / summary.name).read_text(encoding="utf-8"), "source companion")
 
     def test_repair_root_and_subfolder_are_copied_once(self):
         album = self.source / "album"

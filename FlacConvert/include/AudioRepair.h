@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -20,6 +21,16 @@ struct Finding
     std::size_t count{ 0 };
     std::string detail;
 };
+
+struct FindingImpact
+{
+    enum class Risk { Low, Compatibility, Review };
+    Risk risk;
+    std::string_view label;
+    std::string_view detail;
+};
+
+FindingImpact DescribeFindingImpact(const Finding& finding);
 
 struct PlannedFile
 {

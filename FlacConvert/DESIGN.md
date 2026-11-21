@@ -222,7 +222,13 @@ CLI `--jobs` accepts 1–16); installation and report updates are ordered, and a
 staged files are cleaned up. Existing destinations fail unless overwrite is enabled. CLI `--dry-run` prints a complete
 schema-2 JSON report with `status: dry-run` and `plannedRules`, without creating repair output; usual session logs
 still apply. An in-progress marker and
-`repair-report.json` (schema 2) record execution state, enabled rules, findings with rule/count/status, per-file applied rules, installation status and audio/metadata impact. The
+`repair-report.json` (schema 2) record execution state, enabled rules, findings with rule/count/status, per-file applied
+rules, installation status and audio/metadata impact. After the JSON report is installed, `AudioRepair::Execute`
+writes an offline `repair-summary.html` from the same execution state, including on partial failure when report
+writing is possible. It groups findings by the source file's containing folder, ranks incomplete and higher-risk
+albums first, and only claims unchanged audio for verified, installed repairs. The preview uses the same risk
+descriptions for planned fixes. Both report names are reserved at the output root and follow the normal overwrite
+policy. A summary write failure is reported without discarding the JSON report or installed files. The
 CLI returns non-zero when there are findings requiring manual review or when an operation fails.
 
 ### Scan to JSON (menu 2, `scan`)

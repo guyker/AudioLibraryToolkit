@@ -1533,8 +1533,11 @@ void PrintRepairFindings(const AudioRepair::Plan& plan)
     constexpr std::size_t kListed = 25;
     for (std::size_t index = 0; index < plan.findings.size() && index < kListed; ++index) {
         const auto& finding = plan.findings[index];
-        std::cout << "      " << finding.status << " [" << finding.rule << "] "
-            << pathToUtf8(finding.source.lexically_relative(plan.input)) << " - " << finding.detail << '\n';
+        const auto impact = AudioRepair::DescribeFindingImpact(finding);
+        std::cout << "      " << (finding.status == "repairable" ? "Planned" : finding.status)
+            << " [" << finding.rule << "] "
+            << pathToUtf8(finding.source.lexically_relative(plan.input)) << " - " << finding.detail
+            << " (" << impact.label << ": " << impact.detail << ")\n";
     }
     if (plan.findings.size() > kListed) {
         std::cout << "      ... " << plan.findings.size() - kListed

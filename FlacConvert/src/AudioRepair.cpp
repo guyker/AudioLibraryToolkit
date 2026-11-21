@@ -25,6 +25,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <system_error>
 #include <thread>
 
@@ -40,6 +41,9 @@ namespace
 namespace fs = std::filesystem;
 
 using FixList = std::vector<std::pair<std::string, std::size_t>>;
+constexpr auto reportName = "repair-report.json";
+constexpr auto summaryName = "repair-summary.html";
+constexpr auto markerName = ".repair-in-progress";
 
 class RepairProgress : public RunLogging::PhaseProgress
 {
@@ -87,17 +91,6 @@ fs::path temporaryPath(const fs::path& target)
 #endif
     return target.parent_path() / (".afc-repair-" + std::to_string(processId) + "-" +
         std::to_string(timestamp) + "-" + std::to_string(++temporarySequence) + ".tmp");
-}
-
-fs::path ioPath(const fs::path& path, const fs::path& outputRoot)
-{
-#ifdef _WIN32
-    if (path.is_absolute()) return PlatformUtils::WindowsLongPath(path);
-    return PlatformUtils::WindowsLongPath(outputRoot / path);
-#else
-    (void)outputRoot;
-    return path;
-#endif
 }
 
 bool samePathComponent(const fs::path& left, const fs::path& right)
@@ -194,27 +187,155 @@ std::string reportJson(const AudioRepair::Plan& plan, const std::string& status,
     return std::string(buffer.GetString(), buffer.GetSize());
 }
 
-bool writeReport(const AudioRepair::Plan& plan, const fs::path& reportPath,
-    const std::string& status, const std::string& error)
+std::string escapeHtml(std::string_view text)
 {
-    const auto content = reportJson(plan, status, error);
+    std::string escaped;
+    for (const char ch : text) {
+        switch (ch) {
+        case '&': escaped += "&amp;"; break;
+        case '<': escaped += "&lt;"; break;
+        case '>': escaped += "&gt;"; break;
+        default: escaped += ch; break;
+        }
+    }
+    return escaped;
+}
+
+std::string summaryHtml(const AudioRepair::Plan& plan, std::string_view status, std::string_view error)
+{
+    using Risk = AudioRepair::FindingImpact::Risk;
+    struct Album {
+        std::size_t repaired{}, copied{}, pending{}, failed{};
+        Risk risk = Risk::Low;
+        std::vector<const AudioRepair::Finding*> findings;
+    };
+    std::map<fs::path, Album> albums;
+    std::map<fs::path, const AudioRepair::PlannedFile*> files;
+    const auto folderOf = [&](const fs::path& source) {
+        return source.lexically_relative(plan.input).parent_path();
+    };
+    for (const auto& finding : plan.findings) {
+        auto& album = albums[folderOf(finding.source)];
+        album.findings.push_back(&finding);
+        album.risk = (std::max)(album.risk, AudioRepair::DescribeFindingImpact(finding).risk);
+    }
+    Album totals;
+    for (const auto& file : plan.files) {
+        if (file.status == "failed") ++albums[folderOf(file.source)].failed;
+    }
+    for (const auto& file : plan.files) {
+        if (file.repair || file.status == "failed") files.emplace(file.source, &file);
+        const auto album = albums.find(folderOf(file.source));
+        if (file.status == "installed") {
+            ++(file.repair ? totals.repaired : totals.copied);
+            if (album != albums.end()) ++(file.repair ? album->second.repaired : album->second.copied);
+        }
+        else if (file.status == "failed") ++totals.failed;
+        else if (file.repair) {
+            ++totals.pending;
+            if (album != albums.end()) ++album->second.pending;
+        }
+    }
+
+    std::vector<const decltype(albums)::value_type*> ordered;
+    for (const auto& entry : albums) ordered.push_back(&entry);
+    const auto priority = [](const Album& album) {
+        return album.failed || album.pending ? 3 : static_cast<int>(album.risk);
+    };
+    std::stable_sort(ordered.begin(), ordered.end(), [&](const auto* left, const auto* right) {
+        return priority(left->second) > priority(right->second);
+    });
+
+    std::ostringstream html;
+    html << R"HTML(<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audio repair summary</title>
+<style>
+body {font: 1rem/1.5 system-ui, sans-serif; max-width: 72rem; margin: 2rem auto; padding: 0 1rem; overflow-wrap: anywhere}
+details {border: 1px solid #888; border-radius: .4rem; margin: .65rem 0; padding: .65rem}
+summary {cursor: pointer} input {font: inherit; width: min(28rem, 95%)} li {margin: .4rem 0}
+</style>
+</head><body><main><h1>Audio repair summary</h1>
+)HTML";
+    html << "<p>Source: " << escapeHtml(utf8(plan.input)) << "<br>Run status: " << escapeHtml(status)
+         << "</p><p>" << totals.repaired << " repaired, " << totals.copied << " copied unchanged, "
+         << totals.failed << " failed, " << totals.pending << " repairs not attempted.</p>";
+    if (!error.empty()) html << "<p><strong>Error:</strong> " << escapeHtml(error) << "</p>";
+    html << R"HTML(
+<p>Installed repairs were verified against the original audio bytes. Risk labels describe metadata and player compatibility, not sound quality.
+Unresolved findings were not fixed; another repair may have changed the same file.
+See <a href="repair-report.json">the JSON report</a> for the full file inventory.</p>
+<label for="filter">Filter albums, tracks, or repairs</label><br>
+<input type="search" id="filter" hidden>
+<p id="matches" role="status"></p>
+)HTML";
+    if (ordered.empty()) html << "<p>No album findings.</p>";
+    for (const auto* entry : ordered) {
+        const auto& [folder, album] = *entry;
+        const auto* label = album.failed ? "Failed" : album.pending ? "Incomplete" :
+            album.risk == Risk::Review ? "Needs review" :
+            album.risk == Risk::Compatibility ? "Compatibility caution" : "Low metadata risk";
+        html << "<details><summary><strong>" << escapeHtml(folder.empty() ? "(Library root)" : utf8(folder))
+             << "</strong> - " << label << " | " << album.repaired << " repaired, " << album.copied
+             << " copied unchanged</summary><ul>";
+        for (const auto* finding : album.findings) {
+            const auto impact = AudioRepair::DescribeFindingImpact(*finding);
+            const char* result = "Not repaired";
+            if (finding->status == "repaired") result = "Installed; audio verified unchanged";
+            else if (finding->status == "repairable") {
+                const auto file = files.find(finding->source);
+                result = file != files.end() && file->second->status == "failed" ?
+                    "Failed; repair not verified as installed" : "Not attempted";
+            }
+            html << "<li><strong>" << escapeHtml(utf8(finding->source.filename())) << "</strong> - " << result
+                 << " | " << impact.label << "<br>" << escapeHtml(finding->detail)
+                 << " <small>(" << escapeHtml(finding->rule) << ", count: " << finding->count << ")</small><br>"
+                 << impact.detail << "</li>";
+        }
+        html << "</ul>";
+        if (album.failed) {
+            html << "<p>" << album.failed << " file(s) failed. See the run error and JSON file status.</p>";
+        }
+        html << "</details>\n";
+    }
+    html << R"HTML(</main>
+<script>
+const filter = document.getElementById('filter');
+const matches = document.getElementById('matches');
+const albums = Array.from(document.querySelectorAll('details'));
+filter.hidden = false;
+filter.addEventListener('input', () => {
+    const query = filter.value.trim().toLowerCase();
+    let visible = 0;
+    for (const album of albums) {
+        album.hidden = !album.textContent.toLowerCase().includes(query);
+        if (!album.hidden) ++visible;
+    }
+    matches.textContent = `${visible} of ${albums.length} album folders shown`;
+});
+</script></body></html>
+)HTML";
+    return html.str();
+}
+
+bool writeReport(const fs::path& reportPath, std::string_view content, bool overwrite)
+{
     const auto temporary = temporaryPath(reportPath);
     std::error_code ec;
-    if (fs::exists(ioPath(temporary, plan.output), ec) || ec) return false;
-    std::ofstream output(ioPath(temporary, plan.output), std::ios::binary | std::ios::trunc);
-    if (!output) return false;
-    output.write(content.data(), static_cast<std::streamsize>(content.size()));
-    output.flush();
-    const bool success = static_cast<bool>(output);
-    output.close();
-    if (!success || output.fail()) return false;
-    std::ifstream verify(ioPath(temporary, plan.output), std::ios::binary);
-    const std::string actual{ std::istreambuf_iterator<char>(verify), std::istreambuf_iterator<char>() };
-    const bool reportMatches = !verify.bad() && actual == content;
-    verify.close();
-    if (!reportMatches) return false;
-    if (!MediaConvertionTask::InstallOutputFile(ioPath(temporary, plan.output),
-            ioPath(reportPath, plan.output), plan.overwrite)) {
+    if (fs::exists(temporary, ec) || ec) return false;
+    const bool verified = [&] {
+        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+        if (!output) return false;
+        output.write(content.data(), static_cast<std::streamsize>(content.size()));
+        output.close();
+        if (!output) return false;
+        std::ifstream verify(temporary, std::ios::binary);
+        const std::string actual{ std::istreambuf_iterator<char>(verify), std::istreambuf_iterator<char>() };
+        return verify && actual == content;
+    }();
+    if (!verified || !MediaConvertionTask::InstallOutputFile(temporary, reportPath, overwrite)) {
+        fs::remove(temporary, ec);
+        if (ec) spdlog::warn("Cannot remove repair report temporary '{}': {}", utf8(temporary), ec.message());
         return false;
     }
     return true;
@@ -223,6 +344,40 @@ bool writeReport(const AudioRepair::Plan& plan, const fs::path& reportPath,
 
 namespace AudioRepair
 {
+FindingImpact DescribeFindingImpact(const Finding& finding)
+{
+    using Risk = FindingImpact::Risk;
+    if (finding.status == "manual-review" || finding.status == "unreadable") {
+        return { Risk::Review, "Needs review", "This finding was not repaired automatically." };
+    }
+    const auto& rule = finding.rule;
+    if (rule == "mp3.redundant-id3v1") {
+        return { Risk::Compatibility, "Compatibility caution", "Players that only read ID3v1 may no longer show tags." };
+    }
+    if (rule == "flac.leading-id3" || rule == "flac.trailing-tags" || rule == "mp3.ape-lyrics3") {
+        return { Risk::Compatibility, "Compatibility caution",
+            "Players that only read the removed tag format may no longer show those fields." };
+    }
+    if (rule == "flac.invalid-seektable") {
+        return { Risk::Compatibility, "Compatibility caution",
+            "The invalid seek table is replaced with padding; seeking may behave differently in some players." };
+    }
+    if (rule == "flac.picture-descriptor" || rule == "mp3.picture-mime") {
+        return { Risk::Low, "Low metadata risk", "The image bytes are unchanged; only their description is corrected." };
+    }
+    if (rule == "flac.duplicate-comments" || rule == "flac.multiple-comment-blocks" ||
+        rule == "mp3.duplicate-frames" || rule == "mp3.duplicate-id3v2") {
+        return { Risk::Low, "Low metadata risk", "Redundant copies are removed; the retained metadata already contains the values." };
+    }
+    if (rule == "flac.empty-comments" || rule == "mp3.empty-frames") {
+        return { Risk::Low, "Low metadata risk", "Empty fields are removed; software may distinguish an empty field from a missing one." };
+    }
+    if (rule == "mp3.text-encoding") {
+        return { Risk::Low, "Low metadata risk", "The text is preserved and stored in a different encoding." };
+    }
+    return { Risk::Compatibility, "Compatibility caution", "Check how your player handles the metadata change." };
+}
+
 int Prepare(const fs::path& input, const fs::path& output, bool overwrite,
     const std::set<std::string>& rules, Plan& plan, std::size_t workers, bool dryRun)
 {
@@ -422,13 +577,29 @@ int Prepare(const fs::path& input, const fs::path& output, bool overwrite,
             return -1;
         }
     }
-    const auto report = plan.output / "repair-report.json";
-    if (fs::exists(report, ec) && !overwrite) plan.conflicts.push_back(report);
-    if (ec) {
-        spdlog::error("Cannot inspect repair report destination: {}", ec.message());
-        return -1;
+    for (const auto* name : { reportName, summaryName }) {
+        const auto report = plan.output / name;
+        const auto matchesReport = [&](const fs::path& target) {
+            return samePathComponent(target.lexically_relative(plan.output), fs::path(name));
+        };
+        if (std::any_of(plan.files.begin(), plan.files.end(),
+                [&](const PlannedFile& file) { return matchesReport(file.target); }) ||
+            std::any_of(directories.begin(), directories.end(),
+                [&](const fs::path& directory) { return matchesReport(plan.output / directory); })) {
+            spdlog::error("Repair output would copy a file or folder over the reserved report '{}'.", name);
+            return -1;
+        }
+        const auto destination = fs::symlink_status(report, ec);
+        if (destination.type() == fs::file_type::not_found) ec.clear();
+        if (ec) {
+            spdlog::error("Cannot inspect repair report destination '{}': {}", utf8(report), ec.message());
+            return -1;
+        }
+        if (fs::exists(destination) && (!overwrite || !fs::is_regular_file(destination))) {
+            plan.conflicts.push_back(report);
+        }
     }
-    const auto marker = plan.output / ".repair-in-progress";
+    const auto marker = plan.output / markerName;
     if (!dryRun && (fs::exists(marker, ec) || ec)) {
         spdlog::error("Repair output has an existing in-progress marker or cannot be inspected.");
         return -1;
@@ -475,7 +646,7 @@ int Execute(Plan& plan, std::size_t* repaired, std::size_t* copied)
 #endif
     };
     std::error_code ec;
-    const auto marker = resolve(".repair-in-progress");
+    const auto marker = resolve(markerName);
     if (!fs::create_directory(marker, ec)) {
         spdlog::error("Cannot reserve repair marker: {}.", ec ? ec.message() : "already exists");
         return -1;
@@ -624,20 +795,33 @@ int Execute(Plan& plan, std::size_t* repaired, std::size_t* copied)
                 utf8(finding.source.lexically_relative(plan.input)), finding.detail);
         }
     }
-    const auto report = resolve("repair-report.json");
+    const auto report = outputDirectory.ResolvePath(reportName);
+    const auto summary = outputDirectory.ResolvePath(summaryName);
     const auto reportStatus = !error.empty() ? "failed" :
         attention ? "completed-with-findings" : plan.files.empty() ? "no-repairs-needed" : "completed";
-    if (!writeReport(plan, report, reportStatus, error)) {
-        error = error.empty() ? "cannot write or verify repair report" : error;
+    if (!outputDirectory.IsAnchored(plan.output)) {
+        if (error.empty()) error = "repair output directory changed during execution";
+    }
+    else if (!writeReport(report, reportJson(plan, reportStatus, error), plan.overwrite)) {
+        spdlog::error("Cannot write or verify repair report '{}'.", utf8(plan.output / reportName));
+        if (error.empty()) error = "cannot write or verify repair report";
+    }
+    else if (!writeReport(summary, summaryHtml(plan, reportStatus, error), plan.overwrite)) {
+        spdlog::error("Cannot write or verify repair summary '{}'; JSON report: '{}'.",
+            utf8(plan.output / summaryName), utf8(plan.output / reportName));
+        if (error.empty()) error = "cannot write or verify repair summary";
+    }
+    else {
+        spdlog::info("Repair summary: '{}'.", utf8(plan.output / summaryName));
     }
     if (error.empty() && outputDirectory.IsAnchored(plan.output) &&
         fs::remove(marker, ec) && !ec) {
         if (attention) {
-            spdlog::warn("Repair completed with findings requiring review; report '{}'.", utf8(report));
+            spdlog::warn("Repair completed with findings requiring review; report '{}'.", utf8(plan.output / reportName));
             return 1;
         }
         spdlog::info("Repair completed: {} repaired, {} copied; report '{}'.",
-            repaired ? *repaired : 0, copied ? *copied : 0, utf8(report));
+            repaired ? *repaired : 0, copied ? *copied : 0, utf8(plan.output / reportName));
         return 0;
     }
     if (error.empty()) {
