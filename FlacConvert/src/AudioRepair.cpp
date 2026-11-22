@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -943,158 +944,382 @@ std::string escapeHtml(std::string_view text)
     return escaped;
 }
 
+const char* severityName(AudioRepair::FindingImpact::Risk risk)
+{
+    using Risk = AudioRepair::FindingImpact::Risk;
+    return risk == Risk::Review ? "High" : risk == Risk::Compatibility ? "Medium" : "Low";
+}
+
+std::string severityBadge(AudioRepair::FindingImpact::Risk risk)
+{
+    const std::string name = severityName(risk);
+    std::string css = name;
+    std::transform(css.begin(), css.end(), css.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return "<span class=\"sev " + css + "\">" + name + "</span>";
+}
+
+std::string_view issueTitle(std::string_view rule)
+{
+    static const std::map<std::string_view, std::string_view> titles{
+        { "flac.leading-id3", "FLAC: ID3v2 tag before the FLAC data" },
+        { "flac.trailing-tags", "FLAC: ID3v1/APE/Lyrics3 tags after the audio" },
+        { "flac.multiple-comment-blocks", "FLAC: more than one tag (Vorbis comment) block" },
+        { "flac.duplicate-comments", "FLAC: duplicate tag values" },
+        { "flac.empty-comments", "FLAC: empty tags" },
+        { "flac.invalid-comments", "FLAC: malformed tags" },
+        { "flac.picture-descriptor", "FLAC: incorrect cover-art description" },
+        { "flac.invalid-seektable", "FLAC: invalid seek table" },
+        { "flac.missing-md5", "FLAC: missing audio checksum (MD5)" },
+        { "mp3.duplicate-id3v2", "MP3: more than one ID3v2 tag" },
+        { "mp3.duplicate-frames", "MP3: duplicate tag fields" },
+        { "mp3.empty-frames", "MP3: empty tag fields" },
+        { "mp3.text-encoding", "MP3: text encoding not valid for ID3v2.3" },
+        { "mp3.picture-mime", "MP3: incorrect cover-art type" },
+        { "mp3.redundant-id3v1", "MP3: redundant ID3v1 tag" },
+        { "mp3.ape-lyrics3", "MP3: APE or Lyrics3 tag" },
+        { "mp3.stream-garbage", "MP3: unexpected bytes before the audio" },
+        { "mp3.unsupported-id3-layout", "MP3: unsupported ID3v2 tag layout" },
+        { "unreadable", "Unreadable file" },
+    };
+    const auto title = titles.find(rule);
+    return title == titles.end() ? rule : title->second;
+}
+
+// Finding details describe completed edits ("Removed ..."); planned or unapplied edits read as proposals.
+std::string proposedWording(std::string_view detail)
+{
+    static constexpr std::pair<std::string_view, std::string_view> verbs[]{
+        { "Removed ", "Remove " }, { "Corrected ", "Correct " }, { "Replaced ", "Replace " }, { "Changed ", "Change " } };
+    for (const auto& [past, present] : verbs) {
+        if (detail.starts_with(past)) return std::string(present) + std::string(detail.substr(past.size()));
+    }
+    return std::string(detail);
+}
+
 std::string summaryHtml(const AudioRepair::Plan& plan, std::string_view status, std::string_view error,
     bool preview = false)
 {
+    using AudioRepair::Finding;
     using Risk = AudioRepair::FindingImpact::Risk;
-    struct Album {
-        std::size_t repaired{}, copied{}, pending{}, failed{};
-        Risk risk = Risk::Low;
-        std::vector<const AudioRepair::Finding*> findings;
-    };
-    std::map<fs::path, Album> albums;
-    std::map<fs::path, const AudioRepair::PlannedFile*> files;
+    enum class State { Planned, Repaired, Failed, NotAttempted, Review, Unreadable };
+
     const auto folderOf = [&](const fs::path& source) {
         return source.lexically_relative(plan.input).parent_path();
     };
-    for (const auto& finding : plan.findings) {
-        auto& album = albums[folderOf(finding.source)];
-        album.findings.push_back(&finding);
-        album.risk = (std::max)(album.risk, AudioRepair::DescribeFindingImpact(finding).risk);
-    }
-    Album totals;
-    for (const auto& file : plan.files) {
-        if (file.status == "failed") ++albums[folderOf(file.source)].failed;
-    }
-    for (const auto& file : plan.files) {
-        if (file.repair || file.status == "failed") files.emplace(file.source, &file);
-        const auto album = albums.find(folderOf(file.source));
-        if (file.status == "installed") {
-            ++(file.repair ? totals.repaired : totals.copied);
-            if (album != albums.end()) ++(file.repair ? album->second.repaired : album->second.copied);
-        }
-        else if (file.status == "failed") ++totals.failed;
-        else if (preview && !file.repair) {
-            ++totals.copied;
-            if (album != albums.end()) ++album->second.copied;
-        }
-        else if (file.repair) {
-            ++totals.pending;
-            if (album != albums.end()) ++album->second.pending;
-        }
-    }
-
-    std::vector<const decltype(albums)::value_type*> ordered;
-    for (const auto& entry : albums) ordered.push_back(&entry);
-    const auto priority = [preview](const Album& album) {
-        return !preview && (album.failed || album.pending) ? 3 : static_cast<int>(album.risk);
+    const auto folderName = [](const fs::path& folder) {
+        return folder.empty() ? std::string("(Library root)") : utf8(folder);
     };
-    std::stable_sort(ordered.begin(), ordered.end(), [&](const auto* left, const auto* right) {
-        return priority(left->second) > priority(right->second);
-    });
-    std::map<std::string, std::vector<const AudioRepair::Finding*>> issues;
-    for (const auto& finding : plan.findings) issues[finding.rule].push_back(&finding);
+    std::map<fs::path, const AudioRepair::PlannedFile*> files;
+    for (const auto& file : plan.files) files.emplace(file.source, &file);
+    const auto fileFailed = [&](const fs::path& source) {
+        const auto file = files.find(source);
+        return file != files.end() && file->second->status == "failed";
+    };
+    const auto stateOf = [&](const Finding& finding) {
+        if (finding.status == "unreadable") return State::Unreadable;
+        if (finding.status == "manual-review") return State::Review;
+        if (finding.status == "repaired") return State::Repaired;
+        if (preview) return State::Planned;
+        return fileFailed(finding.source) ? State::Failed : State::NotAttempted;
+    };
+    const auto stateLabel = [](State state) {
+        switch (state) {
+        case State::Planned: return "Planned fix";
+        case State::Repaired: return "Fixed and verified";
+        case State::Failed: return "Not fixed (repair failed)";
+        case State::NotAttempted: return "Not fixed (not attempted)";
+        case State::Review: return "Not changed (needs manual review)";
+        default: return "Not changed (file could not be read)";
+        }
+    };
+    const auto changeText = [&](const Finding& finding) {
+        const auto state = stateOf(finding);
+        std::string text = state == State::Planned || state == State::Failed || state == State::NotAttempted ?
+            proposedWording(finding.detail) : finding.detail;
+        if (finding.count > 1) text += " (" + std::to_string(finding.count) + " items)";
+        return std::string(stateLabel(state)) + ": " + escapeHtml(text);
+    };
+    const auto tracksIn = [&](const fs::path& folder, std::size_t affected) {
+        const auto total = plan.folderTracks.find(folder);
+        const auto count = total == plan.folderTracks.end() ? affected : (std::max)(total->second, affected);
+        return affected >= count ? "all " + std::to_string(count) + " track(s)" :
+            std::to_string(affected) + " of " + std::to_string(count) + " tracks";
+    };
 
+    // An issue is a rule plus whether it is review-only, so every finding in a group shares one severity and risk text.
+    struct Issue {
+        std::string key, anchor;
+        AudioRepair::FindingImpact impact{};
+        std::map<fs::path, std::vector<const Finding*>> albums;
+        std::set<fs::path> tracks;
+        std::size_t planned{}, repaired{}, failed{}, unattempted{}, review{};
+    };
+    std::map<std::string, Issue> issues;
+    std::map<fs::path, std::vector<const Finding*>> trackFindings;
+    const auto keyOf = [](const Finding& finding) {
+        const bool review = finding.status == "manual-review" || finding.status == "unreadable";
+        return finding.rule + (review ? "#review" : "");
+    };
+    for (const auto& finding : plan.findings) {
+        auto& issue = issues[keyOf(finding)];
+        if (issue.key.empty()) {
+            issue.key = keyOf(finding);
+            issue.impact = AudioRepair::DescribeFindingImpact(finding);
+            issue.anchor = "issue-" + issue.key;
+            std::replace_if(issue.anchor.begin(), issue.anchor.end(),
+                [](char ch) { return ch == '.' || ch == '#'; }, '-');
+        }
+        issue.albums[folderOf(finding.source)].push_back(&finding);
+        issue.tracks.insert(finding.source);
+        switch (stateOf(finding)) {
+        case State::Planned: ++issue.planned; break;
+        case State::Repaired: ++issue.repaired; break;
+        case State::Failed: ++issue.failed; break;
+        case State::NotAttempted: ++issue.unattempted; break;
+        default: ++issue.review; break;
+        }
+        trackFindings[finding.source].push_back(&finding);
+    }
+    std::vector<const Issue*> issueOrder;
+    for (const auto& [key, issue] : issues) issueOrder.push_back(&issue);
+    std::stable_sort(issueOrder.begin(), issueOrder.end(), [](const Issue* left, const Issue* right) {
+        if (left->impact.risk != right->impact.risk) return left->impact.risk > right->impact.risk;
+        if (left->failed != right->failed) return left->failed > right->failed;
+        return left->tracks.size() > right->tracks.size();
+    });
+    std::map<std::string, std::size_t> issueRank;
+    for (std::size_t index = 0; index < issueOrder.size(); ++index) issueRank[issueOrder[index]->key] = index;
+    const auto issueKeysOf = [&](const std::vector<const Finding*>& findings) {
+        std::vector<std::string> keys;
+        for (const auto* finding : findings) {
+            auto key = keyOf(*finding);
+            if (std::find(keys.begin(), keys.end(), key) == keys.end()) keys.push_back(std::move(key));
+        }
+        std::sort(keys.begin(), keys.end(), [&](const auto& left, const auto& right) {
+            return issueRank[left] < issueRank[right];
+        });
+        return keys;
+    };
+    const auto issueLink = [&](const std::string& key) {
+        const auto& issue = issues.at(key);
+        return severityBadge(issue.impact.risk) + " <a href=\"#" + issue.anchor + "\">" +
+            escapeHtml(issueTitle(issue.key.substr(0, issue.key.find('#')))) +
+            (issue.key.ends_with("#review") ? " (review only)" : "") + "</a>";
+    };
+    const auto trackRisk = [&](const std::vector<const Finding*>& findings) {
+        auto risk = Risk::Low;
+        for (const auto* finding : findings) risk = (std::max)(risk, AudioRepair::DescribeFindingImpact(*finding).risk);
+        return risk;
+    };
+
+    struct Album {
+        fs::path folder;
+        std::string anchor;
+        Risk risk = Risk::Low;
+        std::vector<fs::path> tracks;
+        std::vector<std::string> issueKeys;
+        std::vector<fs::path> failedCopies;
+        std::size_t multiIssueTracks{}, repaired{}, copied{}, pending{}, failed{};
+    };
+    std::map<fs::path, Album> albums;
+    for (const auto& [track, findings] : trackFindings) {
+        auto& album = albums[folderOf(track)];
+        album.tracks.push_back(track);
+        album.risk = (std::max)(album.risk, trackRisk(findings));
+        if (issueKeysOf(findings).size() > 1) ++album.multiIssueTracks;
+        for (const auto& key : issueKeysOf(findings)) {
+            if (std::find(album.issueKeys.begin(), album.issueKeys.end(), key) == album.issueKeys.end()) {
+                album.issueKeys.push_back(key);
+            }
+        }
+    }
+    for (const auto& file : plan.files) {
+        if (file.status == "failed" && !file.repair) albums[folderOf(file.source)].failedCopies.push_back(file.source);
+    }
+    std::size_t totalRepaired = 0, totalCopied = 0, totalPending = 0, totalFailed = 0, multiIssueTracks = 0;
+    for (const auto& file : plan.files) {
+        const auto album = albums.find(folderOf(file.source));
+        const auto count = [&](std::size_t& total, std::size_t Album::*field) {
+            ++total;
+            if (album != albums.end()) ++(album->second.*field);
+        };
+        if (file.status == "installed") count(file.repair ? totalRepaired : totalCopied, file.repair ? &Album::repaired : &Album::copied);
+        else if (file.status == "failed") count(totalFailed, &Album::failed);
+        else if (preview && !file.repair) count(totalCopied, &Album::copied);
+        else if (file.repair) count(totalPending, &Album::pending);
+    }
+    std::vector<Album*> albumOrder;
+    for (auto& [folder, album] : albums) {
+        album.folder = folder;
+        std::sort(album.issueKeys.begin(), album.issueKeys.end(), [&](const auto& left, const auto& right) {
+            return issueRank[left] < issueRank[right];
+        });
+        std::stable_sort(album.tracks.begin(), album.tracks.end(), [&](const auto& left, const auto& right) {
+            return trackRisk(trackFindings[left]) > trackRisk(trackFindings[right]);
+        });
+        multiIssueTracks += album.multiIssueTracks;
+        albumOrder.push_back(&album);
+    }
+    // Severity is the primary key; repair status only breaks ties within a severity.
+    const auto statusPriority = [preview](const Album& album) {
+        if (!preview && album.failed) return 2;
+        if (!preview && album.pending) return 1;
+        return 0;
+    };
+    std::stable_sort(albumOrder.begin(), albumOrder.end(), [&](const Album* left, const Album* right) {
+        if (left->risk != right->risk) return left->risk > right->risk;
+        if (statusPriority(*left) != statusPriority(*right)) return statusPriority(*left) > statusPriority(*right);
+        return left->tracks.size() > right->tracks.size();
+    });
+    for (std::size_t index = 0; index < albumOrder.size(); ++index) {
+        albumOrder[index]->anchor = "album-" + std::to_string(index + 1);
+    }
+    std::map<fs::path, std::string> albumAnchors;
+    for (const auto* album : albumOrder) albumAnchors[album->folder] = album->anchor;
+
+    const char* title = preview ? "Metadata repair plan (preview, no files changed)" : "Metadata repair results";
     std::ostringstream html;
     html << R"HTML(<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>)HTML" << (preview ? "Audio repair preview" : "Audio repair summary") << R"HTML(</title>
+<title>)HTML" << title << R"HTML(</title>
 <style>
 body {font: 1rem/1.5 system-ui, sans-serif; max-width: 72rem; margin: 2rem auto; padding: 0 1rem; overflow-wrap: anywhere}
 details {border: 1px solid #888; border-radius: .4rem; margin: .65rem 0; padding: .65rem}
+details details {margin-left: .5rem}
 summary {cursor: pointer} input {font: inherit; width: min(28rem, 95%)} li {margin: .4rem 0}
+.sev {display: inline-block; min-width: 4.2rem; text-align: center; border-radius: .3rem; padding: 0 .3rem; font-size: .85rem; font-weight: 600; border: 1px solid}
+.sev.high {background: #fde2e1; color: #8a1c13} .sev.medium {background: #fff3cd; color: #6b4e00} .sev.low {background: #e3f1e6; color: #1f5130}
+.risk {margin: .3rem 0 .6rem; padding: .4rem .6rem; border-left: .25rem solid #888}
+.note {color: #555; font-size: .9rem}
 </style>
-</head><body><main><h1>)HTML" << (preview ? "Audio repair preview" : "Audio repair summary") << R"HTML(</h1>
+</head><body><main><h1>)HTML" << title << R"HTML(</h1>
 )HTML";
     html << "<p>Source: " << escapeHtml(utf8(plan.input)) << "<br>Run status: " << escapeHtml(status) << "</p>";
+    if (!error.empty()) html << "<p><strong>Error:</strong> " << escapeHtml(error) << "</p>";
+    html << "<ul>";
     if (preview) {
-        html << "<p>No repairs have run. The descriptions below show proposed edits, not changes made to your files.</p><p>"
-             << plan.inspectedFiles << " audio files inspected, " << totals.pending << " files planned for repair, "
-             << totals.copied << " files planned to be copied unchanged.</p>";
+        html << "<li>No repairs have run. Changes below are proposed, not made.</li><li>" << plan.inspectedFiles
+             << " audio files inspected; " << trackFindings.size() << " track(s) with findings in " << albums.size()
+             << " album folder(s).</li><li>" << totalPending << " file(s) planned for repair; " << totalCopied
+             << " other file(s) in the same folders planned to be copied unchanged.</li>";
     }
     else {
-        html << "<p>" << totals.repaired << " repaired, " << totals.copied << " copied unchanged, "
-             << totals.failed << " failed, " << totals.pending << " repairs not attempted.</p>";
-        if (!error.empty()) html << "<p><strong>Error:</strong> " << escapeHtml(error) << "</p>";
-        html << R"HTML(
-<p>Installed repairs were verified against the original audio bytes. Risk labels describe metadata and player compatibility, not sound quality.
+        html << "<li>" << trackFindings.size() << " track(s) with findings in " << albums.size()
+             << " album folder(s).</li><li>" << totalRepaired << " repaired, " << totalCopied << " copied unchanged, "
+             << totalFailed << " failed, " << totalPending << " repairs not attempted.</li>";
+    }
+    html << "<li>" << issues.size() << " distinct issue(s); " << multiIssueTracks
+         << " track(s) have more than one issue.</li></ul>";
+    if (!preview) {
+        html << R"HTML(<p class="note">Installed repairs were verified against the original audio bytes. Severity describes metadata and player compatibility, not sound quality.
 Unresolved findings were not fixed; another repair may have changed the same file.
 See <a href="repair-report.json">the JSON report</a> for the full file inventory.</p>
 )HTML";
     }
+    html << "<p class=\"note\">Severity: " << severityBadge(Risk::Review)
+         << " needs manual review, no automatic fix; " << severityBadge(Risk::Compatibility)
+         << " safe for the audio, but some players may show tags differently; " << severityBadge(Risk::Low)
+         << " minor metadata clean-up.</p>";
     html << R"HTML(
-<label for="filter">Filter issues, albums, tracks, or repairs</label><br>
+<label for="filter">Filter issues, albums, tracks, or changes</label><br>
 <input type="search" id="filter" hidden>
 <p id="matches" role="status"></p>
 )HTML";
-    html << "<h2>Findings by issue</h2>";
-    if (issues.empty()) html << "<p>No findings.</p>";
-    for (const auto& [rule, findings] : issues) {
-        std::size_t planned = 0, repairedCount = 0, review = 0, failed = 0, unattempted = 0, itemCount = 0;
-        std::set<fs::path> affectedAlbums;
-        for (const auto* finding : findings) {
-            itemCount += finding->count;
-            affectedAlbums.insert(folderOf(finding->source));
-            const auto file = files.find(finding->source);
-            if (finding->status == "repaired") ++repairedCount;
-            else if (finding->status == "manual-review" || finding->status == "unreadable") ++review;
-            else if (preview && finding->status == "repairable") ++planned;
-            else if (file != files.end() && file->second->status == "failed") ++failed;
-            else if (finding->status == "repairable") ++unattempted;
+
+    html << "<h2>Issues by severity</h2>";
+    if (issueOrder.empty()) html << "<p>No findings.</p>";
+    for (const auto* issue : issueOrder) {
+        const auto rule = issue->key.substr(0, issue->key.find('#'));
+        html << "<details data-search-group=\"issue\" id=\"" << issue->anchor << "\"><summary>"
+             << severityBadge(issue->impact.risk) << " <strong>" << escapeHtml(issueTitle(rule))
+             << (issue->key.ends_with("#review") ? " (review only)" : "") << "</strong> <small>"
+             << escapeHtml(rule) << "</small> - " << issue->tracks.size() << " track(s) in "
+             << issue->albums.size() << " album(s)";
+        const std::pair<std::size_t, const char*> counts[]{ { issue->planned, "planned" },
+            { issue->repaired, "fixed" }, { issue->failed, "failed" }, { issue->unattempted, "not attempted" },
+            { issue->review, "review only" } };
+        for (const auto& [value, label] : counts) {
+            if (value) html << "; " << value << ' ' << label;
         }
-        html << "<details data-search-group=\"issue\"><summary><strong>" << escapeHtml(rule)
-             << "</strong> - " << itemCount << " finding(s) across " << affectedAlbums.size()
-             << " folder(s); " << planned << " planned, " << repairedCount << " repaired, "
-             << failed << " failed, " << unattempted << " not attempted, " << review
-             << " review-only</summary><ul>";
-        for (const auto* finding : findings) {
-            const auto impact = AudioRepair::DescribeFindingImpact(*finding);
-            const auto file = files.find(finding->source);
-            const char* result = finding->status == "manual-review" ? "Review only" :
-                finding->status == "unreadable" ? "Unreadable" :
-                finding->status == "repaired" ? "Verified and installed" :
-                preview && finding->status == "repairable" ? "Planned" :
-                file != files.end() && file->second->status == "failed" ? "Failed" :
-                finding->status == "repairable" ? "Not attempted" : finding->status.c_str();
-            html << "<li><strong>" << escapeHtml(utf8(finding->source.lexically_relative(plan.input)))
-                 << "</strong> - " << result << " | " << impact.label << "<br>"
-                 << escapeHtml(finding->detail) << " <small>(count: " << finding->count << ")</small><br>"
-                 << "<strong>If left unchanged:</strong> " << escapeHtml(impact.unchangedDetail)
-                 << "<br><strong>If fixed:</strong> " << escapeHtml(impact.fixDetail) << "</li>";
-        }
-        html << "</ul></details>\n";
-    }
-    html << "<h2>Album folders</h2>";
-    if (ordered.empty()) html << "<p>No album findings.</p>";
-    for (const auto* entry : ordered) {
-        const auto& [folder, album] = *entry;
-        const auto* label = album.failed ? "Failed" : !preview && album.pending ? "Incomplete" :
-            album.risk == Risk::Review ? "Needs review" :
-            album.risk == Risk::Compatibility ? "Compatibility caution" : "Low metadata risk";
-        html << "<details data-search-group=\"album\"><summary><strong>" << escapeHtml(folder.empty() ? "(Library root)" : utf8(folder))
-             << "</strong> - " << label << " | ";
-        if (preview) html << album.pending << " planned for repair, " << album.copied << " planned unchanged copies";
-        else html << album.repaired << " repaired, " << album.copied << " copied unchanged";
-        html << "</summary><ul>";
-        for (const auto* finding : album.findings) {
-            const auto impact = AudioRepair::DescribeFindingImpact(*finding);
-            const char* result = preview ? "No fix planned for this finding" : "Not repaired";
-            if (finding->status == "repaired") result = "Installed; audio verified unchanged";
-            else if (preview && finding->status == "repairable") result = "Planned edit";
-            else if (finding->status == "repairable") {
-                const auto file = files.find(finding->source);
-                result = file != files.end() && file->second->status == "failed" ?
-                    "Failed; repair not verified as installed" : "Not attempted";
+        html << "</summary><div class=\"risk\"><strong>If left unchanged:</strong> "
+             << escapeHtml(issue->impact.unchangedDetail) << "<br><strong>If fixed:</strong> "
+             << escapeHtml(issue->impact.fixDetail) << "</div>";
+        for (const auto& [folder, findings] : issue->albums) {
+            std::set<fs::path> albumTracks;
+            for (const auto* finding : findings) albumTracks.insert(finding->source);
+            html << "<details><summary><a href=\"#" << albumAnchors[folder] << "\">"
+                 << escapeHtml(folderName(folder)) << "</a> - " << tracksIn(folder, albumTracks.size())
+                 << "</summary><ul>";
+            for (const auto* finding : findings) {
+                html << "<li><strong>" << escapeHtml(utf8(finding->source.filename())) << "</strong><br>"
+                     << changeText(*finding);
+                std::vector<std::string> others;
+                for (const auto& key : issueKeysOf(trackFindings[finding->source])) {
+                    if (key != issue->key) others.push_back(issueLink(key));
+                }
+                if (!others.empty()) {
+                    html << "<br><small>This track also has: ";
+                    for (std::size_t index = 0; index < others.size(); ++index) html << (index ? ", " : "") << others[index];
+                    html << "</small>";
+                }
+                html << "</li>";
             }
-            html << "<li><strong>" << escapeHtml(utf8(finding->source.filename())) << "</strong> - " << result
-                 << " | " << impact.label << "<br>" << escapeHtml(finding->detail)
-                 << " <small>(" << escapeHtml(finding->rule) << ", count: " << finding->count << ")</small><br>"
-                 << "<strong>If left unchanged:</strong> " << escapeHtml(impact.unchangedDetail)
-                 << "<br><strong>If fixed:</strong> " << escapeHtml(impact.fixDetail) << "</li>";
+            html << "</ul></details>";
+        }
+        html << "</details>\n";
+    }
+
+    html << "<h2>Albums by severity</h2><p class=\"note\">Only album folders with findings are listed.</p>";
+    if (albumOrder.empty()) html << "<p>No album findings.</p>";
+    for (const auto* album : albumOrder) {
+        const auto* state = !preview && album->failed ? "Failed" : !preview && album->pending ? "Incomplete" : nullptr;
+        html << "<details data-search-group=\"album\" id=\"" << album->anchor << "\"><summary>"
+             << severityBadge(album->risk) << " <strong>" << escapeHtml(folderName(album->folder)) << "</strong> - ";
+        if (state) html << "<strong>" << state << "</strong> - ";
+        html << tracksIn(album->folder, album->tracks.size()) << " affected; " << album->issueKeys.size()
+             << " issue(s)";
+        if (album->multiIssueTracks) html << "; " << album->multiIssueTracks << " track(s) with multiple issues";
+        html << "</summary><p>";
+        if (preview) html << album->pending << " file(s) planned for repair, " << album->copied << " planned unchanged copies";
+        else html << album->repaired << " repaired, " << album->copied << " copied unchanged, " << album->failed
+                  << " failed, " << album->pending << " not attempted";
+        html << ".</p><p><strong>Issues in this album</strong></p><ul>";
+        for (const auto& key : album->issueKeys) {
+            std::size_t affected = 0;
+            for (const auto& track : album->tracks) {
+                const auto& findings = trackFindings[track];
+                affected += std::any_of(findings.begin(), findings.end(),
+                    [&](const Finding* finding) { return keyOf(*finding) == key; });
+            }
+            html << "<li>" << issueLink(key) << " - " << tracksIn(album->folder, affected) << "</li>";
+        }
+        html << "</ul><p><strong>Affected tracks</strong></p><ul>";
+        for (const auto& track : album->tracks) {
+            const auto& findings = trackFindings[track];
+            const auto keys = issueKeysOf(findings);
+            html << "<li>" << severityBadge(trackRisk(findings)) << " <strong>" << escapeHtml(utf8(track.filename()))
+                 << "</strong>";
+            if (keys.size() > 1) html << " <small>(" << keys.size() << " issues)</small>";
+            html << "<ul>";
+            for (const auto& key : keys) {
+                html << "<li>" << issueLink(key);
+                for (const auto* finding : findings) {
+                    if (keyOf(*finding) == key) html << "<br>" << changeText(*finding);
+                }
+                html << "</li>";
+            }
+            html << "</ul></li>";
         }
         html << "</ul>";
-        if (album.failed) {
-            html << "<p>" << album.failed << " file(s) failed. See the run error and JSON file status.</p>";
+        if (!album->failedCopies.empty()) {
+            html << "<p><strong>Files that failed to copy:</strong> ";
+            for (std::size_t index = 0; index < album->failedCopies.size(); ++index) {
+                html << (index ? ", " : "") << escapeHtml(utf8(album->failedCopies[index].filename()));
+            }
+            html << "</p>";
+        }
+        if (album->failed) {
+            html << "<p>" << album->failed << " file(s) failed. See the run error and JSON file status.</p>";
         }
         html << "</details>\n";
     }
@@ -1103,6 +1328,7 @@ See <a href="repair-report.json">the JSON report</a> for the full file inventory
 const filter = document.getElementById('filter');
 const matches = document.getElementById('matches');
 const groups = Array.from(document.querySelectorAll('details[data-search-group]'));
+const nested = Array.from(document.querySelectorAll('details:not([data-search-group])'));
 filter.hidden = false;
 filter.addEventListener('input', () => {
     const query = filter.value.trim().toLowerCase();
@@ -1110,9 +1336,24 @@ filter.addEventListener('input', () => {
     for (const group of groups) {
         group.hidden = !group.textContent.toLowerCase().includes(query);
         if (!group.hidden) ++visible;
+        if (query) group.open = !group.hidden;
     }
-    matches.textContent = `${visible} of ${groups.length} issue groups and album folders shown`;
+    for (const item of nested) {
+        item.hidden = query !== '' && !item.textContent.toLowerCase().includes(query);
+        if (query) item.open = !item.hidden;
+    }
+    matches.textContent = `${visible} of ${groups.length} issues and albums shown`;
 });
+const reveal = () => {
+    const target = location.hash && document.getElementById(location.hash.slice(1));
+    if (!target) return;
+    for (let element = target; element; element = element.parentElement) {
+        if (element.tagName === 'DETAILS') { element.hidden = false; element.open = true; }
+    }
+    target.scrollIntoView();
+};
+window.addEventListener('hashchange', reveal);
+reveal();
 </script></body></html>
 )HTML";
     return html.str();
@@ -1348,6 +1589,9 @@ int Prepare(const fs::path& input, const fs::path& output, bool overwrite,
     inspectionProgress.Finish();
     RepairProgress planning("planning", std::nullopt, "entries");
     plan.inspectedFiles = candidates.size();
+    for (const auto& candidate : candidates) {
+        ++plan.folderTracks[candidate.lexically_relative(plan.input).parent_path()];
+    }
     for (std::size_t index = 0; index < candidates.size(); ++index) {
         auto& inspection = inspections[index];
         plan.findings.insert(plan.findings.end(), std::make_move_iterator(inspection.findings.begin()),

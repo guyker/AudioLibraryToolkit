@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <set>
 #include <string>
 #include <string_view>
@@ -56,6 +57,8 @@ struct Plan
     // Empty enables every rule.
     std::set<std::string> rules;
     std::size_t inspectedFiles{ 0 };
+    // Inspected audio files per folder relative to input; reports use it to tell whole-album from partial findings.
+    std::map<std::filesystem::path, std::size_t> folderTracks;
     std::vector<std::filesystem::path> repairedFolders;
     std::vector<PlannedFile> files;
     std::vector<Finding> findings;

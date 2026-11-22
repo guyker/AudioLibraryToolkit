@@ -24,9 +24,11 @@ source root and every discovered source entry must also be free of symlinks and 
 regular-file links; a link fails preparation rather than being followed or copied.
 `repair-report.json` records findings, risk labels, separate unchanged/fix risk descriptions, file installation status,
 and whether audio or metadata changed. It marks rules as planned until successfully installed, then as applied.
-Open the printed `repair-summary.html` path to filter by issue, album folder, track or repair. Findings are grouped
-by issue first and album folder second. Expand a group to see the exact changes plus separate risks of leaving each
-finding unchanged and applying its fix. The report distinguishes verified installed repairs from failures, repairs not
+Open the printed `repair-summary.html` path to filter by issue, album folder, track or change. "Issues by severity"
+groups findings by issue, highest severity first, then by album folder and track; each album shows whether all or only
+some of its tracks have the issue, and each track links its other issues. "Albums by severity" lists only folders with
+findings, highest severity first, with affected/total tracks, the issues present and tracks having more than one issue. Each issue states once
+the risk of leaving it unchanged and of applying its fix. The report distinguishes verified installed repairs from failures, repairs not
 attempted and findings left for review; audio byte verification does not imply equal player compatibility.
 Before `RUN`, option 7 shows only finding statistics in the console and saves a searchable HTML preview per library
 outside the source libraries. It includes every finding, with proposed edits, reasons and separate unchanged/fix
@@ -70,7 +72,7 @@ of terminal control sequences. Phase boundaries are retained in the session log 
       console. Cancelling leaves sources and `FIXED` untouched, and an unsafe temporary location blocks repair.
 - [ ] The HTML summary groups track findings by folder, shows compatibility cautions and never claims a failed or
       unattempted repair was verified and installed.
-- [ ] Preview and post-repair reports group findings by issue, show exact changes and separate risks for leaving or fixing each finding; JSON distinguishes planned rules from successfully applied rules.
+- [ ] Preview and post-repair reports show the same findings by issue (ordered by severity, then album and track) and by album (only albums with findings), mark whole-album versus partial findings and tracks with several issues, and state separate risks for leaving or fixing each issue; JSON distinguishes planned rules from successfully applied rules.
 - [ ] Any source file/directory symlink or reparse point fails preparation; nested output links are rejected before writes.
 - [ ] Existing output is rejected by default; `--overwrite` allows eligible destinations to be replaced.
 - [ ] Preparation displays progress before confirmation without writing repair output; cancellation keeps sources unchanged.

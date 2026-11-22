@@ -565,8 +565,9 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual([(item["rule"], item["status"]) for item in report["findings"]],
                          [("flac.duplicate-comments", "manual-review")])
         summary = (report_path.parent / "repair-summary.html").read_text(encoding="utf-8")
-        self.assertIn("conflict.flac</strong> - Not repaired | Needs review", summary)
-        self.assertNotIn("Installed; audio verified unchanged", summary)
+        self.assertIn("conflict.flac</strong><br>Not changed (needs manual review):", summary)
+        self.assertIn("FLAC: duplicate tag values (review only)", summary)
+        self.assertNotIn("Fixed and verified", summary)
         self.assertEqual(source.read_bytes(), original)
         self.assertFalse((report_path.parent / source.name).exists())
 
@@ -1010,9 +1011,9 @@ class ConversionTests(unittest.TestCase):
         self.assertTrue((target / ".repair-in-progress").exists())
         summary = (target / "repair-summary.html").read_text(encoding="utf-8")
         self.assertIn("Run status: failed", summary)
-        self.assertIn("a.flac</strong> - Failed; repair not verified as installed", summary)
-        self.assertIn("b.flac</strong> - Not attempted", summary)
-        self.assertNotIn("Installed; audio verified unchanged", summary)
+        self.assertIn("a.flac</strong><br>Not fixed (repair failed): Remove exact duplicate", summary)
+        self.assertIn("b.flac</strong><br>Not fixed (not attempted):", summary)
+        self.assertNotIn("Fixed and verified", summary)
         report = json.loads((target / "repair-report.json").read_text(encoding="utf-8"))
         failed_file = next(file for file in report["files"] if file["source"] == "a.flac")
         self.assertEqual(failed_file["status"], "failed")
@@ -1023,6 +1024,27 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual((self.source / "b.flac").read_bytes(), data)
         self.assertRegex(result.stdout, r"Repair installation: 0/2 verified files installed \(0%\).*\[stopped\]")
         self.assertNotIn("2/2 verified files installed (100%)", result.stdout)
+
+    @unittest.skipUnless(os.name == "nt", "Windows deny-delete replacement failure")
+    def test_repair_album_view_orders_by_severity_before_repair_status(self):
+        toc = "CDTOC=A+96+1234"
+        self.track.unlink()
+        (self.source / "a.flac").write_bytes(add_vorbis_comments(self.repair_fixture.read_bytes(), [toc, toc]))
+        review = self.source / "Review"
+        review.mkdir()
+        (review / "conflict.flac").write_bytes(add_vorbis_comments(
+            self.repair_fixture.read_bytes(), ["CDTOC=A+96+1234", "CDTOC=B+96+5678"]))
+        target = self.output / "FIXED" / self.source.name
+        target.mkdir(parents=True)
+        (target / "a.flac").write_bytes(b"existing destination")
+        with deny_delete(target / "a.flac"):
+            result = self.repair(self.source, "--overwrite", "--rules", "flac.duplicate-comments")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        summary = (target / "repair-summary.html").read_text(encoding="utf-8")
+        self.assertIn("a.flac</strong><br>Not fixed (repair failed):", summary)
+        albums = summary[summary.index("<h2>Albums by severity</h2>"):]
+        # A failed low-risk album must not precede an album needing manual review.
+        self.assertLess(albums.index("conflict.flac"), albums.index("a.flac"))
 
     def test_repair_rejects_existing_output_unless_overwrite_is_enabled(self):
         toc = "CDTOC=A+96+1234"
@@ -1077,8 +1099,9 @@ class ConversionTests(unittest.TestCase):
         self.assertIn("flac.duplicate-comments: 1 repairable finding(s)", result.stdout)
         self.assertLess(result.stdout.index("Repair preview:"), result.stdout.index("Repair installation:"))
         self.assertIn("<strong>album &amp; \u97f3</strong>", summary)
-        self.assertIn("track.flac</strong> - Installed; audio verified unchanged | Compatibility caution", summary)
-        self.assertIn("Findings by issue", summary)
+        self.assertIn("track.flac</strong><br>Fixed and verified: Removed exact duplicate", summary)
+        self.assertIn('<span class="sev medium">Medium</span> <strong>FLAC: duplicate tag values</strong>', summary)
+        self.assertIn("Issues by severity", summary)
         self.assertIn("flac.duplicate-comments", summary)
         self.assertIn("<strong>If left unchanged:</strong>", summary)
         self.assertIn("<strong>If fixed:</strong>", summary)
@@ -1121,14 +1144,16 @@ class ConversionTests(unittest.TestCase):
         report, = temp.rglob("*.html")
         preview = report.read_text(encoding="utf-8")
         self.assertIn("No repairs have run", preview)
-        self.assertIn("Findings by issue", preview)
+        self.assertIn("Issues by severity", preview)
         self.assertEqual(preview.count('data-search-group="issue"'), 1)
         self.assertIn("<strong>If left unchanged:</strong>", preview)
         self.assertIn("<strong>If fixed:</strong>", preview)
-        self.assertEqual(preview.count("Planned edit |"), 27)
-        self.assertIn("track-26.flac</strong> - Planned edit", preview)
+        # Each planned fix appears once in the issue view and once in the album view.
+        self.assertEqual(preview.count("Planned fix: Remove exact duplicate"), 54)
+        self.assertIn("all 27 track(s)", preview)
+        self.assertIn("track-26.flac</strong><br>Planned fix:", preview)
         self.assertIn("retaining the first occurrence: CDTOC", preview)
-        self.assertNotIn("Installed; audio verified unchanged", preview)
+        self.assertNotIn("Fixed and verified", preview)
         self.assertFalse(self.output.exists())
         self.assertEqual(len(list(self.source.iterdir())), 27)
         self.assertTrue(all(path.read_bytes() == contents for path in self.source.iterdir()))
@@ -1139,6 +1164,30 @@ class ConversionTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(self.output.exists())
         self.assertEqual(len(list(self.source.iterdir())), 27)
+
+    def test_repair_summary_groups_issues_by_severity_album_and_track(self):
+        self.track.write_bytes(self.repair_fixture.read_bytes())
+        album = self.source / "Album"
+        album.mkdir()
+        (album / "t1.flac").write_bytes(add_vorbis_comments(
+            self.repair_fixture.read_bytes(), ["CDTOC=A", "CDTOC=A", "COMMENT="]))
+        (album / "t2.flac").write_bytes(add_vorbis_comments(
+            self.repair_fixture.read_bytes(), ["CDTOC=A", "CDTOC=A"]))
+        (album / "t3.flac").write_bytes(self.repair_fixture.read_bytes())
+        result = self.repair()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        summary = (self.output / "FIXED" / self.source.name / "repair-summary.html").read_text(encoding="utf-8")
+        issues = summary[summary.index("<h2>Issues by severity</h2>"):summary.index("<h2>Albums by severity</h2>")]
+        albums = summary[summary.index("<h2>Albums by severity</h2>"):]
+        self.assertLess(issues.index("FLAC: duplicate tag values"), issues.index("FLAC: empty tags"))
+        self.assertIn("Album</a> - 2 of 3 tracks", issues)
+        self.assertIn("Album</a> - 1 of 3 tracks", issues)
+        self.assertEqual(issues.count("This track also has:"), 2)
+        self.assertEqual(albums.count('data-search-group="album"'), 1)
+        self.assertNotIn(self.track.name, albums)
+        self.assertIn("2 of 3 tracks affected; 2 issue(s); 1 track(s) with multiple issues", albums)
+        self.assertIn("t1.flac</strong> <small>(2 issues)</small>", albums)
+        self.assertIn("1 track(s) have more than one issue", summary)
 
     def test_manual_repair_can_opt_in_to_redundant_id3v1_removal(self):
         self.track.unlink()
@@ -1157,7 +1206,7 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(target.read_bytes()[end:], audio)
         self.assertEqual(track.read_bytes(), original)
         summary = (target.parent / "repair-summary.html").read_text(encoding="utf-8")
-        self.assertIn("song.mp3</strong> - Installed; audio verified unchanged | Compatibility caution", summary)
+        self.assertIn("song.mp3</strong><br>Fixed and verified: Removed ID3v1 tag", summary)
         self.assertIn("Older players that read only ID3v1 may stop showing its fields.", summary)
 
     def test_repair_summary_destination_conflict_preserves_existing_file(self):

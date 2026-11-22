@@ -237,10 +237,14 @@ still apply. An in-progress marker and
 risk label, unchanged-risk and fix-risk descriptions. Per-file rules are named `plannedRules` until successfully
 installed, then `appliedRules`; installation status and audio/metadata impact are also recorded. After the JSON report is installed, `AudioRepair::Execute`
 writes an offline `repair-summary.html` from the same execution state, including on partial failure when report
-writing is possible. It groups findings by the source file's containing folder, ranks incomplete and higher-risk
-albums first, and only claims unchanged audio for verified, installed repairs. Both the preview and summary group
-findings by issue first, with album folders as a secondary view; each item gives the proposed or performed change,
-the risk of leaving it unchanged, and the risk of applying the fix. The HTML preview uses the same risk descriptions
+writing is possible. Both the preview and summary present the same findings in two views. "Issues by severity"
+groups findings by issue (rule, with review-only findings as a separate issue), ordered High (needs review), Medium
+(compatibility caution), Low; each issue states once the risk of leaving it unchanged and of applying the fix, then
+lists affected album folders (marked as all or some of the folder's inspected tracks) and their tracks, linking other
+issues on the same track. "Albums by severity" lists only folders with findings, highest severity first (failed, then incomplete,
+folders first within a severity), with affected/total track counts, the issues present, tracks with multiple issues, and each track's issues and
+changes. Planned or unapplied changes are worded as proposals; only verified, installed repairs claim unchanged audio.
+The HTML preview uses the same risk descriptions
 for planned fixes. Both execution report names are reserved at the output root and follow the normal overwrite
 policy. A summary write failure is reported without discarding the JSON report or installed files. The
 CLI returns non-zero when there are findings requiring manual review or when an operation fails.
