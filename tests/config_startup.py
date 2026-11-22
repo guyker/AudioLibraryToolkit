@@ -8,6 +8,13 @@ import tempfile
 from pathlib import Path
 
 
+def load_config(path):
+    """Parse a configuration copied from the commented template; comments are whole lines."""
+    text = path.read_text(encoding="utf-8")
+    assert "//" in text, "First run did not copy the commented default template"
+    return json.loads("\n".join(line for line in text.splitlines() if not line.lstrip().startswith("//")))
+
+
 def main():
     converter = Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="alt-config-") as directory:
@@ -40,7 +47,7 @@ def main():
         text = result.stdout + result.stderr
         assert result.returncode != 0, text
         assert str(config) in text and "Open and edit" in text, text
-        settings = json.loads(config.read_text(encoding="utf-8"))
+        settings = load_config(config)
         assert settings["OutDirectory"] == "" and settings["MediaDirectoryList"] == [], settings
 
         if os.name != "nt":
@@ -62,7 +69,7 @@ def main():
                 os.close(master)
                 os.close(slave)
             assert result.returncode != 0 and "Open and edit" in result.stdout + result.stderr
-            redirected_settings = json.loads(redirected_config.read_text(encoding="utf-8"))
+            redirected_settings = load_config(redirected_config)
             assert redirected_settings["OutDirectory"] == "" and redirected_settings["MediaDirectoryList"] == []
 
         library = root / "input \u97f3"
@@ -94,7 +101,7 @@ def main():
                 if process is not None and process.poll() is None:
                     process.wait(timeout=10)
             assert returncode == 0, terminal_output
-            interactive_settings = json.loads(interactive_config.read_text(encoding="utf-8"))
+            interactive_settings = load_config(interactive_config)
             assert interactive_settings["OutDirectory"] == str(destination)
             assert interactive_settings["MediaDirectoryList"][0]["mediaPath"] == str(library)
 

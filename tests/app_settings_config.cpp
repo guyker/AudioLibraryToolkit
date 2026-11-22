@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -45,8 +46,13 @@ void writeConfig(const fs::path& path, int logLevel)
     require(static_cast<bool>(output), "Could not write test config");
 }
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc < 2) {
+        std::cerr << "Usage: app_settings_config_test <config.default.json>\n";
+        return 2;
+    }
+    const fs::path shippedTemplate = argv[1];
     const auto originalDirectory = fs::current_path();
     const auto testRoot = fs::temp_directory_path() /
         ("afc-user-config-" +
@@ -226,6 +232,55 @@ int main()
         }
         require(readErrorReported && !fs::exists(unreadableConfig),
             "An input read error was treated as an interrupted setup");
+
+        const auto readText = [](const fs::path& path) {
+            std::ifstream in(path, std::ios::binary);
+            return std::string{ std::istreambuf_iterator<char>(in), {} };
+        };
+        const auto templateText = readText(shippedTemplate);
+        require(templateText.find("//") != std::string::npos, "The shipped template has no comments");
+
+        const auto copiedConfig = testRoot / "template-copy" / "config.json";
+        std::ostringstream templateOutput;
+        require(!AppSettingsJson::CreateInitialConfiguration(copiedConfig, shippedTemplate, false,
+                    unusedInput, templateOutput, errorMessage) &&
+                errorMessage.find("Open and edit") != std::string::npos,
+            "Non-interactive template setup did not ask the user to edit the configuration");
+        require(readText(copiedConfig) == templateText && templateOutput.str().find("Warning") == std::string::npos,
+            "The shipped template was not copied unchanged");
+
+        const auto filledConfig = testRoot / "template-filled" / "config.json";
+        std::istringstream templateAnswers(CommonUtils::path_to_utf8(destination) + "\n" +
+            CommonUtils::path_to_utf8(library) + "\n");
+        require(AppSettingsJson::CreateInitialConfiguration(filledConfig, shippedTemplate, true,
+                    templateAnswers, templateOutput, errorMessage),
+            "Interactive template setup failed");
+        const auto filledText = readText(filledConfig);
+        auto filled = AppSettingsJson::LoadWithDefaults(filledConfig, errorMessage);
+        require(filled != nullptr && filledText.find("//") != std::string::npos &&
+                templateOutput.str().find("Warning") == std::string::npos &&
+                filled->OutDirectory == CommonUtils::path_to_utf8(destination) &&
+                filled->MediaDirectoryList.size() == 1 && filled->MediaDirectoryList.front().isActive &&
+                filled->MediaDirectoryList.front().mediaPath == CommonUtils::path_to_utf8(library),
+            "Interactive template setup lost comments or the requested paths");
+
+        const auto badTemplate = testRoot / "bad-template.json";
+        {
+            std::ofstream bad(badTemplate, std::ios::binary);
+            bad << "{\n  // private\n  \"OutDirectory\": \"/private/out\",\n  \"MediaDirectoryList\": []\n}\n";
+        }
+        for (const auto& candidate : { badTemplate, testRoot / "missing-template.json" }) {
+            const auto fallbackConfig = testRoot / ("fallback-" + candidate.stem().string()) / "config.json";
+            std::ostringstream fallbackOutput;
+            require(!AppSettingsJson::CreateInitialConfiguration(fallbackConfig, candidate, false,
+                        unusedInput, fallbackOutput, errorMessage),
+                "Fallback setup succeeded without required paths");
+            auto fallback = AppSettingsJson::LoadWithDefaults(fallbackConfig, errorMessage);
+            require(fallback != nullptr && fallback->OutDirectory.empty() &&
+                    readText(fallbackConfig).find("//") == std::string::npos &&
+                    fallbackOutput.str().find("using built-in defaults") != std::string::npos,
+                "An unusable template did not fall back to built-in defaults with a warning");
+        }
 
         fs::current_path(originalDirectory);
         fs::remove_all(cleanupRoot);

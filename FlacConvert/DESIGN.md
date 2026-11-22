@@ -470,7 +470,12 @@ executable and old shared directories are not searched automatically (K-061). `-
 uses `AppSettingsJson::CreateInitialConfiguration`: if stdin and stdout are terminals, it prompts for an output
 directory and an existing input library, resolving entered paths to absolute paths before saving; without a terminal
 or when input ends before setup is complete, it writes an empty template and exits
-with editing instructions. Creation is exclusive and never overwrites an existing file. Help/version requests do not
+with editing instructions. The new file starts from the commented `config.default.json` template found by
+`AppSettingsJson::FindDefaultConfigTemplate` beside the executable (staged by the build) or in
+`<exe>/../share/AudioLibraryToolkit` (installed by `cmake --install`). Setup answers replace only the template's
+empty `OutDirectory` and `MediaDirectoryList` values, preserving comments, and the result is re-parsed. A missing
+template, one that fails validation or contains preset paths, or a failed fill falls back, with a warning, to JSON
+generated from built-in defaults. Creation is exclusive and never overwrites an existing file. Help/version requests do not
 create a file. Both menu and CLI overlay a found file on built-in defaults via `AppSettingsJson::LoadWithDefaults`.
 Windows setup reads console paths as UTF-16 and converts them to UTF-8 before validation and storage.
 Defaults contain no libraries or output path. The menu rejects an incomplete existing file; CLI operations take

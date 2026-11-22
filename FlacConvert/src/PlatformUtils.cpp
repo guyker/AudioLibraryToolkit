@@ -11,6 +11,9 @@
 #else
 #include <codecvt>
 #include <locale>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -59,6 +62,34 @@ std::filesystem::path UserConfigDirectory()
         return std::filesystem::path(home) / ".config" / "AudioLibraryToolkit";
     }
     throw std::runtime_error("Cannot locate the per-user configuration directory (HOME is unavailable).");
+#endif
+}
+
+std::filesystem::path ExecutableDirectory()
+{
+#ifdef _WIN32
+    std::vector<wchar_t> buffer(MAX_PATH);
+    for (;;) {
+        const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0) return {};
+        if (length < buffer.size()) {
+            return std::filesystem::path(std::wstring(buffer.data(), length)).parent_path();
+        }
+        if (buffer.size() >= 32768) return {};
+        buffer.resize(buffer.size() * 2);
+    }
+#elif defined(__APPLE__)
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::vector<char> buffer(size + 1, '\0');
+    if (_NSGetExecutablePath(buffer.data(), &size) != 0) return {};
+    std::error_code ec;
+    const auto resolved = std::filesystem::weakly_canonical(buffer.data(), ec);
+    return ec ? std::filesystem::path(buffer.data()).parent_path() : resolved.parent_path();
+#else
+    std::error_code ec;
+    const auto executable = std::filesystem::read_symlink("/proc/self/exe", ec);
+    return ec ? std::filesystem::path{} : executable.parent_path();
 #endif
 }
 

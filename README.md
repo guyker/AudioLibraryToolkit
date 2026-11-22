@@ -207,7 +207,10 @@ otherwise `OutDirectory`. `duplicates` does not require an output root. Pass `--
 to select an existing config instead; a missing explicit file is an error. The working directory and old shared
 configuration locations such as `C:\ProgramData\AudioLibraryToolkit` are not searched automatically.
 
-`FlacConvert\config.json` is an optional sample with empty paths and comments explaining additional settings.
+The first-run file is a copy of the commented default template `config.default.json`, which the build places beside
+the executable and `cmake --install` places in `share/AudioLibraryToolkit`; its comments explain the additional
+settings. If the template is missing or invalid, a warning is shown and built-in defaults are written instead. The
+source copy is `FlacConvert\config.default.json`.
 
 ## Design and feature documentation
 

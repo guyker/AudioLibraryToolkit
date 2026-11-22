@@ -159,7 +159,10 @@ def main(interrupted=False):
             exit_code = wintypes.DWORD()
             check(kernel.GetExitCodeProcess(process.process, ctypes.byref(exit_code)))
             assert (exit_code.value != 0) == interrupted, output.decode("utf-8", "replace")
-            config = json.loads((root / "user" / "AudioLibraryToolkit" / "config.json").read_text(encoding="utf-8"))
+            config_text = (root / "user" / "AudioLibraryToolkit" / "config.json").read_text(encoding="utf-8")
+            assert "//" in config_text, "First run did not copy the commented default template"
+            config = json.loads("\n".join(
+                line for line in config_text.splitlines() if not line.lstrip().startswith("//")))
             if interrupted:
                 assert config["OutDirectory"] == "" and config["MediaDirectoryList"] == [], config
             else:

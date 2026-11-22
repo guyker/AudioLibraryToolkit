@@ -12,6 +12,8 @@
 #include <cctype>
 #include <set>
 #include <system_error>
+#include <iterator>
+#include <regex>
 
 #include <spdlog/spdlog.h>
 
@@ -28,6 +30,118 @@ fs::path pathForInspection(const fs::path& path)
     return path;
 #endif
 }
+
+const std::regex& outDirectoryPattern()
+{
+    static const std::regex pattern(R"("OutDirectory"\s*:\s*"")");
+    return pattern;
+}
+
+const std::regex& mediaDirectoryListPattern()
+{
+    static const std::regex pattern(R"("MediaDirectoryList"\s*:\s*\[\s*\])");
+    return pattern;
+}
+
+std::optional<std::smatch> singleMatch(const std::string& text, const std::regex& pattern)
+{
+    auto it = std::sregex_iterator(text.begin(), text.end(), pattern);
+    if (it == std::sregex_iterator()) return std::nullopt;
+    std::smatch match = *it;
+    if (++it != std::sregex_iterator()) return std::nullopt;
+    return match;
+}
+
+// Reads a template that must parse like a configuration and leave the required paths empty for setup.
+std::optional<std::string> readConfigTemplate(const fs::path& templatePath, std::string& problem)
+{
+    std::ifstream in(pathForInspection(templatePath), std::ios::binary);
+    if (!in) {
+        problem = "cannot be opened";
+        return std::nullopt;
+    }
+    std::string text{ std::istreambuf_iterator<char>(in), {} };
+    if (in.bad()) {
+        problem = "cannot be read";
+        return std::nullopt;
+    }
+    if (text.starts_with("\xEF\xBB\xBF")) text.erase(0, 3);
+
+    auto parsed = AppSettingsJson::GetDefaultSettings();
+    if (!parsed.loadFromJsonText(text)) {
+        problem = "is not a valid configuration";
+        return std::nullopt;
+    }
+    if (parsed.LogLevel < 0 || parsed.LogLevel > 6 || parsed.AlbumsSplitThreshold <= 0) {
+        problem = "has an invalid LogLevel or AlbumsSplitThreshold";
+        return std::nullopt;
+    }
+    if (!parsed.OutDirectory.empty() || !parsed.MediaDirectoryList.empty() ||
+        !singleMatch(text, outDirectoryPattern()) || !singleMatch(text, mediaDirectoryListPattern())) {
+        problem = "must contain exactly one empty OutDirectory and one empty MediaDirectoryList";
+        return std::nullopt;
+    }
+    return text;
+}
+
+std::string replaceSingleMatch(const std::string& text, const std::regex& pattern, const std::string& replacement)
+{
+    const auto match = singleMatch(text, pattern);
+    if (!match) return {};
+    return text.substr(0, match->position(0)) + replacement + text.substr(match->position(0) + match->length(0));
+}
+
+// Fills the setup answers into the template so its comments and layout are preserved.
+std::optional<std::string> fillConfigTemplate(const std::string& templateText,
+    const std::string& outputPath, const std::string& inputPath)
+{
+    rapidjson::StringBuffer outBuffer;
+    rapidjson::Writer<rapidjson::StringBuffer> outWriter(outBuffer);
+    outWriter.String(outputPath.c_str(), static_cast<rapidjson::SizeType>(outputPath.size()));
+
+    rapidjson::StringBuffer listBuffer;
+    rapidjson::Writer<rapidjson::StringBuffer> listWriter(listBuffer);
+    listWriter.StartArray();
+    listWriter.StartObject();
+    listWriter.Key("isActive");
+    listWriter.Bool(true);
+    listWriter.Key("mediaPath");
+    listWriter.String(inputPath.c_str(), static_cast<rapidjson::SizeType>(inputPath.size()));
+    listWriter.EndObject();
+    listWriter.EndArray();
+
+    auto text = replaceSingleMatch(templateText, outDirectoryPattern(),
+        std::string("\"OutDirectory\": ") + outBuffer.GetString());
+    if (text.empty()) return std::nullopt;
+    text = replaceSingleMatch(text, mediaDirectoryListPattern(),
+        std::string("\"MediaDirectoryList\": ") + listBuffer.GetString());
+    if (text.empty()) return std::nullopt;
+
+    auto check = AppSettingsJson::GetDefaultSettings();
+    if (!check.loadFromJsonText(text) || check.OutDirectory != outputPath ||
+        check.MediaDirectoryList.size() != 1 || !check.MediaDirectoryList[0].isActive ||
+        check.MediaDirectoryList[0].mediaPath != inputPath) {
+        return std::nullopt;
+    }
+    return text;
+}
+}
+
+std::optional<fs::path> AppSettingsJson::FindDefaultConfigTemplate()
+{
+    const auto exeDir = PlatformUtils::ExecutableDirectory();
+    if (exeDir.empty()) return std::nullopt;
+    const fs::path candidates[] = {
+        exeDir / DefaultConfigTemplateFileName,
+        exeDir / ".." / "share" / "AudioLibraryToolkit" / DefaultConfigTemplateFileName,
+    };
+    for (const auto& candidate : candidates) {
+        std::error_code ec;
+        if (fs::is_regular_file(pathForInspection(candidate), ec) && !ec) {
+            return candidate.lexically_normal();
+        }
+    }
+    return std::nullopt;
 }
 
 fs::path userConfigPath(std::string& errorMessage) {
@@ -77,8 +191,27 @@ std::shared_ptr<AppSettingsJson> AppSettingsJson::AppSetting() {
 bool AppSettingsJson::CreateInitialConfiguration(const fs::path& configPath,
     bool interactive, std::istream& input, std::ostream& output, std::string& errorMessage)
 {
+    return CreateInitialConfiguration(configPath, std::nullopt, interactive, input, output, errorMessage);
+}
+
+bool AppSettingsJson::CreateInitialConfiguration(const fs::path& configPath,
+    const std::optional<fs::path>& templatePath,
+    bool interactive, std::istream& input, std::ostream& output, std::string& errorMessage)
+{
+    std::optional<std::string> templateText;
+    if (templatePath.has_value()) {
+        std::string problem;
+        templateText = readConfigTemplate(*templatePath, problem);
+        if (!templateText) {
+            output << "Warning: default configuration template '" << CommonUtils::path_to_utf8(*templatePath)
+                << "' " << problem << "; using built-in defaults.\n";
+        }
+    }
+
     auto settings = GetDefaultSettings();
     bool completed = false;
+    std::string outputPath;
+    std::string inputPath;
     if (interactive) {
         output << "First-time setup. Enter an output directory and an existing audio library directory.\n"
             "The configuration can be opened and edited after setup.\n";
@@ -116,14 +249,28 @@ bool AppSettingsJson::CreateInitialConfiguration(const fs::path& configPath,
                 return true;
             }
         };
-        std::string outputPath;
-        std::string inputPath;
         completed = readPath("Output directory: ", false, outputPath) &&
             readPath("Input library directory: ", true, inputPath);
         if (completed) {
-            settings.OutDirectory = std::move(outputPath);
-            settings.MediaDirectoryList.push_back({ true, std::move(inputPath), std::nullopt });
+            settings.OutDirectory = outputPath;
+            settings.MediaDirectoryList.push_back({ true, inputPath, std::nullopt });
         }
+    }
+
+    std::string content;
+    if (templateText) {
+        if (!completed) {
+            content = *templateText;
+        }
+        else if (auto filled = fillConfigTemplate(*templateText, outputPath, inputPath)) {
+            content = std::move(*filled);
+        }
+        else {
+            output << "Warning: cannot fill the default configuration template; using built-in defaults.\n";
+        }
+    }
+    if (content.empty()) {
+        content = settings.toJsonString() + "\n";
     }
 
     std::error_code ec;
@@ -133,7 +280,7 @@ bool AppSettingsJson::CreateInitialConfiguration(const fs::path& configPath,
             CommonUtils::path_to_utf8(configPath.parent_path()) + "': " + ec.message();
         return false;
     }
-    if (!PlatformUtils::WriteNewTextFile(configPath, settings.toJsonString() + "\n", ec)) {
+    if (!PlatformUtils::WriteNewTextFile(configPath, content, ec)) {
         errorMessage = "Cannot create configuration file '" + CommonUtils::path_to_utf8(configPath) +
             "': " + ec.message() + ". Existing files are not overwritten; check for an incomplete file.";
         return false;
@@ -176,7 +323,7 @@ std::shared_ptr<AppSettingsJson> AppSettingsJson::LoadForCommandLine(
         }
         if (!exists) {
             const bool interactive = PlatformUtils::IsStdinInteractive() && PlatformUtils::IsStdoutInteractive();
-            if (!CreateInitialConfiguration(configPath, interactive,
+            if (!CreateInitialConfiguration(configPath, FindDefaultConfigTemplate(), interactive,
                     std::cin, std::cout, errorMessage)) {
                 return nullptr;
             }
@@ -316,15 +463,22 @@ void AppSettingsJson::saveToFile(const std::filesystem::path& filename) const {
 
 // Load JSON from a file
 bool AppSettingsJson::loadFromFile(const std::filesystem::path& filename) {
-    std::ifstream ifs(pathForInspection(filename));
+    std::ifstream ifs(pathForInspection(filename), std::ios::binary);
     if (!ifs) {
         std::cerr << "Error: Cannot open file for reading: " << filename << std::endl;
         return false;
     }
+    const std::string text{ std::istreambuf_iterator<char>(ifs), {} };
+    if (ifs.bad()) {
+        std::cerr << "Error: Cannot read file: " << filename << std::endl;
+        return false;
+    }
+    return loadFromJsonText(text);
+}
 
-    rapidjson::IStreamWrapper isw(ifs);
+bool AppSettingsJson::loadFromJsonText(const std::string& text) {
     rapidjson::Document doc;
-    doc.ParseStream<rapidjson::kParseCommentsFlag>(isw);
+    doc.Parse<rapidjson::kParseCommentsFlag>(text.c_str(), text.size());
 
     if (doc.HasParseError() || !doc.IsObject()) {
         std::cerr << "Error: Configuration must be a valid JSON object." << std::endl;

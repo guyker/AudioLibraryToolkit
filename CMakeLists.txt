@@ -87,6 +87,9 @@ add_subdirectory(FlacConvert)
 
 install(TARGETS AudioLibraryToolkit
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+# The executable finds this template at <bindir>/../share/AudioLibraryToolkit with the default layout.
+install(FILES FlacConvert/config.default.json
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/AudioLibraryToolkit")
 
 install(FILES LICENSE THIRD_PARTY_NOTICES.md
     DESTINATION "${CMAKE_INSTALL_DOCDIR}")

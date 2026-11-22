@@ -84,7 +84,8 @@ add_test(NAME duplicate-comparison
 add_test(NAME run-logging
     COMMAND "$<TARGET_FILE:run_logging_test>")
 add_test(NAME app-settings-config
-    COMMAND "$<TARGET_FILE:app_settings_config_test>")
+    COMMAND "$<TARGET_FILE:app_settings_config_test>"
+        "${PROJECT_SOURCE_DIR}/FlacConvert/config.default.json")
 add_test(NAME config-startup
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/config_startup.py"
         "$<TARGET_FILE:AudioLibraryToolkit>")

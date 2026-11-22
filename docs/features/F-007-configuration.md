@@ -9,7 +9,10 @@ Windows, `$XDG_CONFIG_HOME/AudioLibraryToolkit` (or `~/.config/AudioLibraryToolk
 Startup logs the absolute path and notes that it can be opened and edited. The working, executable and old shared directories
 are not searched. On a first operational run with interactive stdin and stdout, setup asks for an output directory and
 an existing input library, saves absolute paths, then creates the file; without an interactive terminal or when input
-ends before setup is complete, it creates an empty template and exits with editing instructions. Help/version print the
+ends before setup is complete, it creates an empty template and exits with editing instructions. The created file is a
+copy of the commented `config.default.json` shipped beside the executable or in `share/AudioLibraryToolkit`, with
+setup answers filled in; if that template is missing or unusable, a warning is shown and built-in defaults are written
+without comments. Help/version print the
 path without creating a config.
 Existing files are not overwritten by setup. Defaults contain neither an output path nor private libraries; the menu
 requires an output root and an active library. CLI commands use their positional input and need either `OutDirectory`
@@ -20,7 +23,7 @@ a positive value caps concurrent metadata workers per album. `LogLevel` sets the
 both CLI and menu; CLI `--log-level` overrides it without changing console verbosity (F-010).
 `MetadataSidecars` sets the conversion sidecar
 `Format` (`binary`|`json`, default `binary`) and per-target policies `ConvertToFlac` / `ConvertToMp3`
-(`disabled`|`optional`|`required`, default `disabled`); other values fail loading. The sample config uses
+(`disabled`|`optional`|`required`, default `disabled`); other values fail loading. The default template uses
 JSON comments to explain these options. `disabled` never writes a sidecar; `optional` writes by default and can
 be disabled for a run; `required` always writes and rejects disable requests. The menu and CLI apply the same
 built-in defaults and validation to a found file (`AppSettingsJson::LoadWithDefaults`). In `MediaDirectoryList`,
@@ -38,6 +41,7 @@ size limit. Large albums split into track fragments; a track that cannot fit fai
 - `AppSettings.cpp#AppSettingsJson::LoadForCommandLine` (CLI), `AppSettings.cpp#AppSettingsJson::AppSetting` (menu),
   both through `AppSettings.cpp#AppSettingsJson::LoadWithDefaults`
 - `include/AppSettings.h#AppSettingsJson::GetDefaultSettings`, `AppSettings.cpp#AppSettingsJson::CreateInitialConfiguration`,
+  `AppSettings.cpp#AppSettingsJson::FindDefaultConfigTemplate`, `FlacConvert/config.default.json`,
   `include/AppSettings.h#MediaDirectoryElement`
 
 ## Design and knowledge
@@ -51,6 +55,8 @@ size limit. Large albums split into track fragments; a track that cannot fit fai
 - [ ] A library path entered during setup or edited in the config with a trailing separator keeps its folder name as
       the default `mediaName`.
 - [ ] Unattended or interrupted first setup creates an empty editable template and exits non-zero.
+- [ ] First setup copies the commented default template; interactive answers are filled in with comments preserved;
+      a missing or invalid template falls back to built-in defaults with a warning.
 - [ ] The menu rejects an existing config without an output root or active library without changing the file.
 - [ ] A CLI command can use an explicit input and `--output-dir` with a config containing no saved libraries.
 - [ ] Output-producing CLI commands without a configured or explicit output root fail clearly.

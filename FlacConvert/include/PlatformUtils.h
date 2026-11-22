@@ -45,6 +45,8 @@ namespace PlatformUtils {
 	std::string WideToUTF8(const std::wstring& wstr);
 	std::string wstringToUtf8_ver2(const std::wstring& wstr);
 	std::filesystem::path UserConfigDirectory();
+	// Directory of the running executable; empty when the platform cannot report it.
+	std::filesystem::path ExecutableDirectory();
 	bool WriteNewTextFile(const std::filesystem::path& path, std::string_view content,
 		std::error_code& error);
 	bool IsLinkOrReparsePoint(const std::filesystem::path& path);

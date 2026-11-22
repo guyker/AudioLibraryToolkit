@@ -131,6 +131,8 @@ struct AppSettingsJson
 	static constexpr bool isCustomAppConfigPath = true;
 
 	static constexpr const char* DefaultConfigFileName = "config.json";
+	// Commented template copied to the per-user configuration on first run.
+	static constexpr const char* DefaultConfigTemplateFileName = "config.default.json";
 	static constexpr const char* DefaultDatabaseFileName = "all_albums.db";
 
 	//APP Setting properties - START
@@ -168,6 +170,8 @@ struct AppSettingsJson
 
 
 	bool loadFromFile(const std::filesystem::path& filename);
+	// Parses JSON text (comments allowed) over the current values, with the same validation as loadFromFile.
+	bool loadFromJsonText(const std::string& text);
 	void saveToFile(const std::filesystem::path& filename) const;
 	std::string toJsonString() const;
 
@@ -176,7 +180,14 @@ struct AppSettingsJson
 	static std::shared_ptr<AppSettingsJson> LoadForCommandLine(
 		const std::optional<std::filesystem::path>& explicitConfigPath,
 		std::string& errorMessage);
+	// First existing template beside the executable or in the installed data directory.
+	static std::optional<std::filesystem::path> FindDefaultConfigTemplate();
+	// Creates configPath from built-in defaults.
 	static bool CreateInitialConfiguration(const std::filesystem::path& configPath,
+		bool interactive, std::istream& input, std::ostream& output, std::string& errorMessage);
+	// Creates configPath from templatePath when it is a valid template, otherwise from built-in defaults.
+	static bool CreateInitialConfiguration(const std::filesystem::path& configPath,
+		const std::optional<std::filesystem::path>& templatePath,
 		bool interactive, std::istream& input, std::ostream& output, std::string& errorMessage);
 	// Built-in defaults are overlaid by configPath (when not empty) and validated.
 	static std::shared_ptr<AppSettingsJson> LoadWithDefaults(

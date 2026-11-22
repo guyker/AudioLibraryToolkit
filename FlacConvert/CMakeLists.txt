@@ -59,6 +59,12 @@ target_link_libraries(FlacConvertCore
 
 add_executable(AudioLibraryToolkit src/FlacConvertMain.cpp)
 target_link_libraries(AudioLibraryToolkit PRIVATE FlacConvertCore)
+# Stage the first-run configuration template beside the built executable.
+add_custom_command(TARGET AudioLibraryToolkit POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/config.default.json"
+        "$<TARGET_FILE_DIR:AudioLibraryToolkit>/config.default.json"
+    VERBATIM)
 
 foreach(_target IN ITEMS sqlite3 FlacConvertCore AudioLibraryToolkit)
     set_target_properties(${_target} PROPERTIES
