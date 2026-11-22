@@ -1,9 +1,58 @@
 # AudioLibraryToolkit
 
-<h1>A command-line utility written in modern c++ for audiophiles or media organizers to catalog their music library, check its quality, identify redundant copies, and perform basic conversions.</h1>
+AudioLibraryToolkit is a C++ command-line music library manager for Windows and Linux. Find duplicate albums, inspect
+audio integrity, repair FLAC and MP3 metadata, convert audio, and export a searchable SQLite catalog.
 
+**[Build and install](#build)** | **[Quick start](#quick-start)** |
+**[Find duplicate albums](docs/guides/find-duplicate-albums.md)** |
+**[Repair FLAC and MP3 metadata](docs/guides/repair-flac-mp3-metadata.md)** |
+**[Contribute](CONTRIBUTING.md)**
 
-<h2>high-level overview of what the program does:</h2>
+## What can it do?
+
+- **Find duplicate music albums:** compare scanned albums using names, MusicBrainz IDs, FLAC MD5s and track details.
+- **Scan and catalog a music library:** collect tags and audio properties in JSON, optionally check audio integrity,
+  and import the results into SQLite.
+- **Repair FLAC and MP3 metadata:** preview recognized problems and write repaired copies without re-encoding audio.
+- **Convert audio:** create 16-bit / 44.1 kHz FLAC files or convert FLAC to MP3 using FFmpeg.
+
+Scanning and duplicate checking are read-only with respect to the music library. Conversion and repair write to a
+separate output tree; they do not modify source files. The interactive duplicate-review menu can optionally move an
+album after explicit confirmation. Review matches yourself: the tool does not automatically choose which copy to keep.
+
+## Quick start
+
+[Build and install](#build) the application first and add its executable directory to `PATH`, then run
+`AudioLibraryToolkit --help`. On the first operational run in an interactive terminal, setup asks for an output
+directory and an existing music library. See
+[configuration and first run](#configuration-and-first-run) for noninteractive setup and config locations.
+
+These Windows examples use an existing `D:\Music` library and output locations outside it; replace the paths for your
+own system. On Linux, use Linux paths instead.
+
+```text
+AudioLibraryToolkit scan "D:\Music" --output-dir "E:\Catalog"
+AudioLibraryToolkit duplicates "E:\Catalog\Music"
+AudioLibraryToolkit repair "D:\Music" --output-dir "E:\Repaired" --dry-run
+AudioLibraryToolkit convert "D:\Music" --to mp3 --output-dir "E:\Converted"
+```
+
+By default, scanning catalogs FLAC and MP3 without decoding audio; use `scan --tier integrity` for full-decode checks.
+Run `AudioLibraryToolkit` without arguments for the interactive menu. The conversion command requires an FFmpeg
+executable; FLAC-to-MP3 conversion also requires its `libmp3lame` encoder.
+
+For example, comparing two generated copies of a FLAC track produces output like this (excerpt):
+
+```text
+Found 1 duplicate album pair(s) in 1 group(s) (exact 1, strong 0, probable 0, partial 0).
+
+  ## CONFIDENCE: EXACT   scale: [EXACT] > strong > probable; partial (coverage-only)
+    Coverage: 1/1 scanned tracks in [1], 1/1 in [2]; currently readable pairs 1/1.
+    Match methods: flac-md5=1
+    Exact means all paired stored FLAC MD5s matched, NOT byte-identical files or a fresh audio verification.
+```
+
+## Detailed overview
 
 <h3>Configuration Management:</h3>
 1. It reads application settings (output directories, logging levels, scan formats/tiers, conversion sidecar policy, and media library paths) from the per-user config.json.
