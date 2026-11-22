@@ -91,6 +91,23 @@ def add_vorbis_comments(data, comments):
         return prefix + data[audio_offset:]
     raise AssertionError("Fixture has no Vorbis comment block")
 
+def vorbis_comment_payload(vendor, comments):
+    vendor = vendor.encode("utf-8")
+    return (struct.pack("<I", len(vendor)) + vendor + struct.pack("<I", len(comments)) +
+            b"".join(struct.pack("<I", len(comment)) + comment for comment in comments))
+
+
+def replace_vorbis_comment_blocks(data, payloads):
+    metadata, audio_offset = blocks(data)
+    insertion = next((index for index, (kind, _) in enumerate(metadata) if kind == 4), len(metadata))
+    metadata = [(kind, payload) for kind, payload in metadata if kind != 4]
+    metadata[insertion:insertion] = [(4, payload) for payload in payloads]
+    prefix = b"fLaC" + b"".join(
+        bytes([kind | (128 if index == len(metadata) - 1 else 0)]) +
+        len(payload).to_bytes(3, "big") + payload
+        for index, (kind, payload) in enumerate(metadata))
+    return prefix + data[audio_offset:]
+
 
 def parse_vorbis_comments(payload):
     vendor_size = int.from_bytes(payload[:4], "little")
@@ -132,8 +149,9 @@ def id3_frames(data):
     return result
 
 
-def id3v23(frames):
+def id3v23(frames, padding=0):
     body = b"".join(frame_id + struct.pack(">IH", len(data), 0) + data for frame_id, data in frames)
+    body += bytes(padding)
     size = len(body)
     return b"ID3\x03\x00\x00" + bytes((size >> shift) & 127 for shift in (21, 14, 7, 0)) + body
 
@@ -149,9 +167,9 @@ def parse_id3v23(data):
     return frames, end
 
 
-def id3v1(title=b"", artist=b"", album=b""):
+def id3v1(title=b"", artist=b"", album=b"", genre=0xff):
     field = lambda value, size: value.ljust(size, b"\0")
-    return b"TAG" + field(title, 30) + field(artist, 30) + field(album, 30) + bytes(34) + b"\xff"
+    return b"TAG" + field(title, 30) + field(artist, 30) + field(album, 30) + bytes(34) + bytes([genre])
 
 
 class ConversionTests(unittest.TestCase):
@@ -602,9 +620,11 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(self.track.read_bytes(), source_before)
         self.assertEqual(unrelated.read_bytes(), unrelated_before)
         target = self.output / "FIXED" / self.source.name / self.track.name
+        self.assertTrue(target.exists(), result.stdout + result.stderr)
         repaired = target.read_bytes()
-        target_blocks, target_audio_offset = blocks(repaired)
-        self.assertEqual(repaired[target_audio_offset:], audio)
+        _, flac_offset = parse_id3v23(repaired)
+        target_blocks, target_audio_offset = blocks(repaired[flac_offset:])
+        self.assertEqual(repaired[flac_offset + target_audio_offset:], audio)
         self.assertNotIn(bad_seek, [payload for _, payload in target_blocks])
         self.assertIn((1, bytes(len(bad_seek))), target_blocks)
         self.assertNotIn(b"image/jpeg", b"".join(payload for kind, payload in target_blocks
@@ -620,9 +640,10 @@ class ConversionTests(unittest.TestCase):
 
         report = json.loads((target.parent / "repair-report.json").read_text(encoding="utf-8"))
         findings = {(item["source"].replace("\\", "/"), item["rule"], item["status"]) for item in report["findings"]}
-        for rule in ("flac.leading-id3", "flac.trailing-tags", "flac.empty-comments",
+        for rule in ("flac.trailing-tags", "flac.empty-comments",
                      "flac.picture-descriptor", "flac.invalid-seektable"):
             self.assertIn((self.track.name, rule, "repaired"), findings)
+        self.assertIn((self.track.name, "flac.leading-id3", "manual-review"), findings)
         self.assertIn(("review/different.flac", "flac.trailing-tags", "manual-review"), findings)
 
         again = self.repair(target.parent, output=self.work / "second")
@@ -637,7 +658,11 @@ class ConversionTests(unittest.TestCase):
         cases = {
             "total.flac": [(b"TALB", b"\x00Album"), (b"TRCK", b"\x002/13")],
             "artwork.flac": [(b"TALB", b"\x00Album"), (b"APIC", b"\x00image/png\x00\x03\x00" + other_image)],
-            "same.flac": [(b"TALB", b"\x00Album"), (b"APIC", b"\x00image/png\x00\x03\x00" + self.image)],
+            "back-cover.flac": [(b"TALB", b"\x00Album"),
+                                (b"APIC", b"\x00image/png\x00\x04Different\x00" + self.image)],
+            "same.flac": [(b"TALB", b"\x00Album"),
+                          (b"APIC", b"\x00image/png\x00\x03" + "Front \u97f3".encode("utf-8") +
+                           b"\x00" + self.image)],
         }
         self.track.unlink()
         for name, frames in cases.items():
@@ -645,13 +670,87 @@ class ConversionTests(unittest.TestCase):
 
         result = self.repair(self.source, "--rules", "flac.leading-id3")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        report = json.loads((self.output / "FIXED" / self.source.name / "repair-report.json")
+        report_path = self.output / "FIXED" / self.source.name / "repair-report.json"
+        report = json.loads(report_path
                             .read_text(encoding="utf-8"))
         findings = {(item["source"], item["status"]) for item in report["findings"]
                     if item["rule"] == "flac.leading-id3"}
         self.assertEqual(findings, {("total.flac", "manual-review"), ("artwork.flac", "manual-review"),
-                                    ("same.flac", "repaired")})
+                                    ("back-cover.flac", "manual-review"), ("same.flac", "repaired")})
         self.assertEqual((self.output / "FIXED" / self.source.name / "same.flac").read_bytes(), flac)
+        self.assertTrue((self.output / "FIXED" / self.source.name / "back-cover.flac")
+                        .read_bytes().startswith(b"ID3"))
+
+    def test_repair_keeps_conflicting_id3v1_genre_and_preserves_source(self):
+        self.track.unlink()
+        plain = self.work / "plain.mp3"
+        checked(ARGS.ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=duration=1",
+                "-c:a", "libmp3lame", "-id3v2_version", "0", "-map_metadata", "-1", plain)
+        audio = plain.read_bytes()
+        v1 = id3v1(b"Song", genre=17)
+        source = self.source / "song.mp3"
+        source.write_bytes(id3v23([(b"TIT2", b"\x00Song"), (b"TIT2", b"\x00Song"),
+                                   (b"TCON", b"\x00Classical")]) + audio + v1)
+        original = source.read_bytes()
+
+        result = self.repair(self.source, "--rules", "mp3.duplicate-frames,mp3.redundant-id3v1")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        target = self.output / "FIXED" / self.source.name / source.name
+        self.assertTrue(target.read_bytes().endswith(v1))
+        self.assertEqual(source.read_bytes(), original)
+        report = json.loads((target.parent / "repair-report.json").read_text(encoding="utf-8"))
+        self.assertIn(("mp3.redundant-id3v1", "manual-review"),
+                      {(item["rule"], item["status"]) for item in report["findings"]})
+
+    def test_combined_id3_text_and_duplicate_frame_fixes_are_reverified(self):
+        self.track.unlink()
+        plain = self.work / "plain.mp3"
+        checked(ARGS.ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=duration=1",
+                "-c:a", "libmp3lame", "-id3v2_version", "0", "-map_metadata", "-1", plain)
+        audio = plain.read_bytes()
+        frames = [(b"TIT2", b"\x03Song"),
+                  (b"TIT2", b"\x02" + "Song".encode("utf-16-be"))]
+        source = self.source / "song.mp3"
+        original = id3v23(frames, padding=64) + audio
+        source.write_bytes(original)
+
+        result = self.repair(self.source, "--rules", "mp3.text-encoding,mp3.duplicate-frames")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        target = self.output / "FIXED" / self.source.name / source.name
+        repaired = target.read_bytes()
+        output_frames, end = parse_id3v23(repaired)
+        self.assertEqual(output_frames, [(b"TIT2", b"\x01\xff\xfe" + "Song".encode("utf-16-le"))])
+        self.assertEqual(end, len(id3v23(frames, padding=64)))
+        self.assertEqual(repaired[end:], audio)
+        self.assertEqual(source.read_bytes(), original)
+
+    def test_id3_text_encoding_rolls_back_when_tag_growth_would_shift_chapter_offsets(self):
+        self.track.unlink()
+        plain = self.work / "plain.mp3"
+        checked(ARGS.ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=duration=1",
+                "-c:a", "libmp3lame", "-id3v2_version", "0", "-map_metadata", "-1", plain)
+        audio = plain.read_bytes()
+        chapter = b"chapter1\0" + struct.pack(">IIII", 0, 1000, 0, 0)
+        frames = [(b"TIT2", b"\x03A title that expands when encoded as UTF-16"),
+                  (b"CHAP", chapter)]
+        audio_offset = len(id3v23(frames))
+        frames[1] = (b"CHAP", b"chapter1\0" +
+                     struct.pack(">IIII", 0, 1000, audio_offset, audio_offset + len(audio)))
+        original = id3v23(frames) + audio
+        source = self.source / "song.mp3"
+        source.write_bytes(original)
+
+        result = self.repair(self.source, "--rules", "mp3.text-encoding")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(source.read_bytes(), original)
+        report_path = self.output / "FIXED" / self.source.name / "repair-report.json"
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        self.assertIn(("mp3.text-encoding", "manual-review"),
+                      {(item["rule"], item["status"]) for item in report["findings"]},
+                      report["findings"])
+        self.assertIn("preserve audio offsets",
+                      next(item["detail"] for item in report["findings"]
+                           if item["rule"] == "mp3.text-encoding"))
 
     def test_repair_rules_fix_mp3_tags_and_keep_audio_bytes(self):
         audio_path = self.work / "plain.mp3"
@@ -734,11 +833,12 @@ class ConversionTests(unittest.TestCase):
             (b"COMM", b"\x03engmissing-separator"),
         ]
         track = self.source / "song.mp3"
-        track.write_bytes(id3v23(frames) + audio)
+        track.write_bytes(id3v23(frames, padding=128) + audio)
         original = track.read_bytes()
         result = self.repair(self.source, "--rules", "mp3.text-encoding")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         target = self.output / "FIXED" / self.source.name / track.name
+        self.assertTrue(target.exists(), result.stdout + result.stderr)
         repaired = target.read_bytes()
         values, end = parse_id3v23(repaired)
         wide = lambda value: b"\xff\xfe" + value.encode("utf-16-le")
@@ -757,6 +857,7 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(probe["format"]["tags"]["lyrics-words-eng"], "song")
         report = json.loads((target.parent / "repair-report.json").read_text(encoding="utf-8"))
         self.assertEqual({f["status"] for f in report["findings"]}, {"repaired", "manual-review"})
+        self.assertTrue(target.exists(), result.stdout + result.stderr)
 
     def test_repair_preserves_flac_padding_and_audio_position(self):
         toc = "CDTOC=A+96+1234"
@@ -774,6 +875,47 @@ class ConversionTests(unittest.TestCase):
         self.assertGreaterEqual(sum(len(data) for kind, data in after if kind == 1),
                                 sum(len(data) for kind, data in before if kind == 1))
         self.assertEqual(self.track.read_bytes(), original)
+
+    def test_repair_preserves_invalid_empty_comments_and_distinct_vendor_blocks(self):
+        source = self.track
+        malformed = b"BAD\x01="
+        duplicate = b"CDTOC=A"
+        first = vorbis_comment_payload("AFC first", [duplicate, duplicate, malformed])
+        second = vorbis_comment_payload("AFC second", [duplicate, duplicate])
+        original = replace_vorbis_comment_blocks(self.repair_fixture.read_bytes(), [first, second])
+        source.write_bytes(original)
+        same_vendor = self.source / "same-vendor.flac"
+        same_vendor_blocks = [vorbis_comment_payload("AFC same", [duplicate, duplicate, malformed]),
+                              vorbis_comment_payload("AFC same", [duplicate, duplicate, malformed])]
+        same_vendor_original = replace_vorbis_comment_blocks(
+            self.repair_fixture.read_bytes(), same_vendor_blocks)
+        same_vendor.write_bytes(same_vendor_original)
+
+        result = self.repair(self.source, "--rules",
+                             "flac.invalid-comments,flac.empty-comments,flac.duplicate-comments,"
+                             "flac.multiple-comment-blocks")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        target = self.output / "FIXED" / self.source.name / source.name
+        repaired = target.read_bytes()
+        comment_blocks = [payload for kind, payload in blocks(repaired)[0] if kind == 4]
+        self.assertEqual(len(comment_blocks), 2)
+        self.assertEqual([payload[:4 + int.from_bytes(payload[:4], "little")]
+                          for payload in comment_blocks],
+                         [first[:4 + int.from_bytes(first[:4], "little")],
+                          second[:4 + int.from_bytes(second[:4], "little")]])
+        self.assertIn(malformed, comment_blocks[0])
+        self.assertEqual(source.read_bytes(), original)
+        same_vendor_target = target.parent / same_vendor.name
+        same_vendor_repaired = same_vendor_target.read_bytes()
+        same_vendor_comments = [payload for kind, payload in blocks(same_vendor_repaired)[0] if kind == 4]
+        self.assertEqual(len(same_vendor_comments), 2)
+        self.assertTrue(all(malformed in payload for payload in same_vendor_comments))
+        self.assertEqual(same_vendor.read_bytes(), same_vendor_original)
+        report = json.loads((target.parent / "repair-report.json").read_text(encoding="utf-8"))
+        self.assertIn(("flac.invalid-comments", "manual-review"),
+                      {(item["rule"], item["status"]) for item in report["findings"]})
+        self.assertIn(("flac.multiple-comment-blocks", "manual-review"),
+                      {(item["rule"], item["status"]) for item in report["findings"]})
 
     def test_repair_creates_padding_when_flac_metadata_shrinks(self):
         source = add_vorbis_comments(self.repair_fixture.read_bytes(), ["EMPTYTAG="])
@@ -806,6 +948,12 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(report["status"], "dry-run")
         self.assertEqual(len(report["findings"]), 30)
         self.assertTrue(all(f["status"] == "repairable" for f in report["findings"]))
+        self.assertEqual(report["findings"][0]["risk"]["label"], "Compatibility caution")
+        self.assertIn("leavingUnchanged", report["findings"][0]["risk"])
+        self.assertIn("fixing", report["findings"][0]["risk"])
+        self.assertIn("plannedRules", report["files"][0])
+        self.assertNotIn("appliedRules", report["files"][0])
+        self.assertIn("not been installed", report["files"][0]["impact"]["audio"])
         self.assertIn("Repair inspection: 30/30 files (100%)", result.stdout)
         self.assertLess(result.stdout.index("Repair discovery:"), result.stdout.index("Repair inspection:"))
         self.assertNotIn("Repair installation:", result.stdout)
@@ -865,6 +1013,12 @@ class ConversionTests(unittest.TestCase):
         self.assertIn("a.flac</strong> - Failed; repair not verified as installed", summary)
         self.assertIn("b.flac</strong> - Not attempted", summary)
         self.assertNotIn("Installed; audio verified unchanged", summary)
+        report = json.loads((target / "repair-report.json").read_text(encoding="utf-8"))
+        failed_file = next(file for file in report["files"] if file["source"] == "a.flac")
+        self.assertEqual(failed_file["status"], "failed")
+        self.assertIn("plannedRules", failed_file)
+        self.assertNotIn("appliedRules", failed_file)
+        self.assertIn("not verified and installed", failed_file["impact"]["audio"])
         self.assertEqual((self.source / "a.flac").read_bytes(), data)
         self.assertEqual((self.source / "b.flac").read_bytes(), data)
         self.assertRegex(result.stdout, r"Repair installation: 0/2 verified files installed \(0%\).*\[stopped\]")
@@ -923,7 +1077,11 @@ class ConversionTests(unittest.TestCase):
         self.assertIn("flac.duplicate-comments: 1 repairable finding(s)", result.stdout)
         self.assertLess(result.stdout.index("Repair preview:"), result.stdout.index("Repair installation:"))
         self.assertIn("<strong>album &amp; \u97f3</strong>", summary)
-        self.assertIn("track.flac</strong> - Installed; audio verified unchanged | Low metadata risk", summary)
+        self.assertIn("track.flac</strong> - Installed; audio verified unchanged | Compatibility caution", summary)
+        self.assertIn("Findings by issue", summary)
+        self.assertIn("flac.duplicate-comments", summary)
+        self.assertIn("<strong>If left unchanged:</strong>", summary)
+        self.assertIn("<strong>If fixed:</strong>", summary)
         self.assertIn("1 repaired, 3 copied unchanged", summary)
         self.assertFalse(list(self.output.rglob(".afc-convert-*")))
         self.assertFalse((output.parent / self.track.name).exists())
@@ -963,6 +1121,10 @@ class ConversionTests(unittest.TestCase):
         report, = temp.rglob("*.html")
         preview = report.read_text(encoding="utf-8")
         self.assertIn("No repairs have run", preview)
+        self.assertIn("Findings by issue", preview)
+        self.assertEqual(preview.count('data-search-group="issue"'), 1)
+        self.assertIn("<strong>If left unchanged:</strong>", preview)
+        self.assertIn("<strong>If fixed:</strong>", preview)
         self.assertEqual(preview.count("Planned edit |"), 27)
         self.assertIn("track-26.flac</strong> - Planned edit", preview)
         self.assertIn("retaining the first occurrence: CDTOC", preview)
@@ -996,7 +1158,7 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(track.read_bytes(), original)
         summary = (target.parent / "repair-summary.html").read_text(encoding="utf-8")
         self.assertIn("song.mp3</strong> - Installed; audio verified unchanged | Compatibility caution", summary)
-        self.assertIn("Players that only read ID3v1 may no longer show tags.", summary)
+        self.assertIn("Older players that read only ID3v1 may stop showing its fields.", summary)
 
     def test_repair_summary_destination_conflict_preserves_existing_file(self):
         self.track.write_bytes(add_vorbis_comments(
@@ -1014,6 +1176,43 @@ class ConversionTests(unittest.TestCase):
         self.assertIn("reserved report", result.stdout + result.stderr)
         self.assertEqual(summary.read_text(encoding="utf-8"), "existing summary")
         self.assertEqual((self.source / summary.name).read_text(encoding="utf-8"), "source companion")
+
+    @unittest.skipUnless(os.name == "nt", "Windows junction output-redirection guard")
+    def test_repair_rejects_junction_in_nested_output_path(self):
+        album = self.source / "album"
+        album.mkdir()
+        track = album / "track.flac"
+        track.write_bytes(add_vorbis_comments(self.repair_fixture.read_bytes(), ["CDTOC=A", "CDTOC=A"]))
+        redirected = self.work / "redirected-output"
+        redirected.mkdir()
+        sentinel = redirected / "sentinel.txt"
+        sentinel.write_text("untouched", encoding="utf-8")
+        output_album = self.output / "FIXED" / self.source.name / "album"
+        output_album.parent.mkdir(parents=True)
+        result = run(os.environ["ComSpec"], "/c", "mklink", "/J", str(output_album), str(redirected))
+        if result.returncode:
+            self.skipTest("Could not create a directory junction: " + result.stderr)
+
+        repair = self.repair(self.source, "--rules", "flac.duplicate-comments")
+        self.assertNotEqual(repair.returncode, 0, repair.stdout + repair.stderr)
+        self.assertIn("redirected or unverifiable directory component", repair.stdout + repair.stderr)
+        self.assertEqual(sentinel.read_text(encoding="utf-8"), "untouched")
+        self.assertFalse((redirected / "track.flac").exists())
+        self.assertEqual(track.read_bytes(),
+                         add_vorbis_comments(self.repair_fixture.read_bytes(), ["CDTOC=A", "CDTOC=A"]))
+
+    def test_repair_rejects_source_file_links_before_creating_output(self):
+        linked_file = self.source / "linked.flac"
+        try:
+            linked_file.symlink_to(self.repair_fixture)
+        except (OSError, NotImplementedError) as error:
+            self.skipTest("Could not create a file symlink: " + str(error))
+
+        result = self.repair()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("link or reparse point", result.stdout + result.stderr)
+        self.assertIn(str(linked_file), result.stdout + result.stderr)
+        self.assertFalse(self.output.exists())
 
     def test_repair_root_and_subfolder_are_copied_once(self):
         album = self.source / "album"
@@ -1208,6 +1407,18 @@ class ConversionTests(unittest.TestCase):
         self.convert(target="flac", success=False)
         self.assertFalse(self.output.exists())
         self.assertEqual((linked_source / "keep.txt").read_bytes(), b"must not disappear silently")
+
+    def test_mp3_conversion_rejects_source_file_links_before_creating_output(self):
+        linked_file = self.source / "linked.flac"
+        try:
+            linked_file.symlink_to(self.fixture)
+        except (OSError, NotImplementedError) as error:
+            self.skipTest("Could not create a file symlink: " + str(error))
+
+        result = self.convert(success=False, target="mp3")
+        self.assertIn("link or reparse point", result.stdout + result.stderr)
+        self.assertIn(str(linked_file), result.stdout + result.stderr)
+        self.assertFalse(self.output.exists())
 
     @unittest.skipUnless(os.name == "nt", "Windows sharing failure during copied audio")
     def test_flac_unsupported_audio_copy_failure_marks_output_failed(self):

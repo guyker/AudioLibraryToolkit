@@ -32,7 +32,6 @@ namespace DiagnosticCode
     inline constexpr const char* ScanFilesystemFailed = "scan_filesystem_failed";
     inline constexpr const char* ScanFailed = "scan_failed";
     inline constexpr const char* NoAlbumsFound = "no_albums_found";
-    inline constexpr const char* ScanLinkedFolderSkipped = "scan_linked_folder_skipped";
     inline constexpr const char* ScanDepthLimitSkipped = "scan_depth_limit_skipped";
     inline constexpr const char* OutputDirectoryUnavailable = "output_directory_unavailable";
     inline constexpr const char* GeneratedJsonInstallFailed = "generated_json_install_failed";

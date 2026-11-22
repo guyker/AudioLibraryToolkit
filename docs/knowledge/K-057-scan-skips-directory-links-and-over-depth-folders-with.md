@@ -3,7 +3,8 @@ id: K-057
 kind: decision
 title: "Scan skips directory links and over-depth folders with warnings instead of failing"
 area: [FlacConvert]
-status: active
+status: superseded
+superseded_by: K-058
 created: 2026-11-21
 reviewed: 2026-11-21
 cites:

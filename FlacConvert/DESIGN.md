@@ -182,24 +182,30 @@ are either automatically fixable or review-only. Fixes only rewrite metadata: an
 `head + source[audioOffset, audioOffset + audioSize) + tail`, so the audio/frame range is copied byte-for-byte and
 never decoded. A tag is removed only when it is empty, a byte-identical duplicate, or fully redundant with another
 tag; anything else that differs is reported for review rather than guessed. "Redundant" means every mapped value
-exists in the kept tag (track/disc totals included) and every embedded picture's image bytes are present there.
+is present without losing a track/disc total, and every embedded picture matches in type, description and image
+bytes. Numeric ID3v1 genres are not equated with text genres, comment frames with language/descriptors are not
+assumed equivalent, and unknown or read-only APE fields are retained for review.
 
 | Rule | Fix |
 |---|---|
 | `flac.leading-id3`, `flac.trailing-tags` | Remove ID3v2 before `fLaC`, or ID3v1/APE after the frames, when every value is already in the Vorbis comments; otherwise review |
-| `flac.multiple-comment-blocks` | Merge extra VORBIS_COMMENT blocks into the first |
-| `flac.duplicate-comments`, `flac.empty-comments` | Remove exact duplicate (case-insensitive key, identical value) or empty comments; conflicting or semicolon-joined CDTOC is review-only |
+| `flac.multiple-comment-blocks` | Remove an extra VORBIS_COMMENT block only when every comment repeats the first block and both vendor strings match; otherwise review |
+| `flac.duplicate-comments`, `flac.empty-comments` | Remove exact duplicate (case-insensitive key, identical value) or valid empty comments; malformed comments are retained for review, and conflicting or semicolon-joined CDTOC is review-only |
 | `flac.picture-descriptor` | Correct PICTURE MIME from image magic bytes, and width/height/depth/colors from the PNG/JPEG/GIF header (libFLAC conventions); image data unchanged |
 | `flac.invalid-seektable` | Replace an invalid SEEKTABLE with same-size PADDING |
 | `flac.invalid-comments`, `flac.missing-md5` | Review only |
 | `mp3.duplicate-id3v2` | Remove a repeated leading ID3v2 tag when redundant with the first |
-| `mp3.duplicate-frames`, `mp3.empty-frames` | Remove byte-identical repeated or empty ID3v2 text frames |
-| `mp3.text-encoding` | Re-encode ID3v2.3 text, TXXX, COMM and USLT frames using v2.4-only encodings (UTF-16BE/UTF-8) as UTF-16 with BOM; malformed fields are review-only |
+| `mp3.duplicate-frames`, `mp3.empty-frames` | Remove repeated standard text frames only after the other selected edits, and remove empty plain text frames except the tag's only frame; other frame types and flagged frames are retained |
+| `mp3.text-encoding` | Rewrite valid ID3v2.3 text, TXXX, COMM and USLT frames using v2.4-only encodings (UTF-16BE/UTF-8) as UTF-16 with BOM; malformed fields are review-only |
 | `mp3.picture-mime` | Correct APIC MIME from image magic bytes |
 | `mp3.redundant-id3v1`, `mp3.ape-lyrics3` | Remove redundant ID3v1 (opt-in) or APE when every value is in ID3v2; otherwise review; Lyrics3 is review-only |
-| `mp3.stream-garbage` | Review only |
+| `mp3.stream-garbage`, `mp3.unsupported-id3-layout` | Review only |
 
-Rewritten ID3v2 tags keep their original size (padding absorbs shrinkage), so MP3 frame offsets do not move.
+ID3v2 tags with unsupported versions, flags or layouts are reported without modification. Duplicate leading tags are
+not removed when CHAP/CTOC offsets may depend on their positions. Rewritten ID3v2 tags keep their original size
+(padding absorbs shrinkage); when combined edits do not fit, those edits are rolled back for review so MP3 audio and
+absolute chapter offsets do not move. Duplicate-frame checks run after encoding normalization to avoid creating new
+duplicates.
 Existing FLAC padding is retained and expanded, or a new padding block is added when possible, to absorb shrinkage
 of the FLAC metadata section. Unreadable files are reported as `unreadable`.
 Repair preparation announces its source before discovery and reports discovery, inspection and planning progress,
@@ -221,27 +227,39 @@ file in those folders is retained, and unrelated files are copied byte-for-byte.
 unique temporary, then verified (`RepairRules::Verify`) against the plan: exact size, head and tail bytes equal to
 the planned edit, audio range byte-identical to the source, and re-analysis finds no remaining fixable defect. Execute
 re-analyzes each source first and fails if its fixes no longer match the preview. Only verified output is installed;
-sources are never modified. Inspection and verified staging use bounded parallel workers (four by default;
+repair code writes only to the separate output tree; source files are read-only to repair operations. Inspection and
+verified staging use bounded parallel workers (four by default;
 CLI `--jobs` accepts 1–16); installation and report updates are ordered, and after the first failure uninstalled
 staged files are cleaned up. Existing destinations fail unless overwrite is enabled. CLI `--dry-run` prints a complete
 schema-2 JSON report with `status: dry-run` and `plannedRules`, without creating repair output; usual session logs
 still apply. An in-progress marker and
-`repair-report.json` (schema 2) record execution state, enabled rules, findings with rule/count/status, per-file applied
-rules, installation status and audio/metadata impact. After the JSON report is installed, `AudioRepair::Execute`
+``repair-report.json` (schema 2) records execution state, enabled rules, findings with rule/count/status and separate
+risk label, unchanged-risk and fix-risk descriptions. Per-file rules are named `plannedRules` until successfully
+installed, then `appliedRules`; installation status and audio/metadata impact are also recorded. After the JSON report is installed, `AudioRepair::Execute`
 writes an offline `repair-summary.html` from the same execution state, including on partial failure when report
 writing is possible. It groups findings by the source file's containing folder, ranks incomplete and higher-risk
-albums first, and only claims unchanged audio for verified, installed repairs. The HTML preview uses the same risk
-descriptions for planned fixes. Both execution report names are reserved at the output root and follow the normal overwrite
+albums first, and only claims unchanged audio for verified, installed repairs. Both the preview and summary group
+findings by issue first, with album folders as a secondary view; each item gives the proposed or performed change,
+the risk of leaving it unchanged, and the risk of applying the fix. The HTML preview uses the same risk descriptions
+for planned fixes. Both execution report names are reserved at the output root and follow the normal overwrite
 policy. A summary write failure is reported without discarding the JSON report or installed files. The
 CLI returns non-zero when there are findings requiring manual review or when an operation fails.
+
+Repair preparation rejects a source root or any discovered source entry that is a symlink or reparse point,
+including regular-file links. Repair output remains separate from the source; staging uses held directory handles
+and no-follow file creation, then verifies before publication. Output directory chains are revalidated before
+staging, installation and report writes. Windows publication uses the anchored, checked output path and verifies
+the installed file identity. A separate same-permission process deliberately moving directories between checks can
+still race ordinary filesystem operations.
 
 ### Scan to JSON (menu 2, `scan`)
 
 `ScanFolderAndCreateJSON`: discover albums (including files directly under the library root) in batches of
-`AlbumsSplitThreshold` (`AlbumCollection::LoadAlbumsCo`). Discovery does not follow directory symlinks or junctions
-and does not descend below `RecursionDirectorySearchDepth`; each skipped folder is logged, counted in the menu preview
-and recorded as a warning diagnostic (`scan_linked_folder_skipped` / `scan_depth_limit_skipped`, with `affectedPath`)
-in `scan-report.json`, and the scan continues. Discovery then
+`AlbumsSplitThreshold` (`AlbumCollection::LoadAlbumsCo`). Preparation fails if the source root or any discovered
+entry is a symlink or reparse point, including regular-file links; the scan does not follow or silently omit links.
+Discovery also does not descend below `RecursionDirectorySearchDepth`; each depth-limited folder is logged, counted
+in the menu preview and recorded as a `scan_depth_limit_skipped` warning with `affectedPath` in `scan-report.json`.
+Discovery then
 reuses prior records for unchanged `(path, size, full-precision mtime)`
 when `Incremental=true` (unless CLI `--full-rescan` is specified), recompute album-level findings from current tracks,
 read remaining accepted formats from `CatalogExtensions` with `TagLibReader`, then read container chapters through
@@ -408,10 +426,11 @@ database integration fixtures cover the corresponding output paths.
 
 ## Contracts and invariants
 
-- **Sources must never be modified.** Every write target must be outside the source tree; overlap is rejected at
-  plan time and revalidated against the directory actually opened by the shared output anchor. The anchor prevents
-  the output path or its ancestors from being renamed into a source-library link while conversion, repair, scan
-  installation, or catalog publication is active (K-047 fixed).
+- **Sources are read-only to application operations.** Every planned write target must be outside the source tree;
+  overlap and source links are rejected during preparation. Output operations revalidate directories and use
+  anchored or handle-relative I/O as supported by each platform. A separate same-permission process deliberately
+  moving directories between checks remains an unavoidable race; no cross-platform filesystem API provides a
+  transaction against that adversary.
 - **Install only after success.** Output is written to a unique temporary, verified and audited, then moved into place
   (`installFile`: `MoveFileExW` on Windows; rename or hard-link/copy elsewhere). Repair output follows the same
   temporary/verification/install rule. Without overwrite an existing
@@ -427,8 +446,9 @@ database integration fixtures cover the corresponding output paths.
   converted or copied, and each directory outside it is retained. Skipped subtrees (audio, no conversions) are
   omitted entirely and listed in the report. Unsupported filesystem entries or filename collisions fail rather than
   being silently omitted.
-  Regular-file symlinks are read as content, not reproduced as links. Plans are preview-time snapshots, not
-  transactional filesystem snapshots; unrelated existing output files are not deleted.
+  Any source file or directory symlink/reparse point, including links inside a subtree that would otherwise be
+  skipped, fails conversion preparation; links are neither followed nor materialized as file contents. Plans are
+  preview-time snapshots, not transactional filesystem snapshots; unrelated existing output files are not deleted.
 - **External FFmpeg tools are child processes with argument vectors**, never shell commands (K-056).
   Catalog scans and duplicate-report re-probes use TagLib and linked FFmpeg libraries; the ffprobe executable is not
   used for metadata extraction.

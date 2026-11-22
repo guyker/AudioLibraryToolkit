@@ -279,6 +279,11 @@ int FolderConvert::ScanAudioFiles(ScanInfo& scanInfo, const std::filesystem::pat
     // Recursively process all subdirectories within the specified directory
     std::filesystem::directory_iterator directoryIT;
     try {
+        if (PlatformUtils::IsLinkOrReparsePoint(directory)) {
+            spdlog::error("ScanAudioFiles: Source directory is a link or reparse point: {}",
+                CommonUtils::path_to_utf8(directory));
+            return -1;
+        }
         if (!fs::exists(directory) || !fs::is_directory(directory)) {
             spdlog::error("Error: Directory does not exist or is not valid: {}",
                 CommonUtils::path_to_utf8(directory));
@@ -286,6 +291,11 @@ int FolderConvert::ScanAudioFiles(ScanInfo& scanInfo, const std::filesystem::pat
         }
 
         for (const auto& entry : fs::recursive_directory_iterator(directory)) {
+            if (PlatformUtils::IsLinkOrReparsePoint(entry.path())) {
+                spdlog::error("ScanAudioFiles: Source contains a link or reparse point: {}",
+                    CommonUtils::path_to_utf8(entry.path()));
+                return -1;
+            }
             if (entry.is_directory()) {
 				scanInfo.folders_count++;
             }
@@ -336,6 +346,18 @@ int FolderConvert::PrepareConversion(
     plan = {};
     plan.overwrite = overwrite;
     plan.options = options;
+    try {
+        if (PlatformUtils::IsLinkOrReparsePoint(inputDirectory)) {
+            spdlog::error("Conversion source is a link or reparse point: '{}'.",
+                CommonUtils::path_to_utf8(inputDirectory));
+            return -1;
+        }
+    }
+    catch (const fs::filesystem_error& error) {
+        spdlog::error("Cannot inspect conversion source '{}': {}",
+            CommonUtils::path_to_utf8(inputDirectory), error.what());
+        return -1;
+    }
     // Canonical paths are only for safety checks: on Windows they turn mapped drives into
     // UNC paths that may not be reachable, so files are read and written via the given paths.
     std::error_code ec;
@@ -410,6 +432,11 @@ int FolderConvert::PrepareConversion(
             PreparationProgress discovery("Conversion discovery", std::nullopt, "entries", "audio files");
             for (const auto& entry : fs::recursive_directory_iterator(inputRoot)) {
                 discovery.Advance();
+                if (PlatformUtils::IsLinkOrReparsePoint(entry.path())) {
+                    spdlog::error("Conversion source contains a link or reparse point: '{}'.",
+                        CommonUtils::path_to_utf8(entry.path()));
+                    return -1;
+                }
                 if (entry.path().lexically_relative(inputRoot).parent_path().empty()) {
                     const auto name = CommonUtils::path_to_utf8(entry.path().filename());
                     if (JsonUtils::caseInsensitiveEquals(name.c_str(), auditFilename) ||
@@ -423,7 +450,7 @@ int FolderConvert::PrepareConversion(
                         const auto relative = entry.path().lexically_relative(inputRoot);
                         const auto canonicalDirectory = fs::weakly_canonical(entry.path(), ec);
                         const auto expectedDirectory = input / relative;
-                        if (ec || entry.is_symlink() ||
+                        if (ec ||
                             !isSameOrChildPath(canonicalDirectory, expectedDirectory) ||
                             !isSameOrChildPath(expectedDirectory, canonicalDirectory)) {
                             spdlog::error("Directory links cannot be classified or copied: {}",

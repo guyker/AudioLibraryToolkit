@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <set>
 #include <string>
@@ -50,7 +51,8 @@ struct Analysis
 
 // An empty rule set enables every rule. Throws std::runtime_error when the file cannot be parsed.
 Analysis Analyze(const std::filesystem::path& path, const std::set<std::string>& enabled);
-void Write(const std::filesystem::path& source, const std::filesystem::path& target, const Edit& edit);
+using WriteSink = std::function<void(const char*, std::size_t)>;
+void Write(const std::filesystem::path& source, const Edit& edit, const WriteSink& sink);
 // Confirms the output is exactly the planned edit, its audio range is byte-identical to the source and no enabled
 // rule still finds anything to fix.
 bool Verify(const std::filesystem::path& source, const std::filesystem::path& output, const Edit& edit,

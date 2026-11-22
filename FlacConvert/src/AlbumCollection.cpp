@@ -335,6 +335,10 @@ CommonUtils::Generator<MediaAlbumListPtr> AlbumCollection::LoadAlbumsCo(std::fil
 
     std::chrono::steady_clock::time_point startTimePoint = std::chrono::steady_clock::now();
     spdlog::debug("===Loading album collection from storage===");
+    if (PlatformUtils::IsLinkOrReparsePoint(albumCollectionDirPath)) {
+        throw fs::filesystem_error("Source library is a link or reparse point; scan stopped.",
+            albumCollectionDirPath, std::make_error_code(std::errc::too_many_symbolic_link_levels));
+    }
 
     // Map to collect tracks per folder
     std::map<fs::path, TrackInfoList> albumMap;
@@ -350,14 +354,12 @@ CommonUtils::Generator<MediaAlbumListPtr> AlbumCollection::LoadAlbumsCo(std::fil
             it != fs::recursive_directory_iterator(); ++it) {
             const auto& entry = *it;
             discovery.Advance();
-            if (!entry.is_directory()) {
-                continue;
-            }
-            // Directory symlinks and junctions may lead outside the library; only real directories are scanned.
-            if (entry.symlink_status().type() != fs::file_type::directory) {
-                spdlog::warn("Skipping linked folder: '{}'.", CommonUtils::path_to_utf8(entry.path()));
-                if (counts) counts->skippedLinkedFolders.push_back(entry.path());
+            if (PlatformUtils::IsLinkOrReparsePoint(entry.path())) {
                 it.disable_recursion_pending();
+                throw fs::filesystem_error("Source library contains a link or reparse point; scan stopped.",
+                    entry.path(), std::make_error_code(std::errc::too_many_symbolic_link_levels));
+            }
+            if (!entry.is_directory()) {
                 continue;
             }
             // Library-root children have depth 1; deeper folders are neither cataloged nor traversed.

@@ -619,6 +619,25 @@ bool ScopedCurrentDirectory::Restore()
     }
 #endif
 
+    bool IsLinkOrReparsePoint(const std::filesystem::path& path)
+    {
+#ifdef _WIN32
+        const DWORD attributes = GetFileAttributesW(WindowsLongPath(path).c_str());
+        if (attributes == INVALID_FILE_ATTRIBUTES) {
+            throw std::filesystem::filesystem_error("Cannot inspect path for links", path,
+                std::error_code(static_cast<int>(GetLastError()), std::system_category()));
+        }
+        return (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+#else
+        std::error_code error;
+        const auto status = std::filesystem::symlink_status(path, error);
+        if (error) {
+            throw std::filesystem::filesystem_error("Cannot inspect path for links", path, error);
+        }
+        return std::filesystem::is_symlink(status);
+#endif
+    }
+
     std::string wstringToUtf8_ver2(const std::wstring& wstr) {
 #ifdef _WIN32
         if (wstr.empty()) return {};

@@ -35,7 +35,7 @@ check (F-003).
 ## Design and knowledge
 - DESIGN: `FlacConvert/DESIGN.md` → Key flows / Conversion; Contracts and invariants
 - K-041 install after success, K-048 codec-aware AAC quality gate, K-056 FFmpeg argument vector, K-038 sidecar policy,
-  K-032 configured vs canonical paths, K-026/K-031 output tree layout, K-036 complete folders, skipped unchanged folders
+  K-032 configured vs canonical paths, K-026/K-031 output tree layout, K-036 complete folders, K-058 source link rejection
 
 ## Acceptance checks
 - [ ] Source tree byte-identical before and after (hash all files).
@@ -56,14 +56,15 @@ check (F-003).
 - [ ] A folder with audio but no conversions is absent from output and listed once (topmost) with its counts.
 - [ ] Libraries without conversions write only the report (listing `"."`) without launching the encoder.
 - [ ] Copy failure retains the failure marker/report and reports unattempted copies as not installed.
-- [ ] File/directory collisions and directory links fail before any output is written.
+- [ ] Any source file or directory symlink/reparse point fails during preparation before output is written.
 - [ ] Explicit `--overwrite` writes a formerly skipped folder completely once it gains a conversion.
 
 ## Known limitations
 - Sequential; stops at the first error, earlier outputs remain (K-024).
 - Lossy sources (`.m4a` AAC) are re-encoded to FLAC without quality gain; the source-rate gate still applies.
 - Skipping is per folder subtree: an MP3-only `CD2` beside a converted `CD1` is skipped and only listed.
-- Directory links/junctions, broken links and special filesystem entries fail explicitly. Regular-file links are
-  materialized as file contents; this is not a link/attribute-preserving filesystem backup.
+- Source file and directory symlinks/junctions, broken links and other reparse points fail explicitly, including
+  inside subtrees that would otherwise be skipped. Links are neither followed nor materialized as file contents;
+  this is not a link/attribute-preserving filesystem backup.
 - Plans describe discovery-time source contents. Existing unrelated output files are retained, not synchronized away.
 - Linux builds are not verified until the Ubuntu CI workflow passes; macOS has no build preset yet.

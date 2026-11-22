@@ -21,7 +21,8 @@ its own path preview and exact `MOVE` confirmation (F-005). Enter continues the 
 Before the option 2 preview, a per-run YES/NO prompt selects byte-exact FLAC metadata archives; Enter keeps the
 configured default (normally NO), and BACK/EXIT/EOF cancels before the scan. The preview shows the selected policy
 and warns that prior manifest-owned archives are retired after success (F-004). The preview also counts folders that
-will be skipped as directory links or beyond `RecursionDirectorySearchDepth`; the completion summary counts installed
+will be skipped beyond `RecursionDirectorySearchDepth`; a source symlink or reparse point instead fails preflight
+with its path before a scan starts. The completion summary counts installed
 JSON batch files (fragmented albums can produce more than one file per album).
 An exception is a scan preview preflight or discovery failure: it attempts to write a diagnostic report to a safe
 system temporary directory and logs its location; it does not install a catalog.

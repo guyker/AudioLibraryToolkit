@@ -4,11 +4,11 @@ Status: active
 
 ## Behaviour
 Discovers album folders under a library, including audio files directly under the library root, and reads the
-case-insensitively matched extensions in `CatalogExtensions` (default `.flac` and `.mp3`) with TagLib. Discovery does
-not follow directory symlinks or junctions (which may lead outside the library) and does not catalog or descend into
-folders deeper than `RecursionDirectorySearchDepth` below the library root. Each skipped folder is logged, counted in
-the menu option 2 preview and recorded in `scan-report.json` as a warning (`scan_linked_folder_skipped` or
-`scan_depth_limit_skipped`, with its `affectedPath`); the scan continues. M4A/MP4,
+case-insensitively matched extensions in `CatalogExtensions` (default `.flac` and `.mp3`) with TagLib. Preparation
+fails if the library root or any discovered source entry is a symlink or reparse point, including regular-file links;
+links are not followed or cataloged as their targets. Folders deeper than `RecursionDirectorySearchDepth` below the
+library root are not cataloged or traversed; each depth-limited folder is logged, counted in the menu option 2 preview
+and recorded in `scan-report.json` as a `scan_depth_limit_skipped` warning with its `affectedPath`. M4A/MP4,
 Ogg/Opus, WavPack/APE, WAV and AIFF can be enabled explicitly for TagLib property extraction. Each track uses catalog schema v2:
 technical properties, normalized tag arrays, raw scoped tag entries, and explicit support and analysis status. FLAC
 and MP3 also expose picture descriptors; chapter boundaries and tags are read through the linked FFmpeg libraries. The contract is
@@ -72,7 +72,7 @@ then reassemble fragment sets before use.
 - Manifest schema: `docs/schemas/scan-manifest-v1.schema.json`
 - Scan report schema: `docs/schemas/scan-report-v2.schema.json` (version 1 remains available for older reports)
 - K-051 manifest-owned scan output replacement; K-053 opt-in FLAC scan archives; K-035 fail scans before installing incomplete metadata;
-  K-057 skipped directory links and over-depth folders
+  K-058 source symlink/reparse-point rejection
 
 ## Acceptance checks
 - [ ] Output JSON validates against the v2 schema and contains one object per album with non-empty `Tracks`.
@@ -88,7 +88,8 @@ then reassemble fragment sets before use.
 - [ ] Different album-level tags among tracks in one directory produce findings without choosing an authoritative value.
 - [ ] Generated duplicate/gapped track-number fixtures and declared-total mismatches produce album findings without dropping tracks.
 - [ ] Audio files directly under the library root are included.
-- [ ] Folders beyond `RecursionDirectorySearchDepth`, and their descendants, are not cataloged; directory links/junctions are not followed; both are reported as warning diagnostics with their path.
+- [ ] Folders beyond `RecursionDirectorySearchDepth`, and their descendants, are not cataloged and are reported as warning diagnostics with their path.
+- [ ] A source file or directory symlink/reparse point fails the scan before catalog installation; it is not followed or silently skipped.
 - [ ] Control characters in tag names/values round-trip through generated JSON.
 - [ ] Missing optional values remain absent; catalog-tier integrity and analysis statuses are `not_run`.
 - [ ] Integrity scans report decode status, decoded samples, and file/PCM SHA-256; decode failures retain a failure position when available.

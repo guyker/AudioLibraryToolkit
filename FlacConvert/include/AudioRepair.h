@@ -27,7 +27,8 @@ struct FindingImpact
     enum class Risk { Low, Compatibility, Review };
     Risk risk;
     std::string_view label;
-    std::string_view detail;
+    std::string_view unchangedDetail;
+    std::string_view fixDetail;
 };
 
 FindingImpact DescribeFindingImpact(const Finding& finding);

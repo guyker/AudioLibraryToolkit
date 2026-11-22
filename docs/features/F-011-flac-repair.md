@@ -4,25 +4,33 @@ Status: active
 
 ## Behaviour
 The `repair` command and menu option 7 inspect `.flac` and `.mp3` files against a catalog of metadata rules (see
-DESIGN → Metadata repair). Fixable defects include redundant ID3/APE/Lyrics3 tags, duplicate or empty tags/frames,
-multiple FLAC comment blocks, wrong picture MIME types or FLAC picture dimensions/depth, invalid FLAC seek tables and ID3v2.3 frames using
-v2.4-only text encodings. Tags are removed only when empty, exact duplicates, or fully redundant; conflicting values
-(including conflicting or semicolon-joined CDTOC), invalid comments, missing FLAC MD5, MP3 stream garbage and
-unreadable files are reported for manual review. `--rules <id,...>` limits the CLI to selected rules.
+DESIGN → Metadata repair). Fixable defects include redundant ID3/APE tags, duplicate or empty tags/frames,
+fully redundant extra FLAC comment blocks, wrong picture MIME types or FLAC picture dimensions/depth, invalid FLAC seek tables and ID3v2.3 frames using
+v2.4-only text encodings. Lyrics3 tags are reported, not removed. Tags are removed only when empty, exact duplicates,
+or fully redundant; conflicting values
+(including conflicting or semicolon-joined CDTOC), invalid comments, missing FLAC MD5, MP3 stream garbage,
+unsupported ID3 layouts and unreadable files are reported for manual review. `--rules <id,...>` limits the CLI to selected rules.
 MP3 ID3v1 tags are kept by default for older players; remove redundant ones only with `--remove-id3v1`,
 an explicit `--rules mp3.redundant-id3v1` selection, or the menu's per-run opt-in. Existing FLAC padding is
 preserved and metadata shrinkage is absorbed into padding when possible.
 
-Sources are never modified and audio bytes are copied unchanged, never decoded or re-encoded. Repaired files are written to
+Repair code writes only to a separate destination tree; source files are read-only and audio bytes are copied unchanged,
+never decoded or re-encoded. Repaired files are written to
 `<output-root>/FIXED/<library-name>` (`--output-dir`, else `OutDirectory` for the CLI); only folders with a repair are
 copied, retaining all other files unchanged. In menu option 7, repair outputs of different active libraries may not
-overlap each other or another library's source; the run fails before installing anything.
-`repair-report.json` records findings, file installation status, and whether audio or metadata changed.
-Open the printed `repair-summary.html` path to filter by album folder, track or repair. Expand a folder to see
-changes and rule-specific cautions. The report distinguishes verified installed repairs from failures, repairs not
+overlap each other or another library's source; the run fails before installing anything. Existing nested output
+symlinks/junctions that redirect destinations are rejected and checked again before staging and installation. The
+source root and every discovered source entry must also be free of symlinks and reparse points, including
+regular-file links; a link fails preparation rather than being followed or copied.
+`repair-report.json` records findings, risk labels, separate unchanged/fix risk descriptions, file installation status,
+and whether audio or metadata changed. It marks rules as planned until successfully installed, then as applied.
+Open the printed `repair-summary.html` path to filter by issue, album folder, track or repair. Findings are grouped
+by issue first and album folder second. Expand a group to see the exact changes plus separate risks of leaving each
+finding unchanged and applying its fix. The report distinguishes verified installed repairs from failures, repairs not
 attempted and findings left for review; audio byte verification does not imply equal player compatibility.
 Before `RUN`, option 7 shows only finding statistics in the console and saves a searchable HTML preview per library
-outside the source libraries. It includes every finding, with proposed edits, reasons and risk labels. Cancellation
+outside the source libraries. It includes every finding, with proposed edits, reasons and separate unchanged/fix
+risks. Cancellation
 keeps the preview without creating repair output. Existing
 destinations are rejected unless `--overwrite` is specified. The CLI returns non-zero for manual-review findings or
 operation failures.
@@ -46,8 +54,11 @@ of terminal control sequences. Phase boundaries are retained in the session log 
 
 ## Acceptance checks
 - [ ] Identical duplicate CDTOC comments are reduced to one in the output; source bytes remain unchanged.
-- [ ] FLAC leading/trailing ID3, empty comments, picture MIME/width/height/depth and invalid seek table are fixed; audio bytes unchanged.
+- [ ] Fully redundant FLAC leading/trailing tags, valid empty comments, picture MIME/width/height/depth and invalid seek table are fixed; audio bytes unchanged; differing tag values are retained.
+- [ ] Invalid FLAC comments are retained for review; a redundant comment block with a different vendor string is not removed.
 - [ ] MP3 duplicate/empty frames, v2.3 text, custom-text, comment and lyrics encodings, and APIC MIME are fixed; audio bytes unchanged.
+- [ ] Conflicting ID3v1 genres and artwork with a different picture role/description are retained; artwork is redundant only when type, description and bytes match.
+- [ ] Combined ID3 text normalization and duplicate-frame removal do not create new duplicates; tag size and chapter offsets remain unchanged, or edits that do not fit are deferred for review.
 - [ ] MP3 ID3v1 stays by default and is removed only when redundant and explicitly selected.
 - [ ] FLAC padding remains available; metadata shrinkage preserves the audio offset where padding can absorb it.
 - [ ] Dry-run prints every finding without creating repair output, and parallel and single-worker runs agree.
@@ -59,6 +70,8 @@ of terminal control sequences. Phase boundaries are retained in the session log 
       console. Cancelling leaves sources and `FIXED` untouched, and an unsafe temporary location blocks repair.
 - [ ] The HTML summary groups track findings by folder, shows compatibility cautions and never claims a failed or
       unattempted repair was verified and installed.
+- [ ] Preview and post-repair reports group findings by issue, show exact changes and separate risks for leaving or fixing each finding; JSON distinguishes planned rules from successfully applied rules.
+- [ ] Any source file/directory symlink or reparse point fails preparation; nested output links are rejected before writes.
 - [ ] Existing output is rejected by default; `--overwrite` allows eligible destinations to be replaced.
 - [ ] Preparation displays progress before confirmation without writing repair output; cancellation keeps sources unchanged.
 - [ ] Installation progress advances only after verification/installation and stops short of 100% on failure.
@@ -66,3 +79,6 @@ of terminal control sequences. Phase boundaries are retained in the session log 
 ## Known limitations
 - Only FLAC and MP3 are supported; only the first leading ID3v2 tag of an MP3 is rewritten.
 - Different values are never reconciled automatically; audio-stream problems (missing MD5, MP3 garbage) are report-only.
+- Output staging uses held directory handles and no-follow file operations where supported; output paths are revalidated
+  during preparation, staging, installation and reporting. A separate same-permission process deliberately moving
+  directories between checks can still race ordinary filesystem operations.

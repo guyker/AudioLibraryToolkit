@@ -1776,9 +1776,8 @@ int ScanFolderAndCreateJSON(std::vector<MediaDirectoryElement> mediaDirectoryLis
                 << "  Diagnostics: " << pathToUtf8(target / "scan-report.json") << '\n'
                 << "  Albums: " << albumCount << "; tracks: " << tracks
                 << "; metadata batches: " << batches.size() << '\n'
-                << "  Skipped folders: " << discovered.skippedLinkedFolders.size()
-                << " directory link(s); " << discovered.skippedDepthFolders.size()
-                << " beyond RecursionDirectorySearchDepth\n"
+                << "  Folders beyond RecursionDirectorySearchDepth: "
+                << discovered.skippedDepthFolders.size() << '\n'
                 << "  JSON output count is determined during serialization.\n"
                 << "  Existing generated JSON files to replace: " << previous << '\n'
                 << "  Byte-exact FLAC metadata archives: "
@@ -1842,6 +1841,20 @@ int ScanFolderAndCreateJSON(std::vector<MediaDirectoryElement> mediaDirectoryLis
         if (ec || !fs::is_directory(canonicalLibrary, ec) || ec) {
             spdlog::error("Library path is not a readable directory: {}", pathToUtf8(libraryPath));
             preflightFailure("Library path is not a readable directory.", libraryPath, ec);
+            return 1;
+        }
+        try {
+            if (PlatformUtils::IsLinkOrReparsePoint(libraryPath)) {
+                const auto linkError = std::make_error_code(std::errc::too_many_symbolic_link_levels);
+                spdlog::error("Source library is a link or reparse point: '{}'.", pathToUtf8(libraryPath));
+                preflightFailure("Source library is a link or reparse point; scan stopped.",
+                    libraryPath, linkError);
+                return 1;
+            }
+        }
+        catch (const fs::filesystem_error& error) {
+            spdlog::error("Cannot inspect source library link status: {}", error.what());
+            preflightFailure(error.what(), libraryPath, error.code());
             return 1;
         }
         const fs::path canonicalTarget = fs::weakly_canonical(targetDirectory, ec);
@@ -2086,8 +2099,6 @@ int ScanFolderAndCreateJSON(std::vector<MediaDirectoryElement> mediaDirectoryLis
                 }
             };
             if (preview) {
-                scanReport.discovery.skippedLinkedFolders =
-                    std::move(preparedDiscovery[libraryIndex].skippedLinkedFolders);
                 scanReport.discovery.skippedDepthFolders =
                     std::move(preparedDiscovery[libraryIndex].skippedDepthFolders);
                 for (const auto& albums : preparedAlbums[libraryIndex]) {
@@ -2137,14 +2148,6 @@ int ScanFolderAndCreateJSON(std::vector<MediaDirectoryElement> mediaDirectoryLis
             writeFailureReport(nullptr);
             cleanupStaging();
             return 1;
-        }
-        for (const auto& folder : scanReport.discovery.skippedLinkedFolders) {
-            scanReport.diagnostics.push_back({
-                std::nullopt, std::nullopt,
-                { "discovery", "filesystem", DiagnosticCode::ScanLinkedFolderSkipped, DiagnosticSeverity::Warning,
-                    "Directory link or junction was not followed; its contents were not scanned." },
-                pathToUtf8(folder)
-            });
         }
         for (const auto& folder : scanReport.discovery.skippedDepthFolders) {
             scanReport.diagnostics.push_back({

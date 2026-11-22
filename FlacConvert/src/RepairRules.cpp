@@ -45,6 +45,8 @@ const std::vector<RuleInfo> kCatalog{
     { "mp3.ape-lyrics3", "mp3", true,
         "APEv2 tag removed when redundant with ID3v2; other APEv2 and Lyrics3 tags are reported." },
     { "mp3.stream-garbage", "mp3", false, "Non-audio bytes before the first MPEG frame are reported." },
+    { "mp3.unsupported-id3-layout", "mp3", false,
+        "ID3v2 tags with unsupported versions, flags or layouts are reported without modification." },
 };
 
 struct Reader
@@ -424,9 +426,18 @@ struct TagValue
 
 struct TagValues
 {
+    struct Artwork
+    {
+        std::uint32_t type{ 0 };
+        Bytes description;
+        Bytes data;
+
+        bool operator==(const Artwork&) const = default;
+    };
+
     std::vector<TagValue> values;
     std::set<std::string> unmapped;
-    std::vector<Bytes> images;
+    std::vector<Artwork> images;
     bool anyGenre{ false };
 };
 
@@ -443,17 +454,9 @@ std::optional<long> leadingNumber(const std::string& value)
 
 bool valueMatches(const TagValue& candidate, const std::string& target)
 {
-    const auto left = trim(candidate.value);
-    const auto right = trim(target);
-    if (candidate.key == "track" || candidate.key == "disc") {
-        const auto a = leadingNumber(left);
-        const auto b = leadingNumber(right);
-        return a && b && *a == *b;
-    }
-    if (candidate.key == "date" && left.size() == 4) return right.rfind(left, 0) == 0;
-    if (candidate.key == "genre") return lower(left) == lower(right);
-    if (left == right) return true;
-    return candidate.truncated && !left.empty() && right.rfind(left, 0) == 0;
+    if (candidate.value == target) return true;
+    return candidate.truncated && !candidate.value.empty() &&
+        target.rfind(candidate.value, 0) == 0;
 }
 
 std::optional<long> totalNumber(const std::string& value)
@@ -468,16 +471,12 @@ std::string firstDifference(const TagValues& candidate, const TagValues& target)
     if (!candidate.unmapped.empty()) return "fields without an equivalent: " + joined(candidate.unmapped);
     for (const auto& image : candidate.images) {
         if (std::find(target.images.begin(), target.images.end(), image) == target.images.end()) {
-            return "embedded picture is not present in the target tag";
+            return "embedded picture type, description or image data differs";
         }
     }
-    const auto hasKey = [&](const std::string& key) {
-        return std::any_of(target.values.begin(), target.values.end(),
-            [&](const TagValue& item) { return item.key == key && !trim(item.value).empty(); });
-    };
-    if (candidate.anyGenre && !hasKey("genre")) return "genre is not present in the target tag";
+    if (candidate.anyGenre) return "ID3v1 numeric genre cannot be proven equivalent to a text genre";
     for (const auto& value : candidate.values) {
-        if (trim(value.value).empty()) continue;
+        if (value.value.empty()) continue;
         bool found = std::any_of(target.values.begin(), target.values.end(),
             [&](const TagValue& item) { return item.key == value.key && valueMatches(value, item.value); });
         // "2/12" also carries the total; it must survive as "n/12" or a TRACKTOTAL/DISCTOTAL field.
@@ -519,6 +518,7 @@ struct Id3Tag
 {
     std::uint8_t major{ 0 };
     bool parsed{ false };
+    bool hasChapterOffsets{ false };
     std::size_t bodySize{ 0 };
     std::vector<Id3Frame> frames;
 };
@@ -547,6 +547,8 @@ Id3Tag parseId3(const Bytes& bytes)
         tag.frames.push_back({ std::move(id), flags,
             Bytes(bytes.begin() + static_cast<std::ptrdiff_t>(offset + 10),
                 bytes.begin() + static_cast<std::ptrdiff_t>(offset + 10 + size)) });
+        tag.hasChapterOffsets = tag.hasChapterOffsets ||
+            tag.frames.back().id == "CHAP" || tag.frames.back().id == "CTOC";
         offset += 10 + size;
     }
     if (std::any_of(bytes.begin() + static_cast<std::ptrdiff_t>(offset), bytes.end(),
@@ -557,7 +559,7 @@ Id3Tag parseId3(const Bytes& bytes)
     return tag;
 }
 
-Bytes serializeId3(const Id3Tag& tag)
+std::optional<Bytes> serializeId3(const Id3Tag& tag)
 {
     Bytes body;
     for (const auto& frame : tag.frames) {
@@ -569,8 +571,9 @@ Bytes serializeId3(const Id3Tag& tag)
         body.push_back(static_cast<std::uint8_t>(frame.flags));
         body.insert(body.end(), frame.data.begin(), frame.data.end());
     }
-    // Keep the original tag size when the frames shrink so the audio does not move.
-    if (body.size() < tag.bodySize) body.resize(tag.bodySize, 0);
+    // Keep the original tag size so absolute chapter offsets and the audio position remain valid.
+    if (body.size() > tag.bodySize) return std::nullopt;
+    body.resize(tag.bodySize, 0);
     Bytes result{ 'I', 'D', '3', tag.major, 0, 0 };
     appendSynchsafe(result, static_cast<std::uint32_t>(body.size()));
     result.insert(result.end(), body.begin(), body.end());
@@ -579,7 +582,8 @@ Bytes serializeId3(const Id3Tag& tag)
 
 bool plainFrame(const Id3Tag& tag, const Id3Frame& frame)
 {
-    return (frame.flags & (tag.major == 3 ? 0x00e0 : 0x004f)) == 0;
+    (void)tag;
+    return frame.flags == 0;
 }
 
 bool textFrame(const Id3Frame& frame)
@@ -590,6 +594,8 @@ bool textFrame(const Id3Frame& frame)
 struct ApicLayout
 {
     std::size_t mimeEnd{ 0 };
+    std::uint32_t type{ 0 };
+    Bytes description;
     std::optional<std::size_t> image;
 };
 
@@ -599,11 +605,15 @@ std::optional<ApicLayout> apicLayout(const Bytes& data)
     if (data.empty() || data[0] > 3) return std::nullopt;
     const auto end = std::find(data.begin() + 1, data.end(), 0);
     if (end == data.end() || data.end() - end < 2) return std::nullopt;
-    ApicLayout layout{ static_cast<std::size_t>(end - data.begin()), std::nullopt };
+    ApicLayout layout;
+    layout.mimeEnd = static_cast<std::size_t>(end - data.begin());
+    layout.type = data[layout.mimeEnd + 1];
     const bool wide = data[0] == 1 || data[0] == 2;
     for (auto offset = layout.mimeEnd + 2; offset + (wide ? 1 : 0) < data.size(); offset += wide ? 2 : 1) {
         if (data[offset] == 0 && (!wide || data[offset + 1] == 0)) {
             layout.image = offset + (wide ? 2 : 1);
+            layout.description.assign(data.begin() + static_cast<std::ptrdiff_t>(layout.mimeEnd + 2),
+                data.begin() + static_cast<std::ptrdiff_t>(offset));
             break;
         }
     }
@@ -621,8 +631,8 @@ TagValues id3Values(const Id3Tag& tag)
         if (frame.id == "APIC") {
             const auto layout = plainFrame(tag, frame) ? apicLayout(frame.data) : std::nullopt;
             if (!layout || !layout->image) result.unmapped.insert(frame.id);
-            else result.images.emplace_back(frame.data.begin() + static_cast<std::ptrdiff_t>(*layout->image),
-                frame.data.end());
+            else result.images.push_back({ layout->type, layout->description,
+                Bytes(frame.data.begin() + static_cast<std::ptrdiff_t>(*layout->image), frame.data.end()) });
             continue;
         }
         const auto mapped = keys.find(frame.id);
@@ -631,16 +641,7 @@ TagValues id3Values(const Id3Tag& tag)
             continue;
         }
         if (frame.id == "COMM") {
-            if (frame.data.size() < 4) {
-                result.unmapped.insert(frame.id);
-                continue;
-            }
-            const auto strings = id3Strings(frame.data[0], frame.data.data() + 4, frame.data.size() - 4);
-            if (!strings || strings->size() < 2 || !(*strings)[0].empty()) {
-                result.unmapped.insert(frame.id);
-                continue;
-            }
-            result.values.push_back({ "comment", (*strings)[1] });
+            result.unmapped.insert(frame.id);
             continue;
         }
         const auto strings = id3Strings(frame.data[0], frame.data.data() + 1, frame.data.size() - 1);
@@ -716,7 +717,7 @@ TagValues id3v1Values(const Bytes& tag)
         const auto begin = tag.begin() + static_cast<std::ptrdiff_t>(offset);
         const auto stop = std::find(begin, begin + static_cast<std::ptrdiff_t>(size), 0);
         const bool full = stop == begin + static_cast<std::ptrdiff_t>(size);
-        auto value = trim(latin1(&*begin, static_cast<std::size_t>(stop - begin)));
+        auto value = latin1(&*begin, static_cast<std::size_t>(stop - begin));
         if (!value.empty()) result.values.push_back({ key, std::move(value), full });
     };
     field("title", 3, 30);
@@ -758,7 +759,8 @@ std::optional<TagValues> apeValues(const Bytes& tag)
         offset = static_cast<std::size_t>(keyEnd - tag.begin()) + 1;
         if (valueSize > footer - offset) return std::nullopt;
         const auto mapped = keys.find(lower(key));
-        if (mapped == keys.end() || ((flags >> 1) & 3) != 0 || !validUtf8(tag.data() + offset, valueSize)) {
+        if (mapped == keys.end() || ((flags >> 1) & 3) != 0 || (flags & 1) != 0 ||
+            !validUtf8(tag.data() + offset, valueSize)) {
             result.unmapped.insert(printable(key));
         }
         else {
@@ -858,7 +860,9 @@ bool validCommentKey(const std::string& key)
 
 struct Picture
 {
+    std::uint32_t type{ 0 };
     std::string mime;
+    Bytes description;
     std::size_t mimeEnd{ 0 };
     std::size_t descriptorOffset{ 0 };
     std::size_t dataOffset{ 0 };
@@ -870,12 +874,15 @@ std::optional<Picture> parsePicture(const Bytes& data)
     const std::size_t mimeSize = be32(data, 4);
     if (mimeSize > data.size() - 8) return std::nullopt;
     Picture picture;
+    picture.type = be32(data, 0);
     picture.mime.assign(data.begin() + 8, data.begin() + 8 + static_cast<std::ptrdiff_t>(mimeSize));
     picture.mimeEnd = 8 + mimeSize;
     if (data.size() - picture.mimeEnd < 4) return std::nullopt;
     const std::size_t descriptionSize = be32(data, picture.mimeEnd);
     const std::size_t fields = picture.mimeEnd + 4;
     if (descriptionSize > data.size() - fields || data.size() - fields - descriptionSize < 20) return std::nullopt;
+    picture.description.assign(data.begin() + static_cast<std::ptrdiff_t>(fields),
+        data.begin() + static_cast<std::ptrdiff_t>(fields + descriptionSize));
     const std::size_t lengthOffset = fields + descriptionSize + 16;
     const std::size_t length = be32(data, lengthOffset);
     picture.descriptorOffset = fields + descriptionSize;
@@ -997,12 +1004,15 @@ Analysis analyzeFlac(Reader& reader, const std::set<std::string>& enabled)
             const auto key = commentKey(entry);
             const auto value = commentValue(entry);
             if (!key || !validCommentKey(*key) || !validUtf8(value.data(), value.size())) ++invalid;
+            const bool validEntry = key && validCommentKey(*key) && validUtf8(value.data(), value.size());
             if (key && !key->empty() && value.empty() && context.On("flac.empty-comments")) {
-                ++empties;
-                emptyKeys.insert(upper(printable(*key)));
-                continue;
+                if (validEntry) {
+                    ++empties;
+                    emptyKeys.insert(upper(printable(*key)));
+                    continue;
+                }
             }
-            if (key && context.On("flac.duplicate-comments") && !(cdtocReview && lower(*key) == "cdtoc") &&
+            if (validEntry && context.On("flac.duplicate-comments") && !(cdtocReview && lower(*key) == "cdtoc") &&
                 !seen.insert(normalizedComment(entry)).second) {
                 ++duplicates;
                 duplicateKeys.insert(upper(printable(*key)));
@@ -1033,8 +1043,15 @@ Analysis analyzeFlac(Reader& reader, const std::set<std::string>& enabled)
             for (const auto& entry : first->second.entries) known.insert(normalizedComment(entry));
             for (std::size_t item = 1; item < commentIndexes.size(); ++item) {
                 const auto block = comments.find(commentIndexes[item]);
-                if (block != comments.end() && std::all_of(block->second.entries.begin(), block->second.entries.end(),
-                        [&](const Bytes& entry) { return known.contains(normalizedComment(entry)); })) {
+                const bool validEntries = block != comments.end() &&
+                    std::all_of(block->second.entries.begin(), block->second.entries.end(), [](const Bytes& entry) {
+                        const auto key = commentKey(entry);
+                        const auto value = commentValue(entry);
+                        return key && validCommentKey(*key) && validUtf8(value.data(), value.size());
+                    });
+                if (validEntries && std::all_of(block->second.entries.begin(), block->second.entries.end(),
+                        [&](const Bytes& entry) { return known.contains(normalizedComment(entry)); }) &&
+                    block->second.vendor == first->second.vendor) {
                     removed.insert(commentIndexes[item]);
                 }
                 else {
@@ -1132,8 +1149,8 @@ Analysis analyzeFlac(Reader& reader, const std::set<std::string>& enabled)
     for (const auto& block : blocks) {
         if (block.type != 6) continue;
         if (const auto picture = parsePicture(block.data)) {
-            vorbis.images.emplace_back(block.data.begin() + static_cast<std::ptrdiff_t>(picture->dataOffset),
-                block.data.end());
+            vorbis.images.push_back({ picture->type, picture->description,
+                Bytes(block.data.begin() + static_cast<std::ptrdiff_t>(picture->dataOffset), block.data.end()) });
         }
     }
 
@@ -1278,19 +1295,29 @@ Analysis analyzeMp3(Reader& reader, const std::set<std::string>& enabled)
 
     std::vector<Id3Tag> tags;
     for (const auto& segment : leading) tags.push_back(parseId3(segment.bytes));
+    if (context.On("mp3.unsupported-id3-layout")) {
+        std::size_t unsupported = 0;
+        for (const auto& tag : tags) unsupported += !tag.parsed;
+        context.Add("mp3.unsupported-id3-layout", false, unsupported,
+            "ID3v2 tag has an unsupported version, header flag or frame layout; it was not modified.");
+    }
     std::vector<bool> keepTag(tags.size(), true);
     bool firstModified = false;
+    std::optional<Id3Tag> originalFirstTag;
 
     if (tags.size() > 1 && context.On("mp3.duplicate-id3v2")) {
         std::size_t fixed = 0, review = 0;
+        const bool hasChapterOffsets = std::any_of(tags.begin(), tags.end(),
+            [](const Id3Tag& tag) { return tag.hasChapterOffsets; });
         for (std::size_t index = 1; index < tags.size(); ++index) {
             const bool subset = tags[0].parsed && tags[index].parsed &&
+                tags[0].major == tags[index].major &&
                 std::all_of(tags[index].frames.begin(), tags[index].frames.end(), [&](const Id3Frame& frame) {
                     return std::any_of(tags[0].frames.begin(), tags[0].frames.end(), [&](const Id3Frame& known) {
-                        return known.id == frame.id && known.data == frame.data;
+                        return known.id == frame.id && known.flags == frame.flags && known.data == frame.data;
                     });
                 });
-            if (subset) {
+            if (subset && !hasChapterOffsets) {
                 keepTag[index] = false;
                 ++fixed;
             }
@@ -1301,42 +1328,41 @@ Analysis analyzeMp3(Reader& reader, const std::set<std::string>& enabled)
         context.Add("mp3.duplicate-id3v2", true, fixed,
             "Removed additional ID3v2 tag(s) whose frames all repeat the first tag.");
         context.Add("mp3.duplicate-id3v2", false, review,
-            "Additional ID3v2 tag(s) hold frames not in the first tag (most players read only the first); unchanged.");
+            hasChapterOffsets
+                ? "Additional ID3v2 tag(s) were retained because CHAP/CTOC offsets may depend on their position."
+                : "Additional ID3v2 tag(s) hold frames or flags not in the first tag (most players read only the first); unchanged.");
     }
 
     if (!tags.empty() && tags[0].parsed) {
         auto& tag = tags[0];
-        if (context.On("mp3.duplicate-frames")) {
-            std::vector<Id3Frame> kept;
-            std::set<std::string> ids;
-            for (auto& frame : tag.frames) {
-                if (std::any_of(kept.begin(), kept.end(), [&](const Id3Frame& known) {
-                        return known.id == frame.id && known.flags == frame.flags && known.data == frame.data;
-                    })) {
-                    ids.insert(frame.id);
-                    continue;
-                }
-                kept.push_back(std::move(frame));
-            }
-            const auto count = tag.frames.size() - kept.size();
-            tag.frames = std::move(kept);
-            firstModified = firstModified || count != 0;
-            context.Add("mp3.duplicate-frames", true, count,
-                "Removed byte-identical repeated ID3v2 frame(s): " + joined(ids) + ".");
-        }
+        originalFirstTag = tag;
         if (context.On("mp3.empty-frames")) {
             std::set<std::string> ids;
-            const auto before = tag.frames.size();
-            std::erase_if(tag.frames, [&](const Id3Frame& frame) {
+            std::vector<Id3Frame> kept;
+            std::size_t fixed = 0, review = 0;
+            for (const auto& frame : tag.frames) {
                 const bool empty = textFrame(frame) && frame.id != "TXXX" && plainFrame(tag, frame) &&
                     std::all_of(frame.data.begin() + (frame.data.empty() ? 0 : 1), frame.data.end(),
                         [](std::uint8_t value) { return value == 0; });
-                if (empty) ids.insert(frame.id);
-                return empty;
-            });
-            firstModified = firstModified || before != tag.frames.size();
-            context.Add("mp3.empty-frames", true, before - tag.frames.size(),
-                "Removed ID3v2 text frame(s) without text: " + joined(ids) + ".");
+                if (!empty) {
+                    kept.push_back(frame);
+                    continue;
+                }
+                if (tag.frames.size() - fixed > 1) {
+                    ids.insert(frame.id);
+                    ++fixed;
+                }
+                else {
+                    ++review;
+                    kept.push_back(frame);
+                }
+            }
+            tag.frames = std::move(kept);
+            firstModified = firstModified || fixed != 0;
+            context.Add("mp3.empty-frames", true, fixed,
+                "Removed empty ID3v2 text frame(s): " + joined(ids) + ".");
+            context.Add("mp3.empty-frames", false, review,
+                "The only frame in the ID3v2 tag is empty; it was retained because an ID3v2 tag must contain a frame.");
         }
         if (context.On("mp3.text-encoding")) {
             std::size_t fixed = 0, review = 0;
@@ -1378,6 +1404,27 @@ Analysis analyzeMp3(Reader& reader, const std::set<std::string>& enabled)
                     joined(encodingChanges) + ".");
             context.Add("mp3.text-encoding", false, review,
                 "ID3v2 text frame(s) use an unknown encoding or invalid text; unchanged.");
+        }
+        if (context.On("mp3.duplicate-frames")) {
+            static const std::set<std::string> safeDuplicateFrames{
+                "TIT2", "TALB", "TPE1", "TPE2", "TRCK", "TPOS", "TCON", "TYER", "TDRC", "TCOM" };
+            std::vector<Id3Frame> kept;
+            std::set<std::string> ids;
+            for (auto& frame : tag.frames) {
+                const bool safeFrame = plainFrame(tag, frame) && safeDuplicateFrames.contains(frame.id);
+                if (safeFrame && std::any_of(kept.begin(), kept.end(), [&](const Id3Frame& known) {
+                        return known.id == frame.id && known.flags == frame.flags && known.data == frame.data;
+                    })) {
+                    ids.insert(frame.id);
+                    continue;
+                }
+                kept.push_back(std::move(frame));
+            }
+            const auto count = tag.frames.size() - kept.size();
+            tag.frames = std::move(kept);
+            firstModified = firstModified || count != 0;
+            context.Add("mp3.duplicate-frames", true, count,
+                "Removed byte-identical repeated standard ID3v2 text frame(s): " + joined(ids) + ".");
         }
         if (context.On("mp3.picture-mime")) {
             std::size_t fixed = 0, review = 0;
@@ -1477,7 +1524,28 @@ Analysis analyzeMp3(Reader& reader, const std::set<std::string>& enabled)
     Bytes head;
     for (std::size_t index = 0; index < leading.size(); ++index) {
         if (!keepTag[index]) continue;
-        const auto bytes = index == 0 && firstModified ? serializeId3(tags[0]) : leading[index].bytes;
+        auto bytes = leading[index].bytes;
+        if (index == 0 && firstModified) {
+            auto serialized = serializeId3(tags[0]);
+            if (!serialized) {
+                tags[0] = *originalFirstTag;
+                firstModified = false;
+                for (auto& finding : analysis.findings) {
+                    if (finding.fix && (finding.rule == "mp3.duplicate-frames" ||
+                        finding.rule == "mp3.empty-frames" || finding.rule == "mp3.text-encoding" ||
+                        finding.rule == "mp3.picture-mime")) {
+                        finding.fix = false;
+                        finding.detail += " The combined edits do not fit the original tag size; unchanged to preserve audio offsets.";
+                    }
+                }
+                context.changed = std::any_of(analysis.findings.begin(), analysis.findings.end(),
+                    [](const Finding& finding) { return finding.fix; });
+                if (!context.changed) return analysis;
+            }
+            else {
+                bytes = std::move(*serialized);
+            }
+        }
         head.insert(head.end(), bytes.begin(), bytes.end());
     }
     analysis.edit = Edit{ std::move(head), audioOffset, audioEnd - audioOffset, std::move(tail) };
@@ -1556,24 +1624,20 @@ Analysis Analyze(const fs::path& path, const std::set<std::string>& enabled)
     return analyzeAs(path, path, enabled);
 }
 
-void Write(const fs::path& source, const fs::path& target, const Edit& edit)
+void Write(const fs::path& source, const Edit& edit, const WriteSink& sink)
 {
     std::ifstream input(source, std::ios::binary);
-    std::ofstream output(target, std::ios::binary | std::ios::trunc);
-    if (!input || !output) throw std::runtime_error("Cannot open source or temporary repair output.");
-    output.write(reinterpret_cast<const char*>(edit.head.data()), static_cast<std::streamsize>(edit.head.size()));
+    if (!input || !sink) throw std::runtime_error("Cannot open repair source or output sink.");
+    if (!edit.head.empty()) sink(reinterpret_cast<const char*>(edit.head.data()), edit.head.size());
     input.seekg(static_cast<std::streamoff>(edit.audioOffset));
     std::array<char, 64 * 1024> buffer{};
     for (std::uint64_t remaining = edit.audioSize; remaining != 0;) {
         const auto chunk = static_cast<std::streamsize>(std::min<std::uint64_t>(remaining, buffer.size()));
-        if (!input.read(buffer.data(), chunk) || !output.write(buffer.data(), chunk)) {
-            throw std::runtime_error("Cannot copy audio bytes into the repaired output.");
-        }
+        if (!input.read(buffer.data(), chunk)) throw std::runtime_error("Cannot read source audio bytes.");
+        sink(buffer.data(), static_cast<std::size_t>(chunk));
         remaining -= static_cast<std::uint64_t>(chunk);
     }
-    output.write(reinterpret_cast<const char*>(edit.tail.data()), static_cast<std::streamsize>(edit.tail.size()));
-    output.flush();
-    if (!output) throw std::runtime_error("Cannot write complete repaired output.");
+    if (!edit.tail.empty()) sink(reinterpret_cast<const char*>(edit.tail.data()), edit.tail.size());
 }
 
 bool Verify(const fs::path& source, const fs::path& output, const Edit& edit,

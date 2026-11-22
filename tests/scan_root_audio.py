@@ -1304,12 +1304,6 @@ def main():
         for folder in deep_folders + [outside_folder]:
             folder.mkdir(parents=True)
             shutil.copyfile(albums[1] / "a.flac", folder / "track.flac")
-        linked_folder = bounded_library / "linked"
-        if os.name == "nt":
-            subprocess.run([os.environ["ComSpec"], "/c", "mklink", "/J", str(linked_folder),
-                            str(outside_folder)], check=True, capture_output=True)
-        else:
-            linked_folder.symlink_to(outside_folder, target_is_directory=True)
         bounded_config = root / "bounded-config.json"
         bounded_config.write_text(json.dumps({"RecursionDirectorySearchDepth": 2}), encoding="utf-8")
         bounded_output = root / "bounded-output"
@@ -1320,18 +1314,79 @@ def main():
                            for path in bounded_json.glob("media_out_*.json")
                            for album in json.loads(path.read_text(encoding="utf-8"))}
         if scanned_folders != {deep_folders[0].resolve(), deep_folders[1].resolve()}:
-            raise AssertionError(f"Depth limit or linked folder was not honoured: {scanned_folders}")
+            raise AssertionError(f"Depth limit was not honoured: {scanned_folders}")
         bounded_report_path = bounded_json / "scan-report.json"
         validate_report(bounded_report_path)
         bounded_report = json.loads(bounded_report_path.read_text(encoding="utf-8"))
-        skipped = {(item["code"], Path(item["affectedPath"]).name)
-                   for item in bounded_report["diagnostics"]
-                   if item["code"] in ("scan_linked_folder_skipped", "scan_depth_limit_skipped")}
-        if skipped != {("scan_linked_folder_skipped", "linked"), ("scan_depth_limit_skipped", "c")}:
-            raise AssertionError(f"Skipped folders were not reported: {bounded_report['diagnostics']}")
+        skipped_depth = {(item["code"], Path(item["affectedPath"]).name)
+                         for item in bounded_report["diagnostics"]
+                         if item["code"] == "scan_depth_limit_skipped"}
+        if skipped_depth != {("scan_depth_limit_skipped", "c")}:
+            raise AssertionError(f"Over-depth folder was not reported: {bounded_report['diagnostics']}")
+
+        linked_library = root / "linked-library"
+        linked_library.mkdir()
+        shutil.copyfile(albums[1] / "a.flac", linked_library / "track.flac")
+        linked_folder = linked_library / "linked"
+        if os.name == "nt":
+            subprocess.run([os.environ["ComSpec"], "/c", "mklink", "/J", str(linked_folder),
+                            str(outside_folder)], check=True, capture_output=True)
+        else:
+            linked_folder.symlink_to(outside_folder, target_is_directory=True)
+        linked_output = root / "linked-output"
+        linked_run = subprocess.run(
+            [converter, "scan", str(linked_library), "--output-dir", str(linked_output),
+             "--config", str(bounded_config)], capture_output=True, text=True, timeout=30,
+        )
+        if linked_run.returncode == 0:
+            raise AssertionError(f"Scan followed or ignored a directory link: {linked_run.stdout}")
+        linked_report_path = linked_output / linked_library.name / "scan-report.json"
+        validate_report(linked_report_path)
+        linked_report = json.loads(linked_report_path.read_text(encoding="utf-8"))
+        link_errors = [item for item in linked_report["diagnostics"]
+                       if item["severity"] == "error" and
+                       item.get("affectedPath") and Path(item["affectedPath"]).name == "linked"]
+        if linked_report["status"] != "failed" or not link_errors:
+            raise AssertionError(f"Directory link failure was not reported: {linked_report['diagnostics']}")
+        if list((linked_output / linked_library.name).glob("media_out_*.json")):
+            raise AssertionError("A scan with a directory link installed catalog JSON.")
         linked_folder.rmdir() if os.name == "nt" else linked_folder.unlink()
         if not (outside_folder / "track.flac").is_file():
             raise AssertionError("Linked folder target was modified")
+
+        linked_file_library = root / "linked-file-library"
+        linked_file_library.mkdir()
+        file_link = linked_file_library / "track.flac"
+        if os.name == "nt":
+            file_link_run = subprocess.run(
+                [os.environ["ComSpec"], "/c", "mklink", str(file_link),
+                 str(outside_folder / "track.flac")], capture_output=True, text=True,
+            )
+            if file_link_run.returncode:
+                file_link = None
+        else:
+            file_link.symlink_to(outside_folder / "track.flac")
+        if file_link is not None:
+            file_link_output = root / "linked-file-output"
+            file_link_scan = subprocess.run(
+                [converter, "scan", str(linked_file_library), "--output-dir", str(file_link_output),
+                 "--config", str(bounded_config)], capture_output=True, text=True, timeout=30,
+            )
+            if file_link_scan.returncode == 0:
+                raise AssertionError(f"Scan followed or ignored a file link: {file_link_scan.stdout}")
+            file_link_report = file_link_output / linked_file_library.name / "scan-report.json"
+            validate_report(file_link_report)
+            file_report = json.loads(file_link_report.read_text(encoding="utf-8"))
+            if not any(item["severity"] == "error" and
+                       item.get("affectedPath") and Path(item["affectedPath"]).name == "track.flac"
+                       for item in file_report["diagnostics"]):
+                raise AssertionError(f"File link failure was not reported: {file_report['diagnostics']}")
+            if list((file_link_output / linked_file_library.name).glob("media_out_*.json")):
+                raise AssertionError("A scan with a file link installed catalog JSON.")
+            if os.name == "nt":
+                file_link.unlink()
+            else:
+                file_link.unlink()
         if any(hashlib.sha256(track.read_bytes()).hexdigest() != source_hash
                for track, source_hash in source_hashes.items()):
             raise AssertionError("A scan changed one or more source files")

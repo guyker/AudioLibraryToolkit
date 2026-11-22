@@ -78,6 +78,9 @@ conversion quality/overwrite policies, and existing or duplicate destinations. O
 No catalog, conversion or repair output files/directories are written during preview. A scan preflight or discovery
 failure attempts a diagnostic report in a safe system temporary directory. All active conversion libraries are planned
 before execution, so a conflict in a later library prevents earlier libraries from being converted.
+Conversion (option 1), catalog scanning (option 2) and repair (option 7) fail during preparation if the source
+library contains any file or directory symlink/Windows reparse point; they neither follow nor silently skip links.
+Option 2's separate recursion-depth limit still skips over-depth directories with a warning.
 The prepared audio/companion lists, scan album batches and JSON input lists are reused for execution.
 Scan previews discover albums without collecting track metadata until confirmed. Source quality/channel
 checks remain part of conversion; counts and destination checks reflect preview-time file state.
@@ -103,11 +106,13 @@ to safe defaults when selecting option `6` again; they do not modify config.json
 Option `7` checks FLAC and MP3 files for common metadata defects (redundant ID3/APE tags, duplicate or empty tags,
 wrong picture MIME types or FLAC picture dimensions/depth, invalid FLAC seek tables, ID3v2.3 encoding errors, and more). It writes repaired copies to
 `OutDirectory\FIXED\<mediaName>`, copying only affected folders and keeping other files unchanged; audio bytes are
-copied unchanged and sources are never modified. Conflicting values and unreadable files are left for manual review
-and listed in `repair-report.json`. Before `RUN`, option 7 shows counts by rule and prints the path to a searchable
-HTML preview with every planned change and unresolved finding. The preview is saved outside the source libraries;
+copied unchanged and repair code does not write to source files. Conflicting values, invalid comments, unsupported
+ID3 layouts and unreadable files are left for manual review and listed in `repair-report.json`. Before `RUN`, option 7
+shows counts by rule and prints the path to a searchable HTML preview with every planned change and unresolved finding,
+grouped by issue with separate risks of leaving each finding unchanged or applying its fix. The preview is saved outside the source libraries;
 cancelling leaves the preview but creates no `FIXED` output. After execution, open the printed `repair-summary.html` path for a
-searchable album-by-album view of installed changes, compatibility cautions and unresolved findings.
+searchable issue-first and album-folder view of installed changes, compatibility cautions and unresolved findings.
+Nested output symlinks/junctions that redirect destinations are rejected and checked again before writes.
 Redundant MP3 ID3v1 tags are kept unless removal is explicitly enabled, to
 preserve compatibility with older players. Four workers inspect and stage files concurrently.
 
@@ -274,8 +279,8 @@ entirely, so the output never holds a partial copy of an untouched album. Only t
 in the audit's `skippedUnchangedDirectories`, with its file and audio counts. A library without conversions writes
 only `FLAC\<mediaName>\conversion-audit.json` listing `"."`. Because the rule is per folder, an MP3-only `CD2` beside a
 converted `CD1` is skipped. Directory symlinks/junctions, broken links and special filesystem entries fail FLAC
-planning explicitly, even inside a skipped folder. Regular-file links are materialized as file contents, not
-preserved as links.
+planning explicitly, including inside a subtree that would otherwise be skipped. Regular-file symlinks and other
+reparse points are rejected too; links are neither followed nor materialized as file contents.
 Explicit `--overwrite` replaces existing targets; unrelated existing output files (including folders that are now
 skipped) are retained, so this is not a directory-mirroring/delete operation.
 MP3 conversion keeps its narrower policy: other audio formats are skipped, and empty/copy-only trees are not exported.
