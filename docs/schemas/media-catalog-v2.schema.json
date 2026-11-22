@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "AudioFormatConverter media catalog batch",
+  "title": "AudioLibraryToolkit media catalog batch",
   "description": "A generated JSON scan batch containing album folders and loss-aware per-file metadata records.",
   "$comment": "Schema v2 uses TagLib for native tag reading and linked FFmpeg libraries for container properties/chapters and optional decode analysis. Keep rawTags for source-scoped values and tags for searchable normalized multi-values. Missing technical values are unknown, not zero. Catalog, integrity and analysis are distinct scan tiers.",
   "type": "array",

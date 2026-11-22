@@ -57,7 +57,7 @@ add_test(NAME media-record-json
         "${PROJECT_SOURCE_DIR}/docs/schemas/media-catalog-v2.schema.json")
 add_test(NAME scan-root-level-audio
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scan_root_audio.py"
-        "$<TARGET_FILE:FlacConvert>"
+        "$<TARGET_FILE:AudioLibraryToolkit>"
         "${FFMPEG_EXECUTABLE}"
         "$<TARGET_FILE:scan_report_schema_test>"
         "${PROJECT_SOURCE_DIR}/docs/schemas/scan-report-v2.schema.json"
@@ -85,9 +85,17 @@ add_test(NAME run-logging
     COMMAND "$<TARGET_FILE:run_logging_test>")
 add_test(NAME app-settings-config
     COMMAND "$<TARGET_FILE:app_settings_config_test>")
+add_test(NAME config-startup
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/config_startup.py"
+        "$<TARGET_FILE:AudioLibraryToolkit>")
+if(WIN32)
+    add_test(NAME config-windows-console
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/windows_console_setup.py"
+            "$<TARGET_FILE:AudioLibraryToolkit>")
+endif()
 add_test(NAME mp3-conversion-integration
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/mp3_conversion.py"
-        --converter "$<TARGET_FILE:FlacConvert>"
+        --converter "$<TARGET_FILE:AudioLibraryToolkit>"
         --ffmpeg "${FFMPEG_EXECUTABLE}"
         --ffprobe "${FFPROBE_EXECUTABLE}"
         --audit-checker "$<TARGET_FILE:preservation_audit_test>"

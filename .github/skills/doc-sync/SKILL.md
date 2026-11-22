@@ -1,9 +1,9 @@
 ---
 name: doc-sync
-description: Detect and fix drift between FlacConvert code, FlacConvert/DESIGN.md, docs/features F-entries, README.md and the knowledge base after a change, or when asked to "check docs", "sync docs" or "are the docs up to date".
+description: Detect and fix drift between AudioLibraryToolkit code, FlacConvert/DESIGN.md, docs/features F-entries, README.md and the knowledge base after a change, or when asked to "check docs", "sync docs" or "are the docs up to date".
 ---
 
-# Doc sync (FlacConvert)
+# Doc sync (AudioLibraryToolkit)
 
 ## Procedure
 

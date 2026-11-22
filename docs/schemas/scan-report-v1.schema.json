@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "AudioFormatConverter scan report",
+  "title": "AudioLibraryToolkit scan report",
   "description": "Per-run diagnostics and summary for a library scan.",
   "type": "object",
   "required": [

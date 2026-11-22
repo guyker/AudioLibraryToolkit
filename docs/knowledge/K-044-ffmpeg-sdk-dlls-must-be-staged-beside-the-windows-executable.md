@@ -3,8 +3,9 @@ id: K-044
 kind: domain
 title: "FFmpeg SDK DLLs must be staged beside the Windows executable"
 area: ["External Dependencies"]
-status: active
+status: superseded
 supersedes: [K-010]
+superseded_by: K-062
 created: 2026-11-16
 reviewed: 2026-11-16
 cites:

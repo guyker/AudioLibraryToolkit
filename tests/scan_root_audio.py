@@ -41,6 +41,8 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix="afc-root-scan-") as temporary:
         root = Path(temporary)
+        if os.name != "nt":
+            os.environ["XDG_STATE_HOME"] = str(root / "state-home")
         if os.name == "nt":
             os.environ["LOCALAPPDATA"] = str(root / "local-app-data")
             menu_config_dir = Path(os.environ["LOCALAPPDATA"]) / "AudioLibraryToolkit"
@@ -50,6 +52,8 @@ def main():
         else:
             os.environ["XDG_CONFIG_HOME"] = str(root / "xdg-config")
             menu_config_dir = Path(os.environ["XDG_CONFIG_HOME"]) / "AudioLibraryToolkit"
+        menu_config_dir.mkdir(parents=True)
+        (menu_config_dir / "config.json").write_text("{}", encoding="utf-8")
         library = root / "library"
         output = root / "output"
         default_config = root / "default-config.json"
@@ -1054,7 +1058,7 @@ def main():
         eof = subprocess.run([converter], stdin=subprocess.DEVNULL, cwd=root,
                              capture_output=True, timeout=15)
         if eof.returncode == 0:
-            raise AssertionError("Menu succeeded without a configuration or input")
+            raise AssertionError("Menu succeeded with an incomplete configuration")
 
         unknown_library = root / "unknown-flac"
         unknown_library.mkdir()
@@ -1090,7 +1094,6 @@ def main():
         fixture_json = json.dumps(menu_fixture).encode("utf-8")
         for index in (1, 3, 1000):
             (menu_json / f"media_out_{library.name}_{index}.json").write_bytes(fixture_json)
-        menu_config_dir.mkdir(parents=True)
         (menu_config_dir / "config.json").write_text(json.dumps({
             "OutDirectory": str(menu_output),
             "ScanTier": "catalog",

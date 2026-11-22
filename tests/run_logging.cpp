@@ -116,7 +116,7 @@ int main()
             "An off threshold did not suppress ordinary details.");
 
         const char* arguments[] = {
-            "FlacConvert", "scan", "library", "--log-level", "trace"
+            "AudioLibraryToolkit", "scan", "library", "--log-level", "trace"
         };
         CommandLineOptions options;
         require(ParseCommandLine(5, arguments, options) == 1 && options.logLevel == "trace",

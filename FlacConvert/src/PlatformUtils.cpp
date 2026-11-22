@@ -18,6 +18,7 @@
 #include <unistd.h>
 #endif
 #include <cerrno>
+#include <algorithm>
 #include <cstdlib>
 #include <cstdio>
 #include <stdexcept>
@@ -59,6 +60,62 @@ std::filesystem::path UserConfigDirectory()
     }
     throw std::runtime_error("Cannot locate the per-user configuration directory (HOME is unavailable).");
 #endif
+}
+
+bool WriteNewTextFile(const std::filesystem::path& path, std::string_view content,
+    std::error_code& error)
+{
+    error.clear();
+#ifdef _WIN32
+    const HANDLE file = CreateFileW(WindowsLongPath(path).c_str(), GENERIC_WRITE, FILE_SHARE_READ,
+        nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        error = std::error_code(static_cast<int>(GetLastError()), std::system_category());
+        return false;
+    }
+    std::size_t offset = 0;
+    while (offset < content.size()) {
+        const auto chunk = static_cast<DWORD>((std::min)(content.size() - offset, std::size_t{ 1024 * 1024 }));
+        DWORD written = 0;
+        if (!WriteFile(file, content.data() + offset, chunk, &written, nullptr)) {
+            error = std::error_code(static_cast<int>(GetLastError()), std::system_category());
+            break;
+        }
+        if (written == 0) {
+            error = std::make_error_code(std::errc::io_error);
+            break;
+        }
+        offset += written;
+    }
+    if (!CloseHandle(file) && !error) {
+        error = std::error_code(static_cast<int>(GetLastError()), std::system_category());
+    }
+#else
+    const int file = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+    if (file < 0) {
+        error = std::error_code(errno, std::generic_category());
+        return false;
+    }
+    std::size_t offset = 0;
+    while (offset < content.size()) {
+        const auto chunk = (std::min)(content.size() - offset, std::size_t{ 1024 * 1024 });
+        const auto written = write(file, content.data() + offset, chunk);
+        if (written < 0) {
+            if (errno == EINTR) continue;
+            error = std::error_code(errno, std::generic_category());
+            break;
+        }
+        if (written == 0) {
+            error = std::make_error_code(std::errc::io_error);
+            break;
+        }
+        offset += static_cast<std::size_t>(written);
+    }
+    if (close(file) != 0 && !error) {
+        error = std::error_code(errno, std::generic_category());
+    }
+#endif
+    return !error;
 }
 
 namespace
@@ -789,6 +846,53 @@ bool ScopedCurrentDirectory::Restore()
 #else
         return isatty(STDOUT_FILENO) != 0;
 #endif
+    }
+
+    bool IsStdinInteractive() {
+#ifdef _WIN32
+        HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+        DWORD mode = 0;
+        return input != nullptr && input != INVALID_HANDLE_VALUE && GetConsoleMode(input, &mode);
+#else
+        return isatty(STDIN_FILENO) != 0;
+#endif
+    }
+
+    bool ReadUtf8Line(std::istream& input, std::string& line) {
+#ifdef _WIN32
+        if (&input == &std::cin && IsStdinInteractive()) {
+            constexpr std::size_t maxPathCharacters = 32767;
+            // Cooked console input is limited by the first read's buffer, including CR/LF.
+            std::vector<wchar_t> buffer(maxPathCharacters + 3);
+            std::wstring wide;
+            for (;;) {
+                DWORD count = 0;
+                if (!ReadConsoleW(GetStdHandle(STD_INPUT_HANDLE), buffer.data(),
+                        static_cast<DWORD>(buffer.size()), &count, nullptr)) {
+                    const auto error = GetLastError();
+                    if (error == ERROR_HANDLE_EOF || error == ERROR_BROKEN_PIPE) return false;
+                    throw std::system_error(static_cast<int>(error), std::system_category(),
+                        "Cannot read console input");
+                }
+                if (count == 0) return false;
+                if (wide.size() + count > maxPathCharacters + 2) {
+                    throw std::length_error("Console input exceeds the maximum supported path length.");
+                }
+                wide.append(buffer.data(), count);
+                if (wide.back() == L'\n') break;
+            }
+            wide.pop_back();
+            if (!wide.empty() && wide.back() == L'\r') wide.pop_back();
+            if (wide == L"\x1a") return false;
+            line = WideToUTF8(wide);
+            return true;
+        }
+#endif
+        if (std::getline(input, line)) return true;
+        if (input.bad() || !input.eof()) {
+            throw std::ios_base::failure("Cannot read setup input");
+        }
+        return false;
     }
 
     bool EnableVirtualTerminal() {

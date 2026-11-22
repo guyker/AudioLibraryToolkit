@@ -37,7 +37,7 @@ jobs:
       - name: Launch installed executable
         run: |
           cd out/install/linux-${{ matrix.configuration }}/bin
-          ./FlacConvert --help
+          ./AudioLibraryToolkit --help
 
   windows:
     name: Windows ${{ matrix.configuration }}
@@ -82,5 +82,5 @@ jobs:
         shell: pwsh
         run: |
           Push-Location "out/install/windows-${{ matrix.configuration }}/bin"
-          .\FlacConvert.exe --help
+          .\AudioLibraryToolkit.exe --help
           Pop-Location

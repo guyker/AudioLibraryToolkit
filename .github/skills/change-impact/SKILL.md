@@ -1,9 +1,9 @@
 ---
 name: change-impact
-description: Answer "how does X work", "where is Y", "what breaks if I change Z", or onboard to AudioFormatConverter/FlacConvert. Use for read-only questions about conversion, scan, duplicates, SQLite import, configuration, menu or platform code before any change is planned.
+description: Answer "how does X work", "where is Y", "what breaks if I change Z", or onboard to AudioLibraryToolkit. Use for read-only questions about conversion, scan, duplicates, SQLite import, configuration, menu or platform code before any change is planned.
 ---
 
-# Change impact and onboarding (FlacConvert)
+# Change impact and onboarding (AudioLibraryToolkit)
 
 Answer from the documentation first, then confirm in code. Read-only: do not edit files.
 

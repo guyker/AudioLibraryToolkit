@@ -4,8 +4,8 @@ Status: active
 
 ## Behaviour
 Each process invocation (CLI command or interactive-menu session) writes a unique `.log` file under
-`%LOCALAPPDATA%\AudioFormatConverter\logs` on Windows, `$XDG_STATE_HOME/audioformatconverter/logs` or
-`$HOME/.local/state/audioformatconverter/logs` elsewhere, falling back to the system temporary directory when the
+`%LOCALAPPDATA%\AudioLibraryToolkit\logs` on Windows, `$XDG_STATE_HOME/AudioLibraryToolkit/logs` or
+`$HOME/.local/state/AudioLibraryToolkit/logs` elsewhere, falling back to the system temporary directory when the
 platform-specific location is unavailable. The console remains concise: informational progress (including the current
 source album folder during FLAC conversion), completion, meaningful warnings, and errors; per-file details and
 expected generated-field normalization are reserved for the session log. Redirected output contains no animated
@@ -14,7 +14,8 @@ elapsed time and (for track collection) an ETA on one updating line, with period
 metadata progress spans all batches of a library.
 Before any menu action prepares work, it logs all active source library paths. CLI commands log the input folder,
 explicitly labeled as catalog JSON for duplicates/database import. Conversion and scan library transitions and
-repair preparation identify the current source folder, including before long preprocessing begins.
+repair preparation identify the current source folder, including before long preprocessing begins. Every invocation
+prints the absolute configuration path and notes that it can be opened and edited, including help and version requests.
 
 The config `LogLevel` (integer spdlog level 0–6) controls the detailed file log; CLI commands can override it with
 `--log-level info|debug|trace`. Start and finish entries are always written when the log is available. The file
@@ -39,6 +40,7 @@ and reports the failure.
 
 ## Acceptance checks
 - [ ] Each CLI invocation creates a distinct session log with start and finish status.
+- [ ] Menu, CLI, help and version output show the configuration path and editing guidance.
 - [ ] The menu uses the same logger and configured file threshold.
 - [ ] `--log-level info|debug|trace` overrides the file threshold; console warnings and errors remain visible.
 - [ ] Conversion console output omits per-file `Processing:` messages, FFmpeg progress stats, and expected generated-field normalization.

@@ -4,8 +4,8 @@
 
 ## Project
 
-AudioFormatConverter is a Windows C++ audio conversion and library-management utility. The single application,
-`FlacConvert`, currently runs conversions through the FFmpeg executable; metadata and audio analysis also use FFmpeg
+AudioLibraryToolkit is a C++ audio conversion and library-management utility. The application sources are under
+`FlacConvert/`; conversions run through the FFmpeg executable, and metadata and audio analysis also use FFmpeg
 libraries. See `README.md` for the feature overview.
 
 The core C++ sources must remain portable across Windows, Linux and macOS. CMake is the only build definition; Visual

@@ -1,4 +1,4 @@
-# FlacConvert design
+# AudioLibraryToolkit design
 
 What the application is: components, flows, contracts and file formats. Rules for changing it live in
 `.github/instructions/`; the reasons behind decisions live in `docs/knowledge/` (K-xxx); user-visible features are
@@ -6,7 +6,7 @@ tracked in `docs/features/`. Code is cited as `path#Symbol`.
 
 ## Purpose
 
-`FlacConvert` is a console utility for a local music library. It:
+`AudioLibraryToolkit` is a console utility for a local music library. It:
 
 - converts audio to a separate output tree (16-bit / 44.1 kHz FLAC, or FLAC to MP3) without touching sources;
 - repairs recognized FLAC/MP3 metadata defects, without touching audio bytes, into a separate output tree;
@@ -103,7 +103,8 @@ and the request proceeds using console logging only. The session log supplements
 `conversion-audit.json` or `scan-report.json`.
 Menu actions log every active source library before preparation, and CLI commands log their source directory
 (identified as catalog JSON for duplicate detection and database import). Conversion and scan transitions identify
-the current source library. `RunLogging` serializes transient progress with console log messages so warnings/errors
+the current source library. Startup logs the absolute configuration path and notes that the file can be edited, including for
+help/version requests. `RunLogging` serializes transient progress with console log messages so warnings/errors
 end the progress line cleanly; transient redraws are not written to session logs or redirected output.
 Long phases use `RunLogging::PhaseProgress` (repair phases, conversion discovery and planning, scan discovery and scan
 track collection): it logs the
@@ -461,23 +462,27 @@ database integration fixtures cover the corresponding output paths.
 
 ## Configuration
 
-`AppSettingsJson::LoadForCommandLine` order: `--config` → per-user `config.json` → built-in defaults
-(`AppSettingsJson::GetDefaultSettings`, no libraries). The working and executable directories are not searched
-automatically.
+`AppSettingsJson::LoadForCommandLine` selects an explicit `--config` or the per-user `config.json`; the working,
+executable and old shared directories are not searched automatically (K-061). `--config` must name an existing file.
 `PlatformUtils::UserConfigDirectory` selects `%LOCALAPPDATA%/AudioLibraryToolkit` on Windows,
 `$XDG_CONFIG_HOME/AudioLibraryToolkit` (or `~/.config/AudioLibraryToolkit`) on Linux, and
-`~/Library/Application Support/AudioLibraryToolkit` on macOS. The legacy menu uses this same location and offers to
-create a default config there when it is absent. Both paths resolve a found file through
-`AppSettingsJson::LoadWithDefaults`: built-in defaults without the sample libraries, overlaid by the file and
-validated, so an absent or empty `OutDirectory` uses the platform default in both paths. CLI loading does not create
-a config file when using built-in defaults.
+`~/Library/Application Support/AudioLibraryToolkit` on macOS. When the per-user file is missing, an operational run
+uses `AppSettingsJson::CreateInitialConfiguration`: if stdin and stdout are terminals, it prompts for an output
+directory and an existing input library, resolving entered paths to absolute paths before saving; without a terminal
+or when input ends before setup is complete, it writes an empty template and exits
+with editing instructions. Creation is exclusive and never overwrites an existing file. Help/version requests do not
+create a file. Both menu and CLI overlay a found file on built-in defaults via `AppSettingsJson::LoadWithDefaults`.
+Windows setup reads console paths as UTF-16 and converts them to UTF-8 before validation and storage.
+Defaults contain no libraries or output path. The menu rejects an incomplete existing file; CLI operations take
+their explicit input and require `OutDirectory` or `--output-dir`, except duplicate reporting, which needs no output
+root. Existing incomplete files are not changed automatically.
 `MediaDirectoryList` entries must be objects; `isActive` must be boolean and `mediaPath` a string when present; an
 active entry requires a non-empty `mediaPath` (an empty path would resolve to the working directory). Violations
 fail configuration loading.
 
 | Key | Default | Used by |
 |---|---|---|
-| `OutDirectory` | `C:\tmp` (Windows) / temp dir (K-007) | All outputs |
+| `OutDirectory` | empty; must be configured or overridden | Output root for menu and output-producing CLI operations |
 | `LogLevel` | 1 (0–6, spdlog levels) | Detailed session-log threshold; console remains concise; CLI `--log-level info\|debug\|trace` overrides it |
 | `UseAsyncMetadataReads` | true | Parallel TagLib scan reads; legacy `UseAsyncFFmpegCalls` is accepted as an alias |
 | `Incremental` | true | Reuse scan records when library-relative file path, size and modification time match and the cached tier is the requested tier or higher (`AlbumCollection::ImportMetadata`) |
@@ -496,7 +501,7 @@ fail configuration loading.
 | `FLACSettings.ffmpeg_exe_name` | `ffmpeg` | Conversion executable; the other `FLACSettings` strings are not used at runtime |
 | `MetadataSidecars.Format` | `binary` (`binary`\|`json`) | Sidecar encoding for conversions |
 | `MetadataSidecars.ConvertToFlac`, `MetadataSidecars.ConvertToMp3` | `disabled` (`disabled`\|`optional`\|`required`) | Per-target sidecar policy; invalid values fail loading |
-| `MediaDirectoryList[]` | – | `{ isActive, mediaPath, mediaName }`; `mediaName` must be a single directory name; active entries require a non-empty `mediaPath` |
+| `MediaDirectoryList[]` | empty | Menu requires at least one active `{ isActive, mediaPath, mediaName }`; `mediaName` must be a single directory name; active entries require a non-empty `mediaPath` |
 
 `DatabaseFileName`, `resultPath` and `dbPath` are not used for output naming.
 
@@ -508,7 +513,7 @@ fail configuration loading.
 | Metadata sidecar | `<audio file>.flac-metadata` (binary) or `<audio file>.flac-metadata.json` (MP3 and native-FLAC sources, per `MetadataSidecars`) | `FlacMetadata::Save` |
 | Unchanged file copies | Same relative path; non-converted regular files outside skipped subtrees for FLAC, non-audio companions for MP3 | `FolderConvert::ExecuteConversion` |
 | Audit report | `<library output>/conversion-audit.json` | `writeAudit` in `FolderConvert.cpp` |
-| Session log | `%LOCALAPPDATA%\AudioFormatConverter\logs\afc-<timestamp>_<pid>_<sequence>.log` (Windows); XDG/HOME state directory elsewhere | `RunLogging::Start` / `RunLogging::Finish` |
+| Session log | `%LOCALAPPDATA%\AudioLibraryToolkit\logs\afc-<timestamp>_<pid>_<sequence>.log` (Windows); XDG/HOME state directory elsewhere | `RunLogging::Start` / `RunLogging::Finish` |
 | In-progress marker | `<library output>/.conversion-in-progress/` (directory) | `FolderConvert::ExecuteConversion` |
 | Album JSON | `OutDirectory/<name>/media_out_<name>[_<n>].json` (schema v2; see `docs/schemas/media-catalog-v2.schema.json`) | `AlbumCollection::SaveAlbumsToJSON` |
 | Scan manifest | `OutDirectory/<name>/scan-manifest.json` (schema v1; batch inventory, SHA-256 integrity and archive references) | `writeScanManifest` |
@@ -577,7 +582,7 @@ conversion records its class in `MediaConvertionTask::GetFailureType`.
 Portable core with narrow conditional blocks (K-006). Windows-specific code: `wmain`, console code pages,
 `PlatformUtils::UserConfigDirectory`, `PlatformUtils::WindowsLongPath`, `ScopedCurrentDirectory`'s long-path fallback (short working-directory anchor and
 directory handles opened without delete sharing), `quoteWindowsArgument` + `_wspawnvp`, `MoveFileExW`,
-`CompareStringOrdinal`, SQLite `win32-longpath` VFS (K-042), default `C:\tmp` (K-007). POSIX branches:
+`CompareStringOrdinal`, SQLite `win32-longpath` VFS (K-042). POSIX branches:
 `fork`/`execvp`, rename/hard-link install, `sqlite3_open`. `JsonUtils::tryParseMember` uses the portable
 `JsonUtils::caseInsensitiveEquals` helper for case-insensitive keys (K-033).
 
@@ -585,10 +590,10 @@ directory handles opened without delete sharing), `quoteWindowsArgument` + `_wsp
 
 CMake is the shared project build (`CMakeLists.txt`, `FlacConvert/CMakeLists.txt`), with Ninja presets for native
 Windows and Linux Debug/Release builds (`CMakePresets.json`). `FlacConvertCore` owns the shared implementation and
-links the SQLite amalgamation, CLI11, header-only spdlog and FFmpeg; `FlacConvert` owns the executable entry point.
+links the SQLite amalgamation, CLI11, header-only spdlog and FFmpeg; `AudioLibraryToolkit` owns the executable entry point.
 Windows uses MSVC and a matching shared FFmpeg SDK selected by `FFmpeg_ROOT` (default
 `external/ffmpeg/ffmpeg-master-latest-win64-gpl-shared/`); CMake stages the SDK runtime DLLs beside the executable
-(K-044). Linux uses pkg-config imported targets for the system FFmpeg development packages. Both platforms use the
+(K-062). Linux uses pkg-config imported targets for the system FFmpeg development packages. Both platforms use the
 tracked SQLite amalgamation and initialized CLI11/spdlog submodules. TagLib is fetched by CMake at a pinned
 revision; ZLIB is optional in that dependency, so compressed ID3 frame support depends on build-time ZLIB
 availability. Runtime conversion still requires the `ffmpeg` executable with `libmp3lame` for MP3.
@@ -622,5 +627,5 @@ prompt, and `ShowConversionPreview`.
 
 ## Knowledge links
 
-Conversion safety: K-041, K-048, K-056, K-029, K-030, K-032, K-038. Formats: K-016, K-017, K-031. Manual menu: K-024, K-025, K-026, K-049. Catalog/DB: K-051, K-042, K-040, K-050. Platform/build: K-006, K-007, K-043, K-044, K-033.
+Conversion safety: K-041, K-048, K-056, K-029, K-030, K-032, K-038. Formats: K-016, K-017, K-031. Manual menu: K-024, K-025, K-026, K-049. Catalog/DB: K-051, K-042, K-040, K-050. Platform/build: K-006, K-061, K-043, K-062, K-033.
 Only live entries are listed; superseded history is in `docs/knowledge/index.md` under "Closed".

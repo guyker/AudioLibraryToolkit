@@ -60,7 +60,7 @@ preserves prior catalog files. Duplicate detection and database import validate 
 then reassemble fragment sets before use.
 
 ## Entry points
-- `FlacConvert scan <library> [--output-dir] [--full-rescan] [--tier catalog|integrity|analysis] [--archive-flac-metadata|--no-archive-flac-metadata]` → `FlacConvertMain.cpp#RunWithArguments`
+- `AudioLibraryToolkit scan <library> [--output-dir] [--full-rescan] [--tier catalog|integrity|analysis] [--archive-flac-metadata|--no-archive-flac-metadata]` → `FlacConvertMain.cpp#RunWithArguments`
 - Menu option 2 → `FlacConvertMain.cpp#ScanFolderAndCreateJSON`, `FlacConvertMain.cpp#installGeneratedFiles`
 - `AlbumCollection.cpp#AlbumCollection::LoadAlbumsCo`, `AlbumCollection.cpp#AlbumCollection::ImportMetadata`,
   `AlbumCollection.cpp#AlbumCollection::SaveAlbumsToJSON`

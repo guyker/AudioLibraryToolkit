@@ -13,7 +13,7 @@ Non-FLAC audio is reported as skipped; companions are copied. Preparation report
 progress as FLAC conversion (F-001).
 
 ## Entry points
-- `FlacConvert convert <input> --to mp3 [--mp3-quality N] [--downmix-to-stereo] [--overwrite]` →
+- `AudioLibraryToolkit convert <input> --to mp3 [--mp3-quality N] [--downmix-to-stereo] [--overwrite]` →
   `FlacConvertMain.cpp#RunWithArguments`
 - Menu option 6 → `FlacConvertMain.cpp#ConvertFLACToMP3` (prompts in `FlacConvertMain.cpp#ConfigureManualMp3`)
 - `include/ConversionOptions.h#ConversionOptions`, `MediaConvertionTask.cpp#conversionArguments`,

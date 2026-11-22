@@ -136,23 +136,23 @@ fs::path defaultLogDirectory()
         const DWORD copied = GetEnvironmentVariableW(
             L"LOCALAPPDATA", localAppData.data(), localAppDataLength);
         if (copied > 0 && copied < localAppDataLength) {
-            return fs::path(localAppData.data()) / L"AudioFormatConverter" / L"logs";
+            return fs::path(localAppData.data()) / L"AudioLibraryToolkit" / L"logs";
         }
     }
 #else
     const char* stateHome = std::getenv("XDG_STATE_HOME");
     if (stateHome != nullptr && *stateHome != '\0') {
-        return fs::path(stateHome) / "audioformatconverter" / "logs";
+        return fs::path(stateHome) / "AudioLibraryToolkit" / "logs";
     }
     const char* home = std::getenv("HOME");
     if (home != nullptr && *home != '\0') {
-        return fs::path(home) / ".local" / "state" / "audioformatconverter" / "logs";
+        return fs::path(home) / ".local" / "state" / "AudioLibraryToolkit" / "logs";
     }
 #endif
     std::error_code ec;
     auto temporary = fs::temp_directory_path(ec);
     if (ec) throw fs::filesystem_error("Cannot locate a log directory", ec);
-    return temporary / "AudioFormatConverter" / "logs";
+    return temporary / "AudioLibraryToolkit" / "logs";
 }
 
 std::string runId()

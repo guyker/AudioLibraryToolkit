@@ -1,9 +1,9 @@
 ---
 name: feature-development
-description: Implement a new feature or behaviour change in AudioFormatConverter/FlacConvert (C++20, FFmpeg, SQLite) - e.g. "add an output format", "add a CLI option", "change how conversion/scan/duplicates/DB import works", "fix bug in FlacConvert". Use before editing FlacConvert/src or FlacConvert/include.
+description: Implement a new feature or behaviour change in AudioLibraryToolkit (C++20, FFmpeg, SQLite) - e.g. "add an output format", "add a CLI option", "change how conversion/scan/duplicates/DB import works", "fix a bug". Use before editing FlacConvert/src or FlacConvert/include.
 ---
 
-# Feature development (FlacConvert)
+# Feature development (AudioLibraryToolkit)
 
 Use the global **project-memory** skill for every knowledge-base step (`kb.ps1`); do not copy it here.
 

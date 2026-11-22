@@ -27,7 +27,7 @@ the session log (F-010); other preservation differences remain warnings, and `co
 check (F-003).
 
 ## Entry points
-- `FlacConvert convert <input> [--output-dir] [--overwrite]` → `FlacConvertMain.cpp#RunWithArguments` →
+- `AudioLibraryToolkit convert <input> [--output-dir] [--overwrite]` → `FlacConvertMain.cpp#RunWithArguments` →
   `FolderConvert.cpp#FolderConvert::ConvertAudioFolderToOutput`
 - Menu option 1 → `FlacConvertMain.cpp#ConvertFLACToFLAC` → `FlacConvertMain.cpp#ConvertConfiguredLibraries`
 - Per file → `MediaConvertionTask.cpp#MediaConvertionTask::ConvertFile`, `MediaConvertionTask.cpp#conversionArguments`
@@ -67,4 +67,6 @@ check (F-003).
   inside subtrees that would otherwise be skipped. Links are neither followed nor materialized as file contents;
   this is not a link/attribute-preserving filesystem backup.
 - Plans describe discovery-time source contents. Existing unrelated output files are retained, not synchronized away.
-- Linux builds are not verified until the Ubuntu CI workflow passes; macOS has no build preset yet.
+- On Ubuntu 24.04 with FFmpeg 6.1.1, some AAC/ALAC M4A files fail the preservation audit on a generated `vendor_id`
+  field; sources remain unchanged (K-063).
+- macOS has no build preset yet.

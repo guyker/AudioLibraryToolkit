@@ -1,29 +1,13 @@
 {
   "Version": "1.0.0",
-  "OutDirectory": "\\\\?\\R:\\tmp\\24",
+  "OutDirectory": "",
   "DatabaseFileName": "all_albums.db",
   "FLACSettings": {
     "ffmpeg_exe_name": "ffmpeg",
     "ffmpeg_convert_24bit_flac": "-map 0:a:0 -af aresample=osf=s16:osr=44100:dither_method=triangular -c:a flac -y -v warning -stats",
     "ffmpeg_get_metadata_tags": "-v quiet -print_format json -show_format -show_streams -show_chapters"
   },
-  "MediaDirectoryList": [
-    {
-      "isActive": true,
-      "mediaPath": "\\\\?\\R:\\tmp\\24\\flac",
-      "mediaName": "flac"
-    },
-    {
-      "isActive": false,
-      "mediaPath": "\\\\?\\R:\\tmp\\24\\mp3",
-      "mediaName": "mp3"
-    },
-    {
-      "isActive": false,
-      "mediaPath": "\\\\?\\R:\\tmp\\24\\flac_tracks2",
-      "mediaName": "flac_tracks2"
-    }
-  ],
+  "MediaDirectoryList": [],
   // MetadataSidecars applies to conversion runs only (menu 1/6 and CLI convert).
   // Scan metadata archives are controlled independently by ScanFlacMetadataArchives below.
   "MetadataSidecars": {

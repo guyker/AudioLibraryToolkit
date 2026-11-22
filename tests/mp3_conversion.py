@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 DEFAULT_MP3_SETTINGS = "\n\n\n"
 DEFAULT_SCAN_SETTINGS = "\n"
@@ -178,6 +179,20 @@ class ConversionTests(unittest.TestCase):
     def setUpClass(cls):
         cls.temporary = tempfile.TemporaryDirectory(prefix="afc-mp3-tests-")
         cls.root = Path(cls.temporary.name)
+        if os.name == "nt":
+            isolated = {"LOCALAPPDATA": str(cls.root / "local-app-data")}
+            default_config_dir = Path(isolated["LOCALAPPDATA"]) / "AudioLibraryToolkit"
+        elif sys.platform == "darwin":
+            isolated = {"HOME": str(cls.root / "home"), "XDG_STATE_HOME": str(cls.root / "state-home")}
+            default_config_dir = Path(isolated["HOME"]) / "Library" / "Application Support" / "AudioLibraryToolkit"
+        else:
+            isolated = {"XDG_CONFIG_HOME": str(cls.root / "config-home"),
+                        "XDG_STATE_HOME": str(cls.root / "state-home")}
+            default_config_dir = Path(isolated["XDG_CONFIG_HOME"]) / "AudioLibraryToolkit"
+        cls.environment = mock.patch.dict(os.environ, isolated)
+        cls.environment.start()
+        default_config_dir.mkdir(parents=True)
+        (default_config_dir / "config.json").write_text("{}", encoding="utf-8")
         cls.config = cls.root / "config.json"
         cls.config.write_text(json.dumps({
             "FLACSettings": {"ffmpeg_exe_name": str(ARGS.ffmpeg)},
@@ -237,6 +252,7 @@ class ConversionTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        cls.environment.stop()
         cls.temporary.cleanup()
 
     def setUp(self):
@@ -1839,7 +1855,7 @@ class ConversionTests(unittest.TestCase):
     def test_manual_flac_without_active_libraries_fails(self):
         result = self.legacy([{"isActive": False, "mediaPath": str(self.source)}], "1\nREPLACE\n")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("No active media libraries", result.stdout + result.stderr)
+        self.assertIn("at least one active", result.stdout + result.stderr)
         self.assertNotIn("Type REPLACE", result.stdout)
         self.assertEqual(hashlib.sha256(self.track.read_bytes()).digest(), self.original_hash)
 
@@ -2963,17 +2979,17 @@ class ConversionTests(unittest.TestCase):
         self.assertIn("collides with another library's repair output", result.stdout + result.stderr)
         self.assertFalse((self.output / "FIXED").exists())
 
-    def test_menu_configuration_uses_command_line_defaults_and_validates_libraries(self):
+    def test_menu_configuration_requires_paths_and_validates_libraries(self):
         settings = json.loads(self.config.read_text(encoding="utf-8"))
         settings.pop("OutDirectory", None)
         settings["MediaDirectoryList"] = []
         result = subprocess.run([str(ARGS.converter)], input="0\n", cwd=self.work,
                                 env=self.write_menu_config(settings), capture_output=True,
                                 text=True, encoding="utf-8", errors="replace")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        default_output = "C:\\tmp" if os.name == "nt" else tempfile.gettempdir()
-        self.assertIn(f"Output root (OutDirectory): {default_output}", result.stdout)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("set OutDirectory and at least one active", result.stdout + result.stderr)
 
+        settings["OutDirectory"] = str(self.output)
         for library in ({"isActive": True}, {"isActive": True, "mediaPath": ""},
                         {"isActive": True, "mediaPath": 5}, {"isActive": "yes", "mediaPath": str(self.source)}):
             with self.subTest(library=library):
@@ -2987,7 +3003,8 @@ class ConversionTests(unittest.TestCase):
         result = subprocess.run([str(ARGS.converter)], input="0\n", cwd=self.work,
                                 env=self.write_menu_config(settings), capture_output=True,
                                 text=True, encoding="utf-8", errors="replace")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("at least one active", result.stdout + result.stderr)
 
     def test_manual_mp3_default_library_name_and_no_active_libraries(self):
         result = self.legacy([{"isActive": False, "mediaPath": str(self.source)}])

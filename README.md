@@ -1,4 +1,4 @@
-# AudioFormatConverter
+# AudioLibraryToolkit
 
 <h1>A command-line utility written in modern c++ for audiophiles or media organizers to catalog their music library, check its quality, identify redundant copies, and perform basic conversions.</h1>
 
@@ -7,7 +7,7 @@
 
 <h3>Configuration Management:</h3>
 1. It reads application settings (output directories, logging levels, scan formats/tiers, conversion sidecar policy, and media library paths) from the per-user config.json.
-2. Explicit commands use built-in defaults when no config is found; the legacy menu can create a default config in the per-user config directory.
+2. First-time setup creates an editable per-user configuration and requires an output directory and input library.
 
 <h3>Audio File Discovery and Metadata Collection:</h3>
 1. It scans specified directories (recursively) to find audio files (FLAC, MP3, etc.).
@@ -144,10 +144,14 @@ variable or pass `-DFFmpeg_ROOT=<path>` for a matching shared FFmpeg SDK contain
 directories; by default CMake checks
 `external\ffmpeg\ffmpeg-master-latest-win64-gpl-shared\`. The SDK must include the five FFmpeg import
 libraries and runtime DLLs used by the application.
+For conversion, `ffmpeg.exe` must also be on `PATH` or selected by the `FLACSettings.ffmpeg_exe_name`
+configuration setting; installing the application does not install the FFmpeg executable.
 
 On Linux, the supported CI reference is Ubuntu 24.04 x86-64 with GCC 13. Install FFmpeg runtime tools and
 development packages for libavformat, libavcodec, libavfilter, libavutil and libswresample, plus pkg-config.
-The FFmpeg executable must include the `libmp3lame` encoder for MP3 integration tests.
+The FFmpeg executable must include the `libmp3lame` encoder for MP3 integration tests. With Ubuntu's FFmpeg 6.1.1,
+existing tests fail for AAC/ALAC M4A preservation and one ID3v2.3 comment lookup; see
+`docs/knowledge/K-063-ffmpeg-6-1-m4a-vendor-ids-fail-the-flac-preservation-audit.md` for the conversion defect.
 
 Configure, build and test using the matching preset:
 
@@ -158,10 +162,52 @@ ctest --preset windows-debug
 ```
 
 Use `linux-debug` on Linux; `windows-release` and `linux-release` select Release builds. Build output is
-isolated under `out\build\<preset>`. To stage an executable, use
-`cmake --install out\build\<preset>`; choose another location with `--prefix <directory>`. Linux uses
-installed system FFmpeg libraries. Windows stages the matched runtime DLLs beside the executable. Do not copy
-the Windows-path sample `config.json` into an active Linux configuration without editing its library paths.
+isolated under `out/build/<preset>`. To stage a Windows build, run `cmake --install out\build\windows-debug`;
+on Linux, run `cmake --install out/build/linux-debug`. Add `--prefix <directory>` to choose another location.
+Linux uses installed system FFmpeg libraries. Windows stages the matched runtime DLLs beside
+`AudioLibraryToolkit.exe`.
+Existing build directories may still contain an obsolete `FlacConvert` executable; run the new
+`AudioLibraryToolkit` executable instead.
+
+## Configuration and first run
+
+The application always prints the absolute configuration file path and tells you that the file can be opened and edited.
+Without `--config`, the per-user file is:
+
+| Platform | Configuration file |
+|---|---|
+| Windows | `%LOCALAPPDATA%\AudioLibraryToolkit\config.json` |
+| Linux | `$XDG_CONFIG_HOME/AudioLibraryToolkit/config.json`, or `~/.config/AudioLibraryToolkit/config.json` |
+| macOS | `~/Library/Application Support/AudioLibraryToolkit/config.json` |
+
+The runtime defines a macOS configuration location, but the supplied CMake build presets currently target Windows
+and Linux only.
+
+On the first operational run with an interactive terminal, enter an output directory and an existing audio library
+directory when prompted. Relative paths entered during setup are saved as absolute paths. The saved configuration
+contains no preselected private paths. If input or output is not an interactive terminal, or input ends before setup
+is complete (Ctrl+Z then Enter on Windows, Ctrl+D on Unix), the application creates an empty template and exits with
+instructions to open and edit it. Existing configuration files are never overwritten by setup. An incomplete existing
+file must be edited before the menu can start. `--help` and `--version` print the path without creating a config.
+
+The required menu settings can also be edited manually; for example, on Windows:
+
+```json
+{
+  "OutDirectory": "E:\\AudioOutput",
+  "MediaDirectoryList": [
+    { "isActive": true, "mediaPath": "D:\\Music", "mediaName": "Music" }
+  ]
+}
+```
+
+Replace these example paths with your own. The menu requires an output root and at least one active library.
+Subcommands take their input as a positional argument; output-producing commands use `--output-dir` when supplied,
+otherwise `OutDirectory`. `duplicates` does not require an output root. Pass `--config <file>` after a subcommand
+to select an existing config instead; a missing explicit file is an error. The working directory and old shared
+configuration locations such as `C:\ProgramData\AudioLibraryToolkit` are not searched automatically.
+
+`FlacConvert\config.json` is an optional sample with empty paths and comments explaining additional settings.
 
 ## Design and feature documentation
 
@@ -177,28 +223,28 @@ documents and structural warnings, use
 
 <h2>Command-line usage</h2>
 
-The executable supports explicit commands. Run `FlacConvert --help` or append `--help` to a command for detailed
+The executable supports explicit commands. Run `AudioLibraryToolkit --help` or append `--help` to a command for detailed
 input, output, configuration, and example information.
-Each invocation writes a session log under `%LOCALAPPDATA%\AudioFormatConverter\logs` on Windows or the platform
+Each invocation writes a session log under `%LOCALAPPDATA%\AudioLibraryToolkit\logs` on Windows or the platform
 state directory elsewhere. Console output stays concise; `--log-level info|debug|trace` controls detail in the log
 file, not console warnings/errors. The configured `LogLevel` is the default file-log threshold. Structured conversion
 audits and scan reports remain separate outputs. Logs can contain library paths and diagnostic metadata; inactive
 session logs older than 30 days or beyond the 1 GiB retention limit are removed.
 
 ```text
-FlacConvert convert "D:\Music" --output-dir "E:\Converted"
-FlacConvert convert "D:\Music" --to mp3 --output-dir "E:\MP3"
-FlacConvert convert "D:\Music" --to mp3 --mp3-quality 2 --output-dir "E:\MP3"
-FlacConvert scan "D:\Music" --output-dir "E:\Catalog"
-FlacConvert scan "D:\Music" --full-rescan --tier integrity
-FlacConvert scan "D:\Music" --archive-flac-metadata
-FlacConvert duplicates "E:\Catalog\Music"
-FlacConvert duplicates "E:\Catalog\Music" --report "E:\Reports\duplicates.json"
-FlacConvert db import "E:\Catalog\Music" --output-dir "E:\Databases"
-FlacConvert repair "D:\Music" --output-dir "E:\Repaired"
-FlacConvert repair "D:\Music" --rules flac.duplicate-comments,mp3.redundant-id3v1
-FlacConvert repair "D:\Music" --dry-run --jobs 2
-FlacConvert repair "D:\Music" --remove-id3v1
+AudioLibraryToolkit convert "D:\Music" --output-dir "E:\Converted"
+AudioLibraryToolkit convert "D:\Music" --to mp3 --output-dir "E:\MP3"
+AudioLibraryToolkit convert "D:\Music" --to mp3 --mp3-quality 2 --output-dir "E:\MP3"
+AudioLibraryToolkit scan "D:\Music" --output-dir "E:\Catalog"
+AudioLibraryToolkit scan "D:\Music" --full-rescan --tier integrity
+AudioLibraryToolkit scan "D:\Music" --archive-flac-metadata
+AudioLibraryToolkit duplicates "E:\Catalog\Music"
+AudioLibraryToolkit duplicates "E:\Catalog\Music" --report "E:\Reports\duplicates.json"
+AudioLibraryToolkit db import "E:\Catalog\Music" --output-dir "E:\Databases"
+AudioLibraryToolkit repair "D:\Music" --output-dir "E:\Repaired"
+AudioLibraryToolkit repair "D:\Music" --rules flac.duplicate-comments,mp3.redundant-id3v1
+AudioLibraryToolkit repair "D:\Music" --dry-run --jobs 2
+AudioLibraryToolkit repair "D:\Music" --remove-id3v1
 ```
 
 `convert` writes FLAC files to a separate output tree and preserves source files. Sources below 16-bit or 44.1 kHz, or
@@ -223,7 +269,7 @@ separately by `MetadataSidecars`. Duplicate detection, database import, and incr
 manifest before using marked batches. `DecodeWorkers` caps the independent full-decode stage. `duplicates` reports matches without
 opening folders; pass `--open` to open matched folders in Explorer. `db import` creates or updates a library-named
 `catalog-v2.sqlite` database and leaves legacy `.db` files untouched. `repair` writes metadata-only FLAC/MP3 fixes to
-`<output-root>\FIXED\<input-folder-name>`; `--rules` limits it to listed rule ids (see `FlacConvert repair --help`).
+`<output-root>\FIXED\<input-folder-name>`; `--rules` limits it to listed rule ids (see `AudioLibraryToolkit repair --help`).
 `--dry-run` prints a complete JSON report without writing repair output, and `--jobs` selects 1–16 workers
 (default 4). Normal session logs still apply. It verifies byte-identical audio before installation and reports
 unresolved findings rather than guessing.
@@ -365,28 +411,26 @@ Metadata design references: [FLAC format (RFC 9639)](https://www.rfc-editor.org/
 [FFmpeg MP3 muxer](https://ffmpeg.org/ffmpeg-formats.html#mp3), and the official FFmpeg
 [ID3 writer](https://github.com/FFmpeg/FFmpeg/blob/master/libavformat/id3v2enc.c).
 
-CTest registers the native regression checks and the generated-fixture Python integration suite. To run the
-Python suite directly:
+CTest registers the native regression checks and the generated-fixture Python integration suite. On Windows, to run
+the Python suite directly:
 
 ```text
-python tests\mp3_conversion.py --converter out\build\windows-debug\FlacConvert\FlacConvert.exe --ffmpeg external\ffmpeg\ffmpeg-master-latest-win64-gpl-shared\bin\ffmpeg.exe --ffprobe external\ffmpeg\ffmpeg-master-latest-win64-gpl-shared\bin\ffprobe.exe
+python tests\mp3_conversion.py --converter out\build\windows-debug\FlacConvert\AudioLibraryToolkit.exe --ffmpeg external\ffmpeg\ffmpeg-master-latest-win64-gpl-shared\bin\ffmpeg.exe --ffprobe external\ffmpeg\ffmpeg-master-latest-win64-gpl-shared\bin\ffprobe.exe
 ```
 
-Configuration is optional. Pass `--config <file>` to select a JSON settings file; otherwise the command checks the
-per-user config directory and uses built-in defaults if no config is present (output goes to the operating system's
-temporary directory on Linux/macOS or `C:\tmp` on Windows). The working directory is not searched automatically. The
-config directory is `%LOCALAPPDATA%\AudioLibraryToolkit` on Windows,
-`$XDG_CONFIG_HOME/AudioLibraryToolkit` (or `~/.config/AudioLibraryToolkit`) on Linux, and
-`~/Library/Application Support/AudioLibraryToolkit` on macOS. CLI input and output paths take precedence.
-Launching without arguments temporarily retains the legacy interactive menu.
-
-`FlacConvert/config.json` is a sample configuration with Windows library paths; adjust those paths before use.
 `FLACSettings.ffmpeg_exe_name` selects the conversion executable. The `ffmpeg_convert_24bit_flac` and
 `ffmpeg_get_metadata_tags` strings are compatibility fields, not runtime overrides: conversion and metadata options
 are defined in code. Library output filenames are generated from `mediaName`; old `resultPath` and `dbPath` fields
 are not read.
 
-On Windows, the executable opts into long-path handling. The operating system's
-**Enable Win32 long paths** policy must also be enabled; the filesystem's per-component
-filename limit still applies. Command-line and configuration paths are interpreted as UTF-8,
-then passed to Windows file APIs as native wide paths.
+On Windows, the executable opts into long-path handling. For application-wide support, enable the operating system's
+**Enable Win32 long paths** policy; setup and configuration loading also use extended Windows paths where needed.
+The filesystem's per-component filename limit still applies. Command-line and configuration paths are interpreted as
+UTF-8, then passed to Windows file APIs as native wide paths.
+
+## Licence
+
+The project source is licensed under [GPL-3.0-or-later](LICENSE). Dependencies have separate licences; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). In particular, binary distributors must review the selected
+FFmpeg build and its corresponding-source and third-party licence obligations; these notices alone do not establish
+distribution compliance.

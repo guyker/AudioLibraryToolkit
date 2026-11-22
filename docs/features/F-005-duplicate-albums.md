@@ -63,7 +63,7 @@ Catalog JSON and databases are not changed by a move: rerun option 2 afterward. 
 but retains database albums absent from the import; it does not automatically purge moved albums.
 
 ## Entry points
-- `FlacConvert duplicates <json dir> [--open] [--report <file>]` → `FlacConvertMain.cpp#RunWithArguments`
+- `AudioLibraryToolkit duplicates <json dir> [--open] [--report <file>]` → `FlacConvertMain.cpp#RunWithArguments`
 - Menu option 3 → `FlacConvertMain.cpp#ScanFolderProcessJSONAndFindDuplicates`
 - `DuplicateMatcher.cpp#DuplicateMatcher::FindDuplicates`
 - `DuplicateComparison.cpp#DuplicateComparison::DescribeAlbum`, `DuplicateComparison.cpp#DuplicateComparison::DescribePair`

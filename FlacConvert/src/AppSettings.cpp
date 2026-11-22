@@ -19,6 +19,17 @@ std::shared_ptr<AppSettingsJson> AppSettingsJson::AppSettingsInstance = nullptr;
 
 namespace fs = std::filesystem;
 
+namespace {
+fs::path pathForInspection(const fs::path& path)
+{
+#ifdef _WIN32
+    return path.empty() ? path : fs::path(PlatformUtils::WindowsLongPath(path));
+#else
+    return path;
+#endif
+}
+}
+
 fs::path userConfigPath(std::string& errorMessage) {
     try {
         return PlatformUtils::UserConfigDirectory() / AppSettingsJson::DefaultConfigFileName;
@@ -45,48 +56,97 @@ std::shared_ptr<AppSettingsJson> AppSettingsJson::AppSetting() {
     }
 
     std::string errorMessage;
-    const fs::path configPath = userConfigPath(errorMessage);
-    if (configPath.empty()) {
+    auto settings = LoadForCommandLine(std::nullopt, errorMessage);
+    if (!settings) {
         std::cerr << "Error: " << errorMessage << std::endl;
         return nullptr;
     }
+    const bool hasActiveLibrary = std::ranges::any_of(settings->MediaDirectoryList,
+        [](const MediaDirectoryElement& library) { return library.isActive && !library.mediaPath.empty(); });
+    if (settings->OutDirectory.empty() ||
+        std::ranges::all_of(settings->OutDirectory, [](unsigned char ch) { return std::isspace(ch) != 0; }) ||
+        !hasActiveLibrary) {
+        AppSettingsInstance.reset();
+        std::cerr << "Error: Edit the configuration file and set OutDirectory and at least one active "
+            "MediaDirectoryList entry with a mediaPath before using the menu." << std::endl;
+        return nullptr;
+    }
+    return settings;
+}
 
-    bool isAppSettingLoaded = fs::exists(configPath);
-    if (isAppSettingLoaded) {
-        std::string errorMessage;
-        auto appSettingPtr = LoadWithDefaults(configPath, errorMessage);
-        isAppSettingLoaded = appSettingPtr != nullptr;
-        if (isAppSettingLoaded) {
-            AppSettingsInstance = appSettingPtr;
-        }
-        else {
-            std::cerr << "Error: " << errorMessage << std::endl;
+bool AppSettingsJson::CreateInitialConfiguration(const fs::path& configPath,
+    bool interactive, std::istream& input, std::ostream& output, std::string& errorMessage)
+{
+    auto settings = GetDefaultSettings();
+    bool completed = false;
+    if (interactive) {
+        output << "First-time setup. Enter an output directory and an existing audio library directory.\n"
+            "The configuration can be opened and edited after setup.\n";
+        const auto readPath = [&](const char* prompt, bool mustExist, std::string& result) {
+            for (;;) {
+                output << prompt << std::flush;
+                std::string value;
+                if (!PlatformUtils::ReadUtf8Line(input, value)) return false;
+                if (value.empty() || std::ranges::all_of(value,
+                        [](unsigned char ch) { return std::isspace(ch) != 0; })) {
+                    output << "A path is required.\n";
+                    continue;
+                }
+                std::error_code ec;
+                auto path = fs::absolute(CommonUtils::path_from_utf8(value), ec).lexically_normal();
+                if (ec) {
+                    output << "Cannot resolve that path: " << ec.message() << '\n';
+                    continue;
+                }
+                if (path.filename().empty() && path.has_relative_path()) {
+                    path = path.parent_path();
+                }
+                const auto status = fs::status(pathForInspection(path), ec);
+                if (ec && ec != std::errc::no_such_file_or_directory) {
+                    output << "Cannot inspect that path: " << ec.message() << '\n';
+                    continue;
+                }
+                if ((mustExist && !fs::is_directory(status)) ||
+                    (!mustExist && fs::exists(status) && !fs::is_directory(status))) {
+                    output << (mustExist ? "The input must be an existing directory.\n" :
+                        "The output path must be a directory or a new directory path.\n");
+                    continue;
+                }
+                result = CommonUtils::path_to_utf8(path);
+                return true;
+            }
+        };
+        std::string outputPath;
+        std::string inputPath;
+        completed = readPath("Output directory: ", false, outputPath) &&
+            readPath("Input library directory: ", true, inputPath);
+        if (completed) {
+            settings.OutDirectory = std::move(outputPath);
+            settings.MediaDirectoryList.push_back({ true, std::move(inputPath), std::nullopt });
         }
     }
-    else {
-        std::cout << std::endl << std::format(
-            "Configuration file not found. Create it at {}? Y/N ",
-            CommonUtils::path_to_utf8(configPath)) << std::flush;
-        char input = std::toupper(getchar());
-        if (input == 'Y') {
-            std::error_code ec;
-            fs::create_directories(configPath.parent_path(), ec);
-            if (ec) {
-                std::cerr << "Error: Cannot create configuration directory: " << ec.message() << std::endl;
-                return nullptr;
-            }
-            auto defaultSettings = AppSettingsJson::GetDefaultSettings();
-            defaultSettings.saveToFile(configPath);
-            if (fs::is_regular_file(configPath)) {
-                AppSettingsInstance = std::make_shared<AppSettingsJson>(defaultSettings);
-            }
-        }
-        else {
-            std::cout << "No configuration created." << std::endl;
-        }
-    }
 
-    return AppSettingsInstance;
+    std::error_code ec;
+    fs::create_directories(pathForInspection(configPath).parent_path(), ec);
+    if (ec) {
+        errorMessage = "Cannot create configuration directory '" +
+            CommonUtils::path_to_utf8(configPath.parent_path()) + "': " + ec.message();
+        return false;
+    }
+    if (!PlatformUtils::WriteNewTextFile(configPath, settings.toJsonString() + "\n", ec)) {
+        errorMessage = "Cannot create configuration file '" + CommonUtils::path_to_utf8(configPath) +
+            "': " + ec.message() + ". Existing files are not overwritten; check for an incomplete file.";
+        return false;
+    }
+    if (!completed) {
+        errorMessage = "Initial configuration created at '" + CommonUtils::path_to_utf8(configPath) +
+            "'. Open and edit it to set OutDirectory and at least one active MediaDirectoryList "
+            "entry with a mediaPath, then run the application again.";
+        return false;
+    }
+    output << "Configuration saved. You can open and edit it at "
+        << CommonUtils::path_to_utf8(configPath) << ".\n";
+    return true;
 }
 
 std::shared_ptr<AppSettingsJson> AppSettingsJson::LoadForCommandLine(
@@ -97,7 +157,7 @@ std::shared_ptr<AppSettingsJson> AppSettingsJson::LoadForCommandLine(
     if (explicitConfigPath.has_value()) {
         configPath = explicitConfigPath.value();
         std::error_code ec;
-        if (!fs::is_regular_file(configPath, ec) || ec) {
+        if (!fs::is_regular_file(pathForInspection(configPath), ec) || ec) {
             errorMessage = "Specified configuration file is not readable: " + CommonUtils::path_to_utf8(configPath);
             return nullptr;
         }
@@ -108,16 +168,20 @@ std::shared_ptr<AppSettingsJson> AppSettingsJson::LoadForCommandLine(
             return nullptr;
         }
         std::error_code ec;
-        const bool exists = fs::exists(configPath, ec);
+        const bool exists = fs::exists(pathForInspection(configPath), ec);
         if (ec) {
             errorMessage = "Cannot inspect configuration file '" +
                 CommonUtils::path_to_utf8(configPath) + "': " + ec.message();
             return nullptr;
         }
         if (!exists) {
-            configPath.clear();
+            const bool interactive = PlatformUtils::IsStdinInteractive() && PlatformUtils::IsStdoutInteractive();
+            if (!CreateInitialConfiguration(configPath, interactive,
+                    std::cin, std::cout, errorMessage)) {
+                return nullptr;
+            }
         }
-        else if (!fs::is_regular_file(configPath, ec) || ec) {
+        else if (!fs::is_regular_file(pathForInspection(configPath), ec) || ec) {
             errorMessage = "Configuration path is not a readable regular file: " +
                 CommonUtils::path_to_utf8(configPath);
             return nullptr;
@@ -131,21 +195,17 @@ std::shared_ptr<AppSettingsJson> AppSettingsJson::LoadForCommandLine(
     return settings;
 }
 
-// Built-in defaults (without the sample libraries) overlaid by the configuration file, if any.
+// Built-in defaults are overlaid by the configuration file, if any.
 // Shared by the command line and the interactive menu so both resolve settings identically.
 std::shared_ptr<AppSettingsJson> AppSettingsJson::LoadWithDefaults(
     const fs::path& configPath, std::string& errorMessage)
 {
     auto settings = std::make_shared<AppSettingsJson>(GetDefaultSettings());
-    settings->MediaDirectoryList.clear();
     if (!configPath.empty() && !settings->loadFromFile(configPath)) {
         errorMessage = "Failed to load configuration file: " + CommonUtils::path_to_utf8(configPath);
         return nullptr;
     }
 
-    if (settings->OutDirectory.empty()) {
-        settings->OutDirectory = DefaultOutDirectory();
-    }
     if (settings->LogLevel < 0 || settings->LogLevel > 6) {
         errorMessage = "LogLevel must be an integer from 0 through 6.";
         return nullptr;
@@ -240,7 +300,7 @@ std::string AppSettingsJson::toJsonString() const {
 
 // Save JSON to a file
 void AppSettingsJson::saveToFile(const std::filesystem::path& filename) const {
-    std::ofstream ofs(filename);
+    std::ofstream ofs(pathForInspection(filename));
     if (!ofs) {
         std::cerr << "Error: Cannot open file for writing: " << filename << std::endl;
         return;
@@ -256,7 +316,7 @@ void AppSettingsJson::saveToFile(const std::filesystem::path& filename) const {
 
 // Load JSON from a file
 bool AppSettingsJson::loadFromFile(const std::filesystem::path& filename) {
-    std::ifstream ifs(filename);
+    std::ifstream ifs(pathForInspection(filename));
     if (!ifs) {
         std::cerr << "Error: Cannot open file for reading: " << filename << std::endl;
         return false;
@@ -287,6 +347,10 @@ bool AppSettingsJson::loadFromFile(const std::filesystem::path& filename) {
     }
     if (doc.HasMember("MediaDirectoryList") && !doc["MediaDirectoryList"].IsArray()) {
         spdlog::error("MediaDirectoryList must be an array.");
+        return false;
+    }
+    if (doc.HasMember("OutDirectory") && !doc["OutDirectory"].IsString()) {
+        spdlog::error("OutDirectory must be a string.");
         return false;
     }
     if (doc.HasMember("MetadataScanMaxThreads") &&
@@ -448,7 +512,8 @@ bool AppSettingsJson::loadFromFile(const std::filesystem::path& filename) {
                 }
                 media.mediaPath = mediaObj["mediaPath"].GetString();
             }
-            if (media.isActive && media.mediaPath.empty()) {
+            if (media.isActive && (media.mediaPath.empty() ||
+                std::ranges::all_of(media.mediaPath, [](unsigned char ch) { return std::isspace(ch) != 0; }))) {
                 // An empty path would resolve to the process working directory.
                 spdlog::error("Active MediaDirectoryList entries require a non-empty mediaPath.");
                 return false;
@@ -460,8 +525,11 @@ bool AppSettingsJson::loadFromFile(const std::filesystem::path& filename) {
                 try
                 {
                     std::filesystem::path path = CommonUtils::path_from_utf8(media.mediaPath);
-                    if (std::filesystem::is_regular_file(path)) {
+                    if (std::filesystem::is_regular_file(pathForInspection(path))) {
                         path = path.parent_path();
+                    }
+                    if (path.filename().empty() && path.has_relative_path()) {
+                        path = path.lexically_normal().parent_path();
                     }
                     media.mediaName = CommonUtils::path_to_utf8(path.filename());
                 }

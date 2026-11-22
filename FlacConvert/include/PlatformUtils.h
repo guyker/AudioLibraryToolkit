@@ -3,7 +3,10 @@
 #include <string>
 #include <stdexcept>
 #include <filesystem>
+#include <iosfwd>
 #include <mutex>
+#include <string_view>
+#include <system_error>
 #include <vector>
 
 
@@ -42,6 +45,8 @@ namespace PlatformUtils {
 	std::string WideToUTF8(const std::wstring& wstr);
 	std::string wstringToUtf8_ver2(const std::wstring& wstr);
 	std::filesystem::path UserConfigDirectory();
+	bool WriteNewTextFile(const std::filesystem::path& path, std::string_view content,
+		std::error_code& error);
 	bool IsLinkOrReparsePoint(const std::filesystem::path& path);
 #ifdef _WIN32
 	std::wstring WindowsLongPath(const std::filesystem::path& path, bool forceExtended = false);
@@ -51,6 +56,8 @@ namespace PlatformUtils {
 	void OpenDirectory(const std::filesystem::path& path);
 
 	bool IsStdoutInteractive();
+	bool IsStdinInteractive();
+	bool ReadUtf8Line(std::istream& input, std::string& line);
 	// True when stdout is an interactive terminal that accepts ANSI/VT control sequences (independent of NO_COLOR).
 	bool EnableVirtualTerminal();
 	// True when stdout is an interactive terminal that accepts ANSI colour (honours NO_COLOR).

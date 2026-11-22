@@ -4,16 +4,23 @@
 
 #include <CLI/CLI.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <iostream>
 
 namespace
 {
 constexpr const char* kVersion = "1.0.0";
 
+bool isBlankPath(const std::string& value)
+{
+    return std::ranges::all_of(value, [](unsigned char ch) { return std::isspace(ch) != 0; });
+}
+
 const std::string kConfigurationHelp =
-    "Configuration keys (all optional; CLI paths override these values):\n"
+    "Configuration keys (CLI input and output paths override the configured paths):\n"
     "  Version (string, default 1.0.0): informational config value; --version reports the executable version.\n"
-    "  OutDirectory (path, default: C:\\tmp on Windows, system temporary directory elsewhere): default output root for convert, scan, and db import.\n"
+    "  OutDirectory (path): required output root unless --output-dir is supplied.\n"
     "  DatabaseFileName (string, default all_albums.db): legacy value; db import uses a library-named database.\n"
     "  FLACSettings.ffmpeg_exe_name (string, default ffmpeg): executable used by convert.\n"
     "  FLACSettings.ffmpeg_convert_24bit_flac (string, default -map 0:a:0 -af aresample=osf=s16:osr=44100:dither_method=triangular -c:a flac -y -v warning -stats): compatibility value only; conversion uses fixed options and determines overwrite behavior separately.\n"
@@ -49,7 +56,7 @@ void add_config_option(CLI::App* command, CommandLineOptions& options)
         "Detailed session-log level: info, debug, or trace. Console output stays concise.")
         ->check(CLI::IsMember({ "info", "debug", "trace" }));
     command->add_option("--config", options.configPath,
-        "Read settings from this JSON file. If omitted, use the per-user config or built-in defaults.")
+        "Read settings from this JSON file. If omitted, use the per-user config.")
         ->check([](const std::string& value) {
             return value.empty() ? "configuration path must not be empty" : std::string{};
         })
@@ -70,8 +77,8 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
     app.set_version_flag("--version", kVersion);
     app.require_subcommand(0, 1);
     app.footer(
-        "Configuration lookup: explicit --config, per-user config, then built-in defaults.\n"
-        "Missing implicit config uses built-in defaults (C:\\tmp on Windows, system temporary directory elsewhere); an explicitly requested invalid config is an error.\n\n"
+        "Configuration lookup: explicit --config, otherwise per-user config.\n"
+        "First run creates an editable config and requires an output directory and input library; an explicitly requested invalid config is an error.\n\n"
         "Commands:\n"
         "  convert <input-dir>   Convert supported audio into a separate output tree.\n"
         "  repair <input-dir>    Validate FLAC/MP3 metadata and repair safe problems without touching audio.\n"
@@ -98,9 +105,9 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
             return value.empty() ? "input directory must not be empty" : std::string{};
         });
     convert->add_option("--output-dir", options.outputDirectory,
-        "Base output root: <root>/<FLAC|MP3>/<input-folder-name>, preserving relative paths. Defaults to config OutDirectory or the platform default (C:\\tmp on Windows).")
+        "Base output root: <root>/<FLAC|MP3>/<input-folder-name>, preserving relative paths. Defaults to config OutDirectory.")
         ->check([](const std::string& value) {
-            return value.empty() ? "output directory must not be empty" : std::string{};
+            return isBlankPath(value) ? "output directory must not be blank" : std::string{};
         })
         ->each([&options](const std::string&) { options.outputDirectorySpecified = true; });
     convert->add_flag("--overwrite", options.overwrite,
@@ -110,8 +117,8 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
     add_config_option(convert, options);
     convert->footer(command_footer(
         "FLAC output: supported inputs become 16-bit/44.1 kHz FLAC with triangular dithering and mapped tags/pictures. Every other regular file in a written folder, including unsupported audio, is copied unchanged, as are folders without audio. A folder subtree containing audio but nothing to convert is skipped and listed in conversion-audit.json; a library without conversions writes only that report. Directory links and unsupported filesystem entries fail instead of being silently omitted. Native FLAC inputs also retain original metadata in .flac.flac-metadata (binary) or .flac.flac-metadata.json sidecars, per MetadataSidecars; source technical fields do not describe the converted audio. MP3 output: only native FLAC inputs; libmp3lame VBR quality 0 by default, ID3v2.4 tags/artwork plus an original FLAC metadata sidecar (per MetadataSidecars) and unchanged non-audio companion files. MP3 retains 44.1/48 kHz; other accepted rates become 48 kHz. Multichannel MP3 requires --downmix-to-stereo. Converted audio requires verified source depth >=16 and rate >=44100 Hz. Paths are preserved under a separate output directory; sources are never replaced. Existing destinations fail unless --overwrite is supplied. Both targets stop at the first error and keep completed outputs.",
-        "  FlacConvert convert \"D:\\Music\" --output-dir \"E:\\Converted\"\n"
-        "  FlacConvert convert \"D:\\Music\" --config \"D:\\settings\\config.json\""));
+        "  AudioLibraryToolkit convert \"D:\\Music\" --output-dir \"E:\\Converted\"\n"
+        "  AudioLibraryToolkit convert \"D:\\Music\" --config \"D:\\settings\\config.json\""));
     convert->callback([&options, &targetFormat, quality, downmix] {
         options.conversion.target = targetFormat == "mp3" ? AudioTarget::Mp3 : AudioTarget::Flac;
         if (options.conversion.target != AudioTarget::Mp3 && (quality->count() || downmix->count())) {
@@ -130,7 +137,7 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
     repair->add_option("--output-dir", options.outputDirectory,
         "Base output root. Repaired folders are written under <root>/FIXED/<library-name>; defaults to OutDirectory.")
         ->check([](const std::string& value) {
-            return value.empty() ? "output directory must not be empty" : std::string{};
+            return isBlankPath(value) ? "output directory must not be blank" : std::string{};
         })
         ->each([&options](const std::string&) { options.outputDirectorySpecified = true; });
     repair->add_flag("--overwrite", options.overwrite,
@@ -153,9 +160,9 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
     add_config_option(repair, options);
     repair->footer(command_footer(
         "Inspects native FLAC and MP3 files with metadata-only rules (see --rules). Audio bytes are copied and verified unchanged. Redundant MP3 ID3v1 tags are kept by default; --remove-id3v1 or explicitly selecting mp3.redundant-id3v1 opts in. --dry-run prints a complete JSON report and writes no repair output. --jobs limits parallel workers (default 4). Only affected folders are copied; sources are never modified. Findings needing review exit with code 1. Existing destinations fail unless --overwrite is supplied.",
-        "  FlacConvert repair \"D:\\Music\"\n"
-        "  FlacConvert repair \"D:\\Music\" --output-dir \"E:\\Repaired\"\n"
-        "  FlacConvert repair \"D:\\Music\" --rules flac.duplicate-comments,mp3.redundant-id3v1"));
+        "  AudioLibraryToolkit repair \"D:\\Music\"\n"
+        "  AudioLibraryToolkit repair \"D:\\Music\" --output-dir \"E:\\Repaired\"\n"
+        "  AudioLibraryToolkit repair \"D:\\Music\" --rules flac.duplicate-comments,mp3.redundant-id3v1"));
     repair->callback([&options] { options.action = CommandAction::Repair; });
 
     auto* scan = app.add_subcommand("scan", "Scan a library and write split JSON metadata files.");
@@ -165,9 +172,9 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
             return value.empty() ? "library directory must not be empty" : std::string{};
         });
     scan->add_option("--output-dir", options.outputDirectory,
-        "Destination root. Defaults to config OutDirectory or the platform default (C:\\tmp on Windows).")
+        "Destination root. Defaults to config OutDirectory.")
         ->check([](const std::string& value) {
-            return value.empty() ? "output directory must not be empty" : std::string{};
+            return isBlankPath(value) ? "output directory must not be blank" : std::string{};
         })
         ->each([&options](const std::string&) { options.outputDirectorySpecified = true; });
     scan->add_flag("--full-rescan", options.fullRescan,
@@ -184,8 +191,8 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
     add_config_option(scan, options);
     scan->footer(command_footer(
         "Inputs: one audio library directory. Output: <output-dir>/<library-name>/media_out_<library-name>_<part>.json and scan-manifest.json. Unchanged files reuse prior metadata when Incremental is enabled; --full-rescan forces rereads. --tier selects catalog, integrity, or analysis processing. Native FLAC metadata archives are optional and disabled by default; the archive flags override ScanFlacMetadataArchives. A completed scan replaces generated JSON and retires previous manifest-owned archives only after the new set is ready.",
-        "  FlacConvert scan \"D:\\Music\"\n"
-        "  FlacConvert scan \"D:\\Music\" --output-dir \"E:\\Catalog\""));
+        "  AudioLibraryToolkit scan \"D:\\Music\"\n"
+        "  AudioLibraryToolkit scan \"D:\\Music\" --output-dir \"E:\\Catalog\""));
     scan->callback([&options] { options.action = CommandAction::Scan; });
 
     auto* duplicates = app.add_subcommand("duplicates", "Find duplicate albums using JSON metadata.");
@@ -201,9 +208,9 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
     add_config_option(duplicates, options);
     duplicates->footer(command_footer(
         "Inputs: a directory containing generated album JSON files. Duplicate groups are printed without prompting. Use --open to launch matching folders in the operating system's file manager and --report to save a JSON report.",
-        "  FlacConvert duplicates \"C:\\tmp\\Music\"\n"
-        "  FlacConvert duplicates \"C:\\tmp\\Music\" --open\n"
-        "  FlacConvert duplicates \"C:\\tmp\\Music\" --report \"C:\\tmp\\duplicates.json\""));
+        "  AudioLibraryToolkit duplicates \"E:\\Catalog\\Music\"\n"
+        "  AudioLibraryToolkit duplicates \"E:\\Catalog\\Music\" --open\n"
+        "  AudioLibraryToolkit duplicates \"E:\\Catalog\\Music\" --report \"E:\\Reports\\duplicates.json\""));
     duplicates->callback([&options] { options.action = CommandAction::Duplicates; });
 
     auto* database = app.add_subcommand("db", "Database operations.");
@@ -215,16 +222,16 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
             return value.empty() ? "JSON directory must not be empty" : std::string{};
         });
     databaseImport->add_option("--output-dir", options.outputDirectory,
-        "Destination root for the library-named database. Defaults to config OutDirectory or the platform default (C:\\tmp on Windows).")
+        "Destination root for the library-named database. Defaults to config OutDirectory.")
         ->check([](const std::string& value) {
-            return value.empty() ? "output directory must not be empty" : std::string{};
+            return isBlankPath(value) ? "output directory must not be blank" : std::string{};
         })
         ->each([&options](const std::string&) { options.outputDirectorySpecified = true; });
     add_config_option(databaseImport, options);
     databaseImport->footer(command_footer(
         "Inputs: schema-v2 catalog JSON files. Output: <output-dir>/<library-name>/catalog-v2.sqlite. Import is transactional; old-format databases are left untouched.",
-        "  FlacConvert db import \"C:\\tmp\\Music\"\n"
-        "  FlacConvert db import \"C:\\tmp\\Music\" --output-dir \"E:\\Catalog\""));
+        "  AudioLibraryToolkit db import \"E:\\Catalog\\Music\"\n"
+        "  AudioLibraryToolkit db import \"E:\\Catalog\\Music\" --output-dir \"E:\\Databases\""));
     databaseImport->callback([&options] { options.action = CommandAction::DatabaseImport; });
 
     try

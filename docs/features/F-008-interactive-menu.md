@@ -3,7 +3,8 @@
 Status: active
 
 ## Behaviour
-Running with no arguments shows a numbered menu over the configured active libraries. Every mutating option prints
+Running with no arguments uses the first-run setup and required configuration described in F-007, then shows a numbered
+menu over the configured active libraries. Every mutating option prints
 an operation preview (inputs, outputs, counts, overwrite effects) and runs only after the user types exactly `RUN`;
 `BACK` returns to the menu; `EXIT`, Enter, any other text or EOF cancels without executing the operation.
 Conflicts block the run before installing output. After a started or failed operation a summary reports Completed, Partially
@@ -39,6 +40,7 @@ system temporary directory and logs its location; it does not install a catalog.
 ## Acceptance checks
 - [ ] Canceling at the confirmation writes no operation output. Option 7 retains its temporary HTML preview;
       a scan preview failure may write a temporary diagnostic report.
+- [ ] The menu cannot start without an output root and at least one active configured library.
 - [ ] `BACK` returns to the menu; EOF on stdin exits cleanly.
 - [ ] Option 2 can enable or disable FLAC archives before the preview without changing the saved configuration.
 - [ ] Option 7 previews FLAC/MP3 repair findings and requires `RUN` before writing repaired copies.

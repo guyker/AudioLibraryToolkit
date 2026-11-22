@@ -5,9 +5,16 @@ Status: active
 ## Behaviour
 Settings come from `config.json` in the per-user configuration directory: `%LOCALAPPDATA%\AudioLibraryToolkit` on
 Windows, `$XDG_CONFIG_HOME/AudioLibraryToolkit` (or `~/.config/AudioLibraryToolkit`) on Linux, and
-`~/Library/Application Support/AudioLibraryToolkit` on macOS. CLI order: `--config <file>` → per-user config →
-built-in defaults with no libraries. The working directory is not searched automatically. CLI use of built-in
-defaults does not create a config file. Invalid `LogLevel` (outside 0–6), `AlbumsSplitThreshold <= 0`, or a negative/non-integer
+`~/Library/Application Support/AudioLibraryToolkit` on macOS, or an explicitly selected CLI `--config <file>`.
+Startup logs the absolute path and notes that it can be opened and edited. The working, executable and old shared directories
+are not searched. On a first operational run with interactive stdin and stdout, setup asks for an output directory and
+an existing input library, saves absolute paths, then creates the file; without an interactive terminal or when input
+ends before setup is complete, it creates an empty template and exits with editing instructions. Help/version print the
+path without creating a config.
+Existing files are not overwritten by setup. Defaults contain neither an output path nor private libraries; the menu
+requires an output root and an active library. CLI commands use their positional input and need either `OutDirectory`
+or `--output-dir`, except `duplicates`, which does not need an output root.
+Invalid `LogLevel` (outside 0–6), `AlbumsSplitThreshold <= 0`, or a negative/non-integer
 `MetadataScanMaxThreads` fails. `MetadataScanMaxThreads` defaults to `0`, which uses hardware concurrency (fallback 4);
 a positive value caps concurrent metadata workers per album. `LogLevel` sets the detailed session-file threshold for
 both CLI and menu; CLI `--log-level` overrides it without changing console verbosity (F-010).
@@ -15,10 +22,9 @@ both CLI and menu; CLI `--log-level` overrides it without changing console verbo
 `Format` (`binary`|`json`, default `binary`) and per-target policies `ConvertToFlac` / `ConvertToMp3`
 (`disabled`|`optional`|`required`, default `disabled`); other values fail loading. The sample config uses
 JSON comments to explain these options. `disabled` never writes a sidecar; `optional` writes by default and can
-be disabled for a run; `required` always writes and rejects disable requests. The menu offers to create a default file in the per-user configuration directory. The menu and CLI apply the same
-built-in defaults and validation to a
-found file (`AppSettingsJson::LoadWithDefaults`), so an absent or empty `OutDirectory` uses the platform default
-(K-007) in both. In `MediaDirectoryList`, `isActive` must be boolean and `mediaPath` a string when present, and active
+be disabled for a run; `required` always writes and rejects disable requests. The menu and CLI apply the same
+built-in defaults and validation to a found file (`AppSettingsJson::LoadWithDefaults`). In `MediaDirectoryList`,
+`isActive` must be boolean and `mediaPath` a string when present, and active
 entries require a non-empty `mediaPath`; otherwise loading fails.
 `UseAsyncMetadataReads` controls parallel TagLib reads during scan; the previous `UseAsyncFFmpegCalls` key remains
 accepted as an alias when the new key is absent. `CatalogExtensions` defaults to `.flac` and `.mp3`; additional supported TagLib formats can be
@@ -31,25 +37,31 @@ size limit. Large albums split into track fragments; a track that cannot fit fai
 ## Entry points
 - `AppSettings.cpp#AppSettingsJson::LoadForCommandLine` (CLI), `AppSettings.cpp#AppSettingsJson::AppSetting` (menu),
   both through `AppSettings.cpp#AppSettingsJson::LoadWithDefaults`
-- `AppSettings.cpp#AppSettingsJson::GetDefaultSettings`, `include/AppSettings.h#MediaDirectoryElement`
+- `include/AppSettings.h#AppSettingsJson::GetDefaultSettings`, `AppSettings.cpp#AppSettingsJson::CreateInitialConfiguration`,
+  `include/AppSettings.h#MediaDirectoryElement`
 
 ## Design and knowledge
 - DESIGN: `FlacConvert/DESIGN.md` → Configuration
-- K-007 default output directory
-- K-060 per-user platform configuration directory
+- K-061 per-user configuration and explicit required paths
 
 ## Acceptance checks
 - [ ] `--config missing.json` exits non-zero with a clear message.
-- [ ] With no config file, `convert` works using defaults.
+- [ ] First interactive setup asks for an output directory and existing input library and saves them.
+- [ ] Unicode and long paths entered on Windows are saved without corruption.
+- [ ] A library path entered during setup or edited in the config with a trailing separator keeps its folder name as
+      the default `mediaName`.
+- [ ] Unattended or interrupted first setup creates an empty editable template and exits non-zero.
+- [ ] The menu rejects an existing config without an output root or active library without changing the file.
+- [ ] A CLI command can use an explicit input and `--output-dir` with a config containing no saved libraries.
+- [ ] Output-producing CLI commands without a configured or explicit output root fail clearly.
 - [ ] A config in the working directory is ignored unless selected with `--config`.
 - [ ] `--config` takes precedence over the per-user config; an invalid per-user config fails instead of using defaults.
-- [ ] Missing implicit config uses built-in defaults without creating a file.
+- [ ] `--help` and `--version` print the configuration path without creating a file.
 - [ ] `AlbumsSplitThreshold: 0` is rejected.
 - [ ] Negative or non-integer `JsonBatchTargetBytes` is rejected.
 - [ ] `MediaDirectoryList` must contain objects, and a closed input stream exits the configuration prompt.
 - [ ] An active `MediaDirectoryList` entry with a missing, empty or non-string `mediaPath`, or a non-boolean
       `isActive`, fails loading; an inactive entry without a path is accepted.
-- [ ] A menu config without `OutDirectory` uses the same platform default as the CLI.
 - [ ] `MetadataScanMaxThreads: -1` is rejected; `0` selects automatic concurrency.
 - [ ] `CatalogExtensions` accepts only supported extensions and matching is case-insensitive.
 - [ ] `ScanFlacMetadataArchives` defaults to `false`, round-trips through config, and rejects non-boolean values.

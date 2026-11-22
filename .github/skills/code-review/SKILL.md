@@ -1,9 +1,9 @@
 ---
 name: code-review
-description: Repository-specific review of changes in AudioFormatConverter/FlacConvert (C++ FFmpeg/SQLite code, docs). Use when asked to review a diff, PR, branch or files in this repository. Runs in addition to the global code-review skill and overrides its naming/style rules.
+description: Repository-specific review of changes in AudioLibraryToolkit (C++ FFmpeg/SQLite code, docs). Use when asked to review a diff, PR, branch or files in this repository. Runs in addition to the global code-review skill and overrides its naming/style rules.
 ---
 
-# Code review (FlacConvert)
+# Code review (AudioLibraryToolkit)
 
 Run the global **code-review** skill for general C++ correctness. This skill adds the repository contract and
 **overrides** the global style guide: repo names are PascalCase types/methods, `_camelCase` members, camelCase

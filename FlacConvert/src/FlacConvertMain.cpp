@@ -96,6 +96,31 @@ fs::path pathFromUtf8(const std::string& path)
     return CommonUtils::path_from_utf8(path);
 }
 
+void logConfigurationPath(const std::vector<const char*>& arguments)
+{
+    try {
+        std::optional<fs::path> explicitPath;
+        for (std::size_t index = 1; index < arguments.size(); ++index) {
+            const std::string_view argument = arguments[index] == nullptr ? "" : arguments[index];
+            if (argument == "--") break;
+            if (argument == "--config" && index + 1 < arguments.size() && arguments[index + 1] != nullptr) {
+                explicitPath = pathFromUtf8(arguments[index + 1]);
+                break;
+            }
+            if (argument.starts_with("--config=")) {
+                explicitPath = pathFromUtf8(std::string(argument.substr(9)));
+                break;
+            }
+        }
+        const auto configPath = fs::absolute(explicitPath ? *explicitPath :
+            PlatformUtils::UserConfigDirectory() / AppSettingsJson::DefaultConfigFileName).lexically_normal();
+        spdlog::info("Configuration file: '{}'. You can open and edit this file.", pathToUtf8(configPath));
+    }
+    catch (const std::exception& error) {
+        spdlog::error("Cannot determine the configuration file path: {}", error.what());
+    }
+}
+
 fs::path scanOutputIoPath(const fs::path& path)
 {
 #ifdef _WIN32
@@ -3097,7 +3122,7 @@ int RunLegacyMenu()
     {
         spdlog::error("Failed to load Configuration File");
 
-        return -1;
+        return 1;
     }
 
     RunLogging::SetFileLevel(static_cast<spdlog::level::level_enum>(appSettingPtr->LogLevel));
@@ -3273,6 +3298,15 @@ int RunWithArgumentsImpl(const std::vector<const char*>& arguments)
             return 1;
         }
 
+        if (options.action != CommandAction::Duplicates && !options.outputDirectorySpecified &&
+            (settings->OutDirectory.empty() || std::ranges::all_of(settings->OutDirectory,
+                [](unsigned char ch) { return std::isspace(ch) != 0; }))) {
+            const std::string error = "Set OutDirectory in the configuration file or pass --output-dir.";
+            std::cerr << "Configuration error: " << error << '\n';
+            RunLogging::RecordError("Configuration error: " + error);
+            return 1;
+        }
+
         auto fileLogLevel = static_cast<spdlog::level::level_enum>(settings->LogLevel);
         if (options.logLevel == "info") fileLogLevel = spdlog::level::info;
         else if (options.logLevel == "debug") fileLogLevel = spdlog::level::debug;
@@ -3407,6 +3441,7 @@ int RunWithArguments(const std::vector<const char*>& arguments)
     const std::string operation = arguments.size() == 1
         ? "interactive menu" : (arguments[1] == nullptr ? "command line" : arguments[1]);
     RunLogging::Start(operation);
+    logConfigurationPath(arguments);
     int result = 1;
     try {
         result = RunWithArgumentsImpl(arguments);

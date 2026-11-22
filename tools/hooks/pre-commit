@@ -1,5 +1,5 @@
 #!/bin/sh
-# AudioFormatConverter documentation reminder; never blocks a commit.
+# AudioLibraryToolkit documentation reminder; never blocks a commit.
 
 if [ ! -f "tools/doc_impact.py" ]; then
     printf '%s\n' "WARNING: tools/doc_impact.py is unavailable; review design and features manually." >&2

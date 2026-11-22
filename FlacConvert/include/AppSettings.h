@@ -130,16 +130,6 @@ struct AppSettingsJson
 {
 	static constexpr bool isCustomAppConfigPath = true;
 
-	static constexpr const char* DefaultTMPDirectory = "c:\\tmp" ;
-	static std::string DefaultOutDirectory()
-	{
-#ifdef _WIN32
-		return "C:\\tmp";
-#else
-		return CommonUtils::utf8string_to_string(std::filesystem::temp_directory_path().u8string());
-#endif
-	}
-
 	static constexpr const char* DefaultConfigFileName = "config.json";
 	static constexpr const char* DefaultDatabaseFileName = "all_albums.db";
 
@@ -186,7 +176,9 @@ struct AppSettingsJson
 	static std::shared_ptr<AppSettingsJson> LoadForCommandLine(
 		const std::optional<std::filesystem::path>& explicitConfigPath,
 		std::string& errorMessage);
-	// Built-in defaults without sample libraries, overlaid by configPath (when not empty) and validated.
+	static bool CreateInitialConfiguration(const std::filesystem::path& configPath,
+		bool interactive, std::istream& input, std::ostream& output, std::string& errorMessage);
+	// Built-in defaults are overlaid by configPath (when not empty) and validated.
 	static std::shared_ptr<AppSettingsJson> LoadWithDefaults(
 		const std::filesystem::path& configPath, std::string& errorMessage);
 
@@ -195,7 +187,7 @@ struct AppSettingsJson
 		AppSettingsJson appSettingsJson
 		{	
 			"1.0.0",
-			AppSettingsJson::DefaultOutDirectory(),
+			"",
 			AppSettingsJson::DefaultDatabaseFileName,
 			1,
 			true, //UseAsyncMetadataReads
@@ -215,10 +207,7 @@ struct AppSettingsJson
 				 L"-map 0:a:0 -af aresample=osf=s16:osr=44100:dither_method=triangular -c:a flac -y -v warning -stats",
 				 L"-v quiet -print_format json -show_format -show_streams -show_chapters",
 			},
-			{
-				{true, "\\\\?\\R:\\tmp\\24\\flac", "flac"},
-				{true, "\\\\?\\R:\\tmp\\24\\mp3", "mp3"}
-			},
+			{},
 			{}, // MetadataSidecars: binary, disabled for both targets
 		};
 

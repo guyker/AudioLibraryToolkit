@@ -16,7 +16,7 @@ Split albums are validated and reassembled before import; incomplete or inconsis
 Legacy batches without a manifest ID remain readable.
 
 ## Entry points
-- `FlacConvert db import <json dir> [--output-dir]` → `FlacConvertMain.cpp#ImportJsonDirectoryToDatabase`
+- `AudioLibraryToolkit db import <json dir> [--output-dir]` → `FlacConvertMain.cpp#ImportJsonDirectoryToDatabase`
 - Menu option 4 → `FlacConvertMain.cpp#ExportJSONToDB`
 - `AlbumCollection.cpp#AlbumCollection::ExportToDatabase`, `CatalogDatabase.cpp#CatalogDatabase::Import`
 

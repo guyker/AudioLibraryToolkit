@@ -57,10 +57,10 @@ target_link_libraries(FlacConvertCore
     PRIVATE
         rapidjson_headers)
 
-add_executable(FlacConvert src/FlacConvertMain.cpp)
-target_link_libraries(FlacConvert PRIVATE FlacConvertCore)
+add_executable(AudioLibraryToolkit src/FlacConvertMain.cpp)
+target_link_libraries(AudioLibraryToolkit PRIVATE FlacConvertCore)
 
-foreach(_target IN ITEMS sqlite3 FlacConvertCore FlacConvert)
+foreach(_target IN ITEMS sqlite3 FlacConvertCore AudioLibraryToolkit)
     set_target_properties(${_target} PROPERTIES
         CXX_STANDARD 20
         CXX_STANDARD_REQUIRED ON
@@ -73,6 +73,6 @@ endforeach()
 if(WIN32)
     target_compile_definitions(FlacConvertCore PUBLIC UNICODE _UNICODE SPDLOG_WCHAR_FILENAMES)
     target_link_libraries(FlacConvertCore PUBLIC shell32)
-    afc_copy_windows_ffmpeg_runtime(FlacConvert)
-    afc_embed_windows_manifest(FlacConvert)
+    afc_copy_windows_ffmpeg_runtime(AudioLibraryToolkit)
+    afc_embed_windows_manifest(AudioLibraryToolkit)
 endif()

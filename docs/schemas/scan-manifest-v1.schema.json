@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "AudioFormatConverter scan manifest",
+  "title": "AudioLibraryToolkit scan manifest",
   "description": "Integrity and completeness inventory for one successful scan output set.",
   "type": "object",
   "required": [

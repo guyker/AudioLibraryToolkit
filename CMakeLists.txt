@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(AudioFormatConverter VERSION 1.0 LANGUAGES C CXX)
+project(AudioLibraryToolkit VERSION 1.0 LANGUAGES C CXX)
 
 include(CTest)
 include(GNUInstallDirs)
@@ -85,12 +85,37 @@ endif()
 
 add_subdirectory(FlacConvert)
 
-install(TARGETS FlacConvert
+install(TARGETS AudioLibraryToolkit
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+install(FILES LICENSE THIRD_PARTY_NOTICES.md
+    DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+install(FILES external/CLI11/LICENSE
+    DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses" RENAME CLI11.txt)
+install(FILES external/spdlog/LICENSE
+    DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses" RENAME spdlog.txt)
+install(FILES external/spdlog/include/spdlog/fmt/bundled/fmt.license.rst
+    DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses" RENAME fmt.txt)
+install(FILES licenses/RapidJSON.txt
+    DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses")
+install(FILES "${taglib_SOURCE_DIR}/COPYING.LGPL"
+    DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses" RENAME TagLib-LGPL.txt)
+install(FILES "${taglib_SOURCE_DIR}/COPYING.MPL"
+    DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses" RENAME TagLib-MPL.txt)
+if(EXISTS "${taglib_SOURCE_DIR}/3rdparty/utfcpp/LICENSE")
+    install(FILES "${taglib_SOURCE_DIR}/3rdparty/utfcpp/LICENSE"
+        DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses" RENAME utfcpp.txt)
+endif()
 
 if(WIN32)
     install(FILES ${_ffmpeg_runtime_dlls}
         DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    if(EXISTS "${FFmpeg_ROOT}/LICENSE.txt")
+        install(FILES "${FFmpeg_ROOT}/LICENSE.txt"
+            DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses" RENAME FFmpeg.txt)
+    else()
+        message(WARNING "The selected FFmpeg SDK has no LICENSE.txt; obtain its licence and redistribution notices separately.")
+    endif()
 endif()
 
 if(BUILD_TESTING)

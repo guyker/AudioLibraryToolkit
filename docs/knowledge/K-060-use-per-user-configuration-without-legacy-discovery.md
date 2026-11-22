@@ -3,8 +3,9 @@ id: K-060
 kind: decision
 title: "Use per-user configuration without legacy discovery"
 area: [FlacConvert]
-status: active
+status: superseded
 supersedes: [K-059]
+superseded_by: K-061
 created: 2026-11-22
 reviewed: 2026-11-22
 cites:
