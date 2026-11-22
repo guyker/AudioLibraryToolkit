@@ -41,6 +41,15 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix="afc-root-scan-") as temporary:
         root = Path(temporary)
+        if os.name == "nt":
+            os.environ["LOCALAPPDATA"] = str(root / "local-app-data")
+            menu_config_dir = Path(os.environ["LOCALAPPDATA"]) / "AudioLibraryToolkit"
+        elif sys.platform == "darwin":
+            os.environ["HOME"] = str(root / "home")
+            menu_config_dir = Path(os.environ["HOME"]) / "Library" / "Application Support" / "AudioLibraryToolkit"
+        else:
+            os.environ["XDG_CONFIG_HOME"] = str(root / "xdg-config")
+            menu_config_dir = Path(os.environ["XDG_CONFIG_HOME"]) / "AudioLibraryToolkit"
         library = root / "library"
         output = root / "output"
         default_config = root / "default-config.json"
@@ -1081,8 +1090,7 @@ def main():
         fixture_json = json.dumps(menu_fixture).encode("utf-8")
         for index in (1, 3, 1000):
             (menu_json / f"media_out_{library.name}_{index}.json").write_bytes(fixture_json)
-        menu_config_dir = root / "menu-config"
-        menu_config_dir.mkdir()
+        menu_config_dir.mkdir(parents=True)
         (menu_config_dir / "config.json").write_text(json.dumps({
             "OutDirectory": str(menu_output),
             "ScanTier": "catalog",
@@ -1090,8 +1098,6 @@ def main():
             "MediaDirectoryList": [{"isActive": True, "mediaPath": str(library),
                                     "mediaName": ""}],
         }), encoding="utf-8")
-        (root / "AppSettingsJsonPersistent.txt").write_text(
-            "UTF8:" + str(menu_config_dir), encoding="utf-8")
         menu = subprocess.run([converter], input="4\nRUN\n", cwd=root,
                               capture_output=True, text=True, timeout=30)
         if menu.returncode != 0 or "JSON input files: 3" not in menu.stdout:

@@ -38,7 +38,7 @@ It runs either as explicit CLI commands or, with no arguments, as a legacy inter
 | Duplicate matching | `src/DuplicateMatcher.cpp`, `include/DuplicateMatcher.h` | `DuplicateMatcher::FindDuplicates`: aliases, candidate indexes, pair evaluation, confidence and grouping |
 | Duplicate comparison output | `src/DuplicateComparison.cpp`, `include/DuplicateComparison.h` | Pure descriptions of current album snapshots and scan-time pair evidence; stable group-local album numbers |
 | Duplicate review | `src/DuplicateReview.cpp`, `include/DuplicateReview.h` | Per-group menu choices; explicitly confirmed, verified whole-folder moves to `OutDirectory/deleted` |
-| Platform adapters | `src/PlatformUtils.cpp`, `include/PlatformUtils.h` | UTF-16/UTF-8, `PlatformUtils::WindowsLongPath`, `PlatformUtils::OpenDirectory` |
+| Platform adapters | `src/PlatformUtils.cpp`, `include/PlatformUtils.h` | Per-user config location, UTF-16/UTF-8, `PlatformUtils::WindowsLongPath`, `PlatformUtils::OpenDirectory` |
 | Utilities | `src/CommonUtils.cpp`, `include/CommonUtils.h`, `include/BoundedTaskRunner.h`, `src/JsonUtils.cpp`, `include/JsonUtils.h` | UTF-8 path helpers, coroutine `Generator`, bounded task runner, JSON helpers |
 | Legacy (unused) | `FolderConvert::ConverAudioFolder`, `FolderConvert::ConverAudioFolder2`, `MediaConvertionAsyncTask` | In-place conversion paths with no caller outside themselves; not part of any current flow |
 
@@ -461,11 +461,16 @@ database integration fixtures cover the corresponding output paths.
 
 ## Configuration
 
-`AppSettingsJson::LoadForCommandLine` order: `--config` → directory persisted in `AppSettingsJsonPersistent.txt`
-(current directory) → `./config.json` → built-in defaults (`AppSettingsJson::GetDefaultSettings`, no libraries). The
-legacy menu uses `AppSettingsJson::AppSetting`, which can prompt for a config directory and offer to create one.
-Both resolve a found file through `AppSettingsJson::LoadWithDefaults`: built-in defaults without the sample libraries,
-overlaid by the file and validated, so an absent or empty `OutDirectory` uses the platform default in both paths.
+`AppSettingsJson::LoadForCommandLine` order: `--config` → per-user `config.json` → built-in defaults
+(`AppSettingsJson::GetDefaultSettings`, no libraries). The working and executable directories are not searched
+automatically.
+`PlatformUtils::UserConfigDirectory` selects `%LOCALAPPDATA%/AudioLibraryToolkit` on Windows,
+`$XDG_CONFIG_HOME/AudioLibraryToolkit` (or `~/.config/AudioLibraryToolkit`) on Linux, and
+`~/Library/Application Support/AudioLibraryToolkit` on macOS. The legacy menu uses this same location and offers to
+create a default config there when it is absent. Both paths resolve a found file through
+`AppSettingsJson::LoadWithDefaults`: built-in defaults without the sample libraries, overlaid by the file and
+validated, so an absent or empty `OutDirectory` uses the platform default in both paths. CLI loading does not create
+a config file when using built-in defaults.
 `MediaDirectoryList` entries must be objects; `isActive` must be boolean and `mediaPath` a string when present; an
 active entry requires a non-empty `mediaPath` (an empty path would resolve to the working directory). Violations
 fail configuration loading.
@@ -570,7 +575,7 @@ conversion records its class in `MediaConvertionTask::GetFailureType`.
 ## Platform boundaries
 
 Portable core with narrow conditional blocks (K-006). Windows-specific code: `wmain`, console code pages,
-`PlatformUtils::WindowsLongPath`, `ScopedCurrentDirectory`'s long-path fallback (short working-directory anchor and
+`PlatformUtils::UserConfigDirectory`, `PlatformUtils::WindowsLongPath`, `ScopedCurrentDirectory`'s long-path fallback (short working-directory anchor and
 directory handles opened without delete sharing), `quoteWindowsArgument` + `_wspawnvp`, `MoveFileExW`,
 `CompareStringOrdinal`, SQLite `win32-longpath` VFS (K-042), default `C:\tmp` (K-007). POSIX branches:
 `fork`/`execvp`, rename/hard-link install, `sqlite3_open`. `JsonUtils::tryParseMember` uses the portable

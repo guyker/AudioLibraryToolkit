@@ -3,9 +3,11 @@
 Status: active
 
 ## Behaviour
-Settings come from `config.json`. CLI order: `--config <file>` → directory recorded in
-`AppSettingsJsonPersistent.txt` (current directory) → `./config.json` → built-in defaults with no libraries. Invalid
-`LogLevel` (outside 0–6), `AlbumsSplitThreshold <= 0`, or a negative/non-integer
+Settings come from `config.json` in the per-user configuration directory: `%LOCALAPPDATA%\AudioLibraryToolkit` on
+Windows, `$XDG_CONFIG_HOME/AudioLibraryToolkit` (or `~/.config/AudioLibraryToolkit`) on Linux, and
+`~/Library/Application Support/AudioLibraryToolkit` on macOS. CLI order: `--config <file>` → per-user config →
+built-in defaults with no libraries. The working directory is not searched automatically. CLI use of built-in
+defaults does not create a config file. Invalid `LogLevel` (outside 0–6), `AlbumsSplitThreshold <= 0`, or a negative/non-integer
 `MetadataScanMaxThreads` fails. `MetadataScanMaxThreads` defaults to `0`, which uses hardware concurrency (fallback 4);
 a positive value caps concurrent metadata workers per album. `LogLevel` sets the detailed session-file threshold for
 both CLI and menu; CLI `--log-level` overrides it without changing console verbosity (F-010).
@@ -13,8 +15,8 @@ both CLI and menu; CLI `--log-level` overrides it without changing console verbo
 `Format` (`binary`|`json`, default `binary`) and per-target policies `ConvertToFlac` / `ConvertToMp3`
 (`disabled`|`optional`|`required`, default `disabled`); other values fail loading. The sample config uses
 JSON comments to explain these options. `disabled` never writes a sidecar; `optional` writes by default and can
-be disabled for a run; `required` always writes and rejects disable requests. The menu may prompt for a config
-directory and offer to create a default file. The menu and CLI apply the same built-in defaults and validation to a
+be disabled for a run; `required` always writes and rejects disable requests. The menu offers to create a default file in the per-user configuration directory. The menu and CLI apply the same
+built-in defaults and validation to a
 found file (`AppSettingsJson::LoadWithDefaults`), so an absent or empty `OutDirectory` uses the platform default
 (K-007) in both. In `MediaDirectoryList`, `isActive` must be boolean and `mediaPath` a string when present, and active
 entries require a non-empty `mediaPath`; otherwise loading fails.
@@ -34,10 +36,14 @@ size limit. Large albums split into track fragments; a track that cannot fit fai
 ## Design and knowledge
 - DESIGN: `FlacConvert/DESIGN.md` → Configuration
 - K-007 default output directory
+- K-060 per-user platform configuration directory
 
 ## Acceptance checks
 - [ ] `--config missing.json` exits non-zero with a clear message.
 - [ ] With no config file, `convert` works using defaults.
+- [ ] A config in the working directory is ignored unless selected with `--config`.
+- [ ] `--config` takes precedence over the per-user config; an invalid per-user config fails instead of using defaults.
+- [ ] Missing implicit config uses built-in defaults without creating a file.
 - [ ] `AlbumsSplitThreshold: 0` is rejected.
 - [ ] Negative or non-integer `JsonBatchTargetBytes` is rejected.
 - [ ] `MediaDirectoryList` must contain objects, and a closed input stream exits the configuration prompt.
@@ -55,5 +61,3 @@ size limit. Large albums split into track fragments; a track that cannot fit fai
 
 ## Known limitations
 - `DatabaseFileName`, `resultPath`, `dbPath` and most `FLACSettings` strings are read but unused.
-- `AppSettingsJsonPersistent.txt` lives in the current directory; only the legacy menu writes it, when the user
-  supplies a config directory (`AppSettings.cpp#promptForConfigDir`). Commands only read it.

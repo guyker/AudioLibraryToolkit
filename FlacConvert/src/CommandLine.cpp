@@ -49,7 +49,7 @@ void add_config_option(CLI::App* command, CommandLineOptions& options)
         "Detailed session-log level: info, debug, or trace. Console output stays concise.")
         ->check(CLI::IsMember({ "info", "debug", "trace" }));
     command->add_option("--config", options.configPath,
-        "Read settings from this JSON file. If omitted, use the persisted config location, then ./config.json, then built-in defaults.")
+        "Read settings from this JSON file. If omitted, use the per-user config or built-in defaults.")
         ->check([](const std::string& value) {
             return value.empty() ? "configuration path must not be empty" : std::string{};
         })
@@ -70,7 +70,7 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
     app.set_version_flag("--version", kVersion);
     app.require_subcommand(0, 1);
     app.footer(
-        "Configuration lookup: explicit --config, persisted config directory, ./config.json, then built-in defaults.\n"
+        "Configuration lookup: explicit --config, per-user config, then built-in defaults.\n"
         "Missing implicit config uses built-in defaults (C:\\tmp on Windows, system temporary directory elsewhere); an explicitly requested invalid config is an error.\n\n"
         "Commands:\n"
         "  convert <input-dir>   Convert supported audio into a separate output tree.\n"

@@ -41,6 +41,7 @@ namespace PlatformUtils {
 
 	std::string WideToUTF8(const std::wstring& wstr);
 	std::string wstringToUtf8_ver2(const std::wstring& wstr);
+	std::filesystem::path UserConfigDirectory();
 	bool IsLinkOrReparsePoint(const std::filesystem::path& path);
 #ifdef _WIN32
 	std::wstring WindowsLongPath(const std::filesystem::path& path, bool forceExtended = false);

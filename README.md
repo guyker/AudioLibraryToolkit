@@ -6,8 +6,8 @@
 <h2>high-level overview of what the program does:</h2>
 
 <h3>Configuration Management:</h3>
-1. It reads application settings (output directories, logging levels, scan formats/tiers, conversion sidecar policy, and media library paths) from config.json.
-2. Explicit commands use built-in defaults when no config is found; only the temporary legacy menu can prompt for a config location.
+1. It reads application settings (output directories, logging levels, scan formats/tiers, conversion sidecar policy, and media library paths) from the per-user config.json.
+2. Explicit commands use built-in defaults when no config is found; the legacy menu can create a default config in the per-user config directory.
 
 <h3>Audio File Discovery and Metadata Collection:</h3>
 1. It scans specified directories (recursively) to find audio files (FLAC, MP3, etc.).
@@ -373,8 +373,11 @@ python tests\mp3_conversion.py --converter out\build\windows-debug\FlacConvert\F
 ```
 
 Configuration is optional. Pass `--config <file>` to select a JSON settings file; otherwise the command checks the
-persisted config location, then `./config.json`, and finally uses built-in defaults (output goes to the operating
-system's temporary directory on Linux/macOS or `C:\tmp` on Windows). CLI input and output paths take precedence.
+per-user config directory and uses built-in defaults if no config is present (output goes to the operating system's
+temporary directory on Linux/macOS or `C:\tmp` on Windows). The working directory is not searched automatically. The
+config directory is `%LOCALAPPDATA%\AudioLibraryToolkit` on Windows,
+`$XDG_CONFIG_HOME/AudioLibraryToolkit` (or `~/.config/AudioLibraryToolkit`) on Linux, and
+`~/Library/Application Support/AudioLibraryToolkit` on macOS. CLI input and output paths take precedence.
 Launching without arguments temporarily retains the legacy interactive menu.
 
 `FlacConvert/config.json` is a sample configuration with Windows library paths; adjust those paths before use.

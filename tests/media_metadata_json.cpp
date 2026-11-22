@@ -85,7 +85,7 @@ int main() {
             "Audio analysis status was not explicitly marked as not run");
 
         std::string settingsError;
-        auto settings = AppSettingsJson::LoadForCommandLine(std::nullopt, settingsError);
+        auto settings = AppSettingsJson::LoadWithDefaults({}, settingsError);
         require(settings != nullptr, "Could not initialize test settings");
         require(settings->toJsonString().find("UseFFmpegLibraryAPI") == std::string::npos,
             "Deprecated UseFFmpegLibraryAPI setting was serialized");

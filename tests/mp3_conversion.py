@@ -11,6 +11,7 @@ import struct
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -247,6 +248,30 @@ class ConversionTests(unittest.TestCase):
         self.track = self.source / self.name
         self.track.write_bytes(self.fixture.read_bytes())
         self.original_hash = hashlib.sha256(self.track.read_bytes()).digest()
+
+    def config_environment(self, environment=None):
+        env = os.environ.copy() if environment is None else environment.copy()
+        config_root = Path(tempfile.mkdtemp(prefix="config-home-", dir=self.work))
+        if os.name == "nt":
+            env["LOCALAPPDATA"] = str(config_root / "local-app-data")
+        elif sys.platform == "darwin":
+            env["HOME"] = str(config_root / "home")
+        else:
+            env["XDG_CONFIG_HOME"] = str(config_root / "xdg-config")
+        return env
+
+    def write_menu_config(self, settings, environment=None):
+        env = self.config_environment(environment)
+        if os.name == "nt":
+            config_dir = Path(env["LOCALAPPDATA"]) / "AudioLibraryToolkit"
+        elif sys.platform == "darwin":
+            config_dir = Path(env["HOME"]) / "Library" / "Application Support" / "AudioLibraryToolkit"
+        else:
+            config_dir = Path(env["XDG_CONFIG_HOME"]) / "AudioLibraryToolkit"
+        config_dir.mkdir(parents=True)
+        self.menu_config_path = config_dir / "config.json"
+        self.menu_config_path.write_text(json.dumps(settings), encoding="utf-8")
+        return env
 
     def convert(self, *extra, success=True, target="mp3", config=None):
         env = os.environ.copy()
@@ -1645,10 +1670,8 @@ class ConversionTests(unittest.TestCase):
         settings = json.loads(self.config.read_text(encoding="utf-8"))
         settings.update({"OutDirectory": str(self.output), "MediaDirectoryList": libraries})
         settings.update(extra_settings)
-        (self.work / "config.json").write_text(json.dumps(settings), encoding="utf-8")
-        (self.work / "AppSettingsJsonPersistent.txt").write_text(
-            "UTF8:" + str(self.work), encoding="utf-8")
-        return subprocess.run([str(ARGS.converter)], input=selection, cwd=self.work, env=env,
+        return subprocess.run([str(ARGS.converter)], input=selection, cwd=self.work,
+                              env=self.write_menu_config(settings, env),
                               capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     def test_manual_mp3_selection(self):
@@ -2069,7 +2092,7 @@ class ConversionTests(unittest.TestCase):
         second_archive = second_target / second_manifest["archives"][0]["file"]
         self.assertEqual(second_archive.read_bytes(), self.prefix)
         self.assertNotIn("ScanFlacMetadataArchives",
-                         json.loads((self.work / "config.json").read_text(encoding="utf-8")))
+                         json.loads(self.menu_config_path.read_text(encoding="utf-8")))
 
         result = self.legacy(libraries, "2\nNO\nRUN\n", ScanFlacMetadataArchives=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -2080,7 +2103,7 @@ class ConversionTests(unittest.TestCase):
         self.assertFalse(second_archive.exists())
         self.assertEqual(json.loads(manifest_path.read_text(encoding="utf-8"))["archives"], [])
         self.assertEqual(json.loads(second_manifest_path.read_text(encoding="utf-8"))["archives"], [])
-        self.assertTrue(json.loads((self.work / "config.json").read_text(encoding="utf-8"))
+        self.assertTrue(json.loads(self.menu_config_path.read_text(encoding="utf-8"))
                         ["ScanFlacMetadataArchives"])
 
         result = self.legacy(libraries, "2\n\nRUN\n", ScanFlacMetadataArchives=True)
@@ -2187,11 +2210,8 @@ class ConversionTests(unittest.TestCase):
             "MediaDirectoryList": [{"isActive": True, "mediaPath": str(missing),
                                     "mediaName": "Library"}],
         })
-        (self.work / "config.json").write_text(json.dumps(settings), encoding="utf-8")
-        (self.work / "AppSettingsJsonPersistent.txt").write_text(
-            "UTF8:" + str(self.work), encoding="utf-8")
-        env = dict(os.environ, TEMP=str(fallback_temp), TMP=str(fallback_temp),
-                   TMPDIR=str(fallback_temp))
+        env = self.write_menu_config(settings, dict(os.environ, TEMP=str(fallback_temp),
+                                                    TMP=str(fallback_temp), TMPDIR=str(fallback_temp)))
         result = subprocess.run([str(ARGS.converter)], input="2\n\n", cwd=self.work,
                                 capture_output=True, text=True, encoding="utf-8",
                                 errors="replace", env=env)
@@ -2686,7 +2706,7 @@ class ConversionTests(unittest.TestCase):
             expected = [json.loads(path.read_text(encoding="utf-8")) for path in menu_files]
             explicit_output = self.work / "explicit"
             result = run(ARGS.converter, "scan", self.source, "--output-dir", explicit_output,
-                         "--config", self.work / "config.json")
+                         "--config", self.menu_config_path)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             explicit_files = sorted((explicit_output / self.source.name).glob("media_out_*_[12].json"))
             actual = [json.loads(path.read_text(encoding="utf-8")) for path in explicit_files]
@@ -2943,17 +2963,12 @@ class ConversionTests(unittest.TestCase):
         self.assertIn("collides with another library's repair output", result.stdout + result.stderr)
         self.assertFalse((self.output / "FIXED").exists())
 
-    def write_menu_config(self, settings):
-        (self.work / "config.json").write_text(json.dumps(settings), encoding="utf-8")
-        (self.work / "AppSettingsJsonPersistent.txt").write_text(
-            "UTF8:" + str(self.work), encoding="utf-8")
-
     def test_menu_configuration_uses_command_line_defaults_and_validates_libraries(self):
         settings = json.loads(self.config.read_text(encoding="utf-8"))
         settings.pop("OutDirectory", None)
         settings["MediaDirectoryList"] = []
-        self.write_menu_config(settings)
-        result = subprocess.run([str(ARGS.converter)], input="0\n", cwd=self.work, capture_output=True,
+        result = subprocess.run([str(ARGS.converter)], input="0\n", cwd=self.work,
+                                env=self.write_menu_config(settings), capture_output=True,
                                 text=True, encoding="utf-8", errors="replace")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         default_output = "C:\\tmp" if os.name == "nt" else tempfile.gettempdir()
@@ -2963,14 +2978,14 @@ class ConversionTests(unittest.TestCase):
                         {"isActive": True, "mediaPath": 5}, {"isActive": "yes", "mediaPath": str(self.source)}):
             with self.subTest(library=library):
                 settings["MediaDirectoryList"] = [library]
-                self.write_menu_config(settings)
                 result = subprocess.run([str(ARGS.converter)], input="N\n", cwd=self.work,
-                                        capture_output=True, text=True, encoding="utf-8", errors="replace")
+                                        env=self.write_menu_config(settings), capture_output=True,
+                                        text=True, encoding="utf-8", errors="replace")
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn("Failed to load configuration file", result.stdout + result.stderr)
         settings["MediaDirectoryList"] = [{"isActive": False}]
-        self.write_menu_config(settings)
-        result = subprocess.run([str(ARGS.converter)], input="0\n", cwd=self.work, capture_output=True,
+        result = subprocess.run([str(ARGS.converter)], input="0\n", cwd=self.work,
+                                env=self.write_menu_config(settings), capture_output=True,
                                 text=True, encoding="utf-8", errors="replace")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 

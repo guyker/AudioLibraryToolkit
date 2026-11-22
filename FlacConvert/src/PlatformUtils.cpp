@@ -20,6 +20,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstdio>
+#include <stdexcept>
 #include <mutex>
 #include <vector>
 #include <spdlog/spdlog.h>
@@ -27,6 +28,38 @@
 #include "CommonUtils.h"
 
 namespace PlatformUtils {
+
+std::filesystem::path UserConfigDirectory()
+{
+#ifdef _WIN32
+    const DWORD localAppDataLength = GetEnvironmentVariableW(L"LOCALAPPDATA", nullptr, 0);
+    if (localAppDataLength > 1) {
+        std::vector<wchar_t> localAppData(localAppDataLength);
+        const DWORD copied = GetEnvironmentVariableW(
+            L"LOCALAPPDATA", localAppData.data(), localAppDataLength);
+        if (copied > 0 && copied < localAppDataLength) {
+            return std::filesystem::path(localAppData.data()) / L"AudioLibraryToolkit";
+        }
+    }
+    throw std::runtime_error("Cannot locate the per-user configuration directory (LOCALAPPDATA is unavailable).");
+#elif defined(__APPLE__)
+    const char* home = std::getenv("HOME");
+    if (home != nullptr && *home != '\0') {
+        return std::filesystem::path(home) / "Library" / "Application Support" / "AudioLibraryToolkit";
+    }
+    throw std::runtime_error("Cannot locate the per-user configuration directory (HOME is unavailable).");
+#else
+    const char* xdgConfigHome = std::getenv("XDG_CONFIG_HOME");
+    if (xdgConfigHome != nullptr && *xdgConfigHome == '/') {
+        return std::filesystem::path(xdgConfigHome) / "AudioLibraryToolkit";
+    }
+    const char* home = std::getenv("HOME");
+    if (home != nullptr && *home != '\0') {
+        return std::filesystem::path(home) / ".config" / "AudioLibraryToolkit";
+    }
+    throw std::runtime_error("Cannot locate the per-user configuration directory (HOME is unavailable).");
+#endif
+}
 
 namespace
 {

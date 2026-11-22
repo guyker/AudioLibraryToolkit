@@ -140,7 +140,6 @@ struct AppSettingsJson
 #endif
 	}
 
-	static constexpr const char* PersistentFileName = "AppSettingsJsonPersistent.txt";
 	static constexpr const char* DefaultConfigFileName = "config.json";
 	static constexpr const char* DefaultDatabaseFileName = "all_albums.db";
 

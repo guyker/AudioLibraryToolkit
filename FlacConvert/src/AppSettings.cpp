@@ -17,93 +17,16 @@
 
 std::shared_ptr<AppSettingsJson> AppSettingsJson::AppSettingsInstance = nullptr;
 
-// ----------------------------------------------------------------------
-// Helpers for persistence (just the directory, not the full filename)
-// ----------------------------------------------------------------------
-
 namespace fs = std::filesystem;
 
-void saveLastDir(const fs::path& lastDir, const fs::path& persistentFile) {
-    std::ofstream out(persistentFile, std::ios::trunc);
-    if (!out) {
-        spdlog::error("Failed to write persistent file '{}',", CommonUtils::path_to_utf8(persistentFile));
+fs::path userConfigPath(std::string& errorMessage) {
+    try {
+        return PlatformUtils::UserConfigDirectory() / AppSettingsJson::DefaultConfigFileName;
     }
-    else {
-        const auto utf8Path = lastDir.u8string();
-        out.write("UTF8:", 5);
-        out.write(reinterpret_cast<const char*>(utf8Path.data()), static_cast<std::streamsize>(utf8Path.size()));
+    catch (const std::runtime_error& error) {
+        errorMessage = error.what();
+        return {};
     }
-}
-
-std::optional<fs::path> loadLastDir(const fs::path& persistentFile) {
-    std::ifstream in(persistentFile);
-    if (!in) return std::nullopt;
-    std::string dir;
-    std::getline(in, dir);
-    if (dir.empty()) return std::nullopt;
-    if (dir.starts_with("UTF8:")) {
-        return CommonUtils::path_from_utf8(dir.substr(5));
-    }
-    return fs::path(dir);
-}
-
-// ----------------------------------------------------------------------
-// Prompt the user once for a directory containing config.json
-// ----------------------------------------------------------------------
-
-fs::path promptForConfigDir(const fs::path& persistentFile) {
-    while (true) {
-        std::cout << "Please enter the directory containing '"
-            << AppSettingsJson::DefaultConfigFileName << "': "
-            << std::flush;
-
-        std::string input;
-        if (!std::getline(std::cin, input)) {
-            spdlog::error("Cannot read the configuration directory from standard input.");
-            return {};
-        }
-
-        if (input.empty()) {
-            spdlog::warn("No input provided; try again.");
-            continue;
-        }
-
-        fs::path dir = CommonUtils::path_from_utf8(input);
-        fs::path candidate = dir / AppSettingsJson::DefaultConfigFileName;
-
-        std::error_code ec;
-        if (fs::exists(candidate, ec) && !ec) {
-            // save only the directory for next time
-            saveLastDir(dir, persistentFile);
-            return dir;
-        }
-
-        spdlog::error("Config file not found at '{}'; please retry.", CommonUtils::path_to_utf8(candidate));
-    }
-}
-
-// ----------------------------------------------------------------------
-// Locate the config directory (possibly via persisted choice)
-// ----------------------------------------------------------------------
-
-fs::path findConfigDir() {
-    fs::path persistentFile = fs::current_path() / AppSettingsJson::PersistentFileName;
-
-    // 1) Try persisted directory
-    if (auto last = loadLastDir(persistentFile)) {
-        fs::path candidate = *last / AppSettingsJson::DefaultConfigFileName;
-        std::error_code ec;
-        if (fs::exists(candidate, ec) && !ec) {
-            spdlog::info("Using Config Path: '{}',", CommonUtils::path_to_utf8(candidate));
-            return *last;
-        }
-        spdlog::warn(
-            "Persisted directory '{}' no longer contains '{}', falling back to prompt",
-            CommonUtils::path_to_utf8(*last), AppSettingsJson::DefaultConfigFileName);
-    }
-
-    // 2) Ask the user until we get a valid one
-    return promptForConfigDir(persistentFile);
 }
 
 void save_string(const std::string& value, const fs::path& path) {
@@ -121,11 +44,12 @@ std::shared_ptr<AppSettingsJson> AppSettingsJson::AppSetting() {
         return AppSettingsInstance;
     }
 
-    fs::path configDir = findConfigDir();
-    if (configDir.empty()) {
+    std::string errorMessage;
+    const fs::path configPath = userConfigPath(errorMessage);
+    if (configPath.empty()) {
+        std::cerr << "Error: " << errorMessage << std::endl;
         return nullptr;
     }
-    fs::path configPath = configDir / AppSettingsJson::DefaultConfigFileName;
 
     bool isAppSettingLoaded = fs::exists(configPath);
     if (isAppSettingLoaded) {
@@ -140,22 +64,25 @@ std::shared_ptr<AppSettingsJson> AppSettingsJson::AppSetting() {
         }
     }
     else {
-        std::cout << "Configuration file not found - Generating default config file, please update settings in config file and run again" << std::endl;
-    }
-
-    if (!isAppSettingLoaded) {
         std::cout << std::endl << std::format(
-            "Would you like to create a new configuration file with defaults under {}? Y/N ",
-            CommonUtils::path_to_utf8(configPath)) << std::endl;
+            "Configuration file not found. Create it at {}? Y/N ",
+            CommonUtils::path_to_utf8(configPath)) << std::flush;
         char input = std::toupper(getchar());
         if (input == 'Y') {
+            std::error_code ec;
+            fs::create_directories(configPath.parent_path(), ec);
+            if (ec) {
+                std::cerr << "Error: Cannot create configuration directory: " << ec.message() << std::endl;
+                return nullptr;
+            }
             auto defaultSettings = AppSettingsJson::GetDefaultSettings();
             defaultSettings.saveToFile(configPath);
-            AppSettingsInstance = std::make_shared<AppSettingsJson>(defaultSettings);
+            if (fs::is_regular_file(configPath)) {
+                AppSettingsInstance = std::make_shared<AppSettingsJson>(defaultSettings);
+            }
         }
         else {
-            std::cout << "Ignored, please edit and fix "
-                << CommonUtils::path_to_utf8(configPath) << std::endl;
+            std::cout << "No configuration created." << std::endl;
         }
     }
 
@@ -176,21 +103,24 @@ std::shared_ptr<AppSettingsJson> AppSettingsJson::LoadForCommandLine(
         }
     }
     else {
-        const fs::path persistentFile = fs::current_path() / PersistentFileName;
-        if (const auto lastDirectory = loadLastDir(persistentFile)) {
-            const fs::path persistedConfig = *lastDirectory / DefaultConfigFileName;
-            std::error_code ec;
-            if (fs::is_regular_file(persistedConfig, ec) && !ec) {
-                configPath = persistedConfig;
-            }
-        }
-
+        configPath = userConfigPath(errorMessage);
         if (configPath.empty()) {
-            const fs::path currentConfig = fs::current_path() / DefaultConfigFileName;
-            std::error_code ec;
-            if (fs::is_regular_file(currentConfig, ec) && !ec) {
-                configPath = currentConfig;
-            }
+            return nullptr;
+        }
+        std::error_code ec;
+        const bool exists = fs::exists(configPath, ec);
+        if (ec) {
+            errorMessage = "Cannot inspect configuration file '" +
+                CommonUtils::path_to_utf8(configPath) + "': " + ec.message();
+            return nullptr;
+        }
+        if (!exists) {
+            configPath.clear();
+        }
+        else if (!fs::is_regular_file(configPath, ec) || ec) {
+            errorMessage = "Configuration path is not a readable regular file: " +
+                CommonUtils::path_to_utf8(configPath);
+            return nullptr;
         }
     }
 

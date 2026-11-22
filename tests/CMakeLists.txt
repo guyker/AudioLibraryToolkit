@@ -28,8 +28,10 @@ add_executable(duplicate_comparison_test duplicate_comparison.cpp)
 target_link_libraries(duplicate_comparison_test PRIVATE FlacConvertCore)
 add_executable(run_logging_test run_logging.cpp)
 target_link_libraries(run_logging_test PRIVATE FlacConvertCore)
+add_executable(app_settings_config_test app_settings_config.cpp)
+target_link_libraries(app_settings_config_test PRIVATE FlacConvertCore)
 
-foreach(_target IN ITEMS preservation_audit_test warning_regressions_test media_metadata_json_test media_record_json_test taglib_smoke_test decode_analyzer_test bounded_task_runner_test scoped_current_directory_test scan_report_schema_test duplicate_review_test duplicate_matcher_test duplicate_comparison_test run_logging_test)
+foreach(_target IN ITEMS preservation_audit_test warning_regressions_test media_metadata_json_test media_record_json_test taglib_smoke_test decode_analyzer_test bounded_task_runner_test scoped_current_directory_test scan_report_schema_test duplicate_review_test duplicate_matcher_test duplicate_comparison_test run_logging_test app_settings_config_test)
     target_compile_options(${_target} PRIVATE
         "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/W3;/utf-8;/permissive->"
         "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>>:-Wall;-Wextra;-Wpedantic>")
@@ -81,6 +83,8 @@ add_test(NAME duplicate-comparison
     COMMAND "$<TARGET_FILE:duplicate_comparison_test>")
 add_test(NAME run-logging
     COMMAND "$<TARGET_FILE:run_logging_test>")
+add_test(NAME app-settings-config
+    COMMAND "$<TARGET_FILE:app_settings_config_test>")
 add_test(NAME mp3-conversion-integration
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/mp3_conversion.py"
         --converter "$<TARGET_FILE:FlacConvert>"
