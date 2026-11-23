@@ -54,6 +54,7 @@ extern "C" {
 #include "DuplicateComparison.h"
 #include "DuplicateMatcher.h"
 #include "DuplicateReview.h"
+#include "OutputLayout.h"
 
 #include "MediaInformation.h"
 
@@ -1136,6 +1137,32 @@ std::map<std::string, MediaRecord> loadCatalogCache(
     return cache;
 }
 
+fs::path configuredCatalogDirectory(const fs::path& outputRoot, const fs::path& name)
+{
+    const auto directory = scanOutputIoPath(OutputLayout::Catalog(outputRoot, name));
+    std::error_code ec;
+    const auto status = fs::symlink_status(directory, ec);
+    if (ec && ec != std::errc::no_such_file_or_directory) {
+        throw fs::filesystem_error("Cannot inspect catalog directory", directory, ec);
+    }
+    if (fs::exists(status)) {
+        return directory;
+    }
+
+    const auto legacy = scanOutputIoPath(outputRoot / name);
+    ec.clear();
+    const bool legacyExists = fs::is_directory(legacy, ec);
+    if (ec && ec != std::errc::no_such_file_or_directory) {
+        throw fs::filesystem_error("Cannot inspect legacy catalog directory", legacy, ec);
+    }
+    if (legacyExists) {
+        spdlog::warn("Using legacy catalog directory '{}'; run option 2 to create catalog JSON in '{}'.",
+            pathToUtf8(legacy), pathToUtf8(directory));
+        return legacy;
+    }
+    return directory;
+}
+
 std::vector<fs::path> findConfiguredJsonFiles(
     const std::vector<MediaDirectoryElement>& mediaList,
     const fs::path& outputRoot)
@@ -1144,7 +1171,7 @@ std::vector<fs::path> findConfiguredJsonFiles(
     for (const auto& mediaEntry : mediaList) {
         const auto name = mediaEntry.mediaName && !mediaEntry.mediaName->empty()
             ? *mediaEntry.mediaName : directoryNameUtf8(pathFromUtf8(mediaEntry.mediaPath));
-        const auto jsonFiles = findJsonFiles(outputRoot / pathFromUtf8(name));
+        const auto jsonFiles = findJsonFiles(configuredCatalogDirectory(outputRoot, pathFromUtf8(name)));
         files.insert(files.end(), jsonFiles.begin(), jsonFiles.end());
     }
     return files;
@@ -1449,7 +1476,7 @@ int ConvertConfiguredLibraries(const std::vector<MediaDirectoryElement>& mediaDi
             spdlog::error("Library path is not a readable directory: '{}'.", pathToUtf8(source));
             return 1;
         }
-        const fs::path target = outputRoot / (mp3 ? "MP3" : "FLAC") / name;
+        const fs::path target = OutputLayout::Conversion(outputRoot, options.target, name);
         summary.outputs.push_back(absoluteDisplayPath(target));
         const fs::path canonicalTarget = fs::weakly_canonical(target, ec);
         if (ec) {
@@ -1604,7 +1631,7 @@ int RepairConfiguredLibraries(const std::vector<MediaDirectoryElement>& librarie
             return 1;
         }
         AudioRepair::Plan plan;
-        const auto target = outputRoot / "FIXED" / name;
+        const auto target = OutputLayout::Repair(outputRoot, name);
         if (AudioRepair::Prepare(source, target, overwrite, rules, plan) != 0) return 1;
         summary.outputs.push_back(absoluteDisplayPath(target));
         std::cout << "\nOperation preview: validate and repair FLAC/MP3 metadata\n"
@@ -1727,7 +1754,7 @@ int ScanFolderAndCreateJSON(std::vector<MediaDirectoryElement> mediaDirectoryLis
                 reportPreflight(source, outputRoot, "Library name must be a single directory name.", name);
                 return 1;
             }
-            const auto target = absoluteDisplayPath(outputRoot / name);
+            const auto target = absoluteDisplayPath(OutputLayout::Catalog(outputRoot, name));
             if (summary) {
                 summary->outputs.push_back(target);
             }
@@ -1841,7 +1868,7 @@ int ScanFolderAndCreateJSON(std::vector<MediaDirectoryElement> mediaDirectoryLis
         const fs::path libraryName = pathFromUtf8(mediaEntry.mediaName.value());
         const auto preflightFailure = [&](const std::string& message, const fs::path& affected,
             const std::error_code& error = {}) {
-            reportPreflight(libraryPath, outputRoot / libraryName, message, affected, error);
+            reportPreflight(libraryPath, OutputLayout::Catalog(outputRoot, libraryName), message, affected, error);
         };
         if (libraryName.empty() || libraryName == "." || libraryName == ".." ||
             libraryName.has_root_path() || libraryName.has_parent_path()) {
@@ -1850,7 +1877,7 @@ int ScanFolderAndCreateJSON(std::vector<MediaDirectoryElement> mediaDirectoryLis
             return 1;
         }
         std::error_code ec;
-        const fs::path targetDirectory = fs::absolute(outputRoot / libraryName, ec);
+        const fs::path targetDirectory = fs::absolute(OutputLayout::Catalog(outputRoot, libraryName), ec);
         if (ec) {
             spdlog::error("Cannot resolve scan output directory: {}", ec.message());
             preflightFailure("Cannot resolve scan output directory: " + ec.message(), outputRoot, ec);
@@ -2857,8 +2884,8 @@ int ExportJSONToDB(const std::vector<MediaDirectoryElement>& mediaDirectoryList,
             {}
         };
         summary.outputs.push_back(plan.database);
-        for (const auto& json : findJsonFiles(
-            pathFromUtf8(appSettingPtr->OutDirectory) / pathFromUtf8(normalizedEntry.mediaName.value()))) {
+        for (const auto& json : findJsonFiles(configuredCatalogDirectory(
+            pathFromUtf8(appSettingPtr->OutDirectory), name))) {
             plan.json.push_back(absoluteDisplayPath(json));
         }
         std::error_code ec;
@@ -2979,7 +3006,7 @@ constexpr std::array<MenuEntry, 7> MenuEntries{ {
     { '1', ConvertActionEnum::ConverEnum,
         "Convert to FLAC [sources unchanged]",
         "      Input: all regular files and directories in the active source libraries, recursively.\n"
-        "      Output: OutDirectory/FLAC/<mediaName>, retaining relative folder structure.\n"
+        "      Output: OutDirectory/normalized-flac/<mediaName>, retaining relative folder structure.\n"
         "              16-bit / 44.1 kHz FLAC with dithering, mapped tags/pictures, original FLAC\n"
         "              metadata sidecars per MetadataSidecars (binary/JSON; disabled/optional/required);\n"
         "              other files in written folders are copied unchanged.\n"
@@ -2992,7 +3019,7 @@ constexpr std::array<MenuEntry, 7> MenuEntries{ {
         "      RUN confirms execution; the first error stops processing without whole-batch rollback.\n" },
     { '2', ConvertActionEnum::CreateJSONEnum, "Scan directories and create metadata JSON",
         "      Input: audio libraries; reads track tags and technical metadata.\n"
-        "      Output: OutDirectory/<mediaName>/media_out_<mediaName>_<part>.json.\n"
+        "      Output: OutDirectory/catalog-json/<mediaName>/media_out_<mediaName>_<part>.json.\n"
         "              scan-report.json and scan-manifest.json; optional byte-exact FLAC archives.\n"
         "      Changes: replaces generated JSON, manifest and prior manifest-owned archives after\n"
         "               a successful scan; a failed scan preserves them and writes diagnostics;\n"
@@ -3004,10 +3031,10 @@ constexpr std::array<MenuEntry, 7> MenuEntries{ {
         "             for track metadata/quality comparisons.\n"
         "      Output: duplicate reports in the console; opens matching album folders.\n"
         "      Changes: pauses after each pair; an explicitly confirmed choice moves a whole\n"
-        "               album to OutDirectory/deleted. JSON and databases are not updated.\n" },
+        "               album to OutDirectory/quarantine. JSON and databases are not updated.\n" },
     { '4', ConvertActionEnum::PopulateJsonToDBEnum, "Import metadata JSON into SQLite",
         "      Input: generated JSON from option 2 for each active library.\n"
-        "      Output: OutDirectory/<mediaName>/catalog-v2.sqlite.\n"
+        "      Output: OutDirectory/catalog-sqlite/<mediaName>/catalog-v2.sqlite.\n"
         "      Changes: creates/updates database records; source audio and JSON are unchanged.\n"
         "               Does not scan audio directly; preview shows the configured filenames.\n" },
     { '5', ConvertActionEnum::CreateDBFromFolderEnum, "Scan directories directly to SQLite [NOT IMPLEMENTED]",
@@ -3015,7 +3042,7 @@ constexpr std::array<MenuEntry, 7> MenuEntries{ {
         "      Use option 2, then option 4 instead.\n" },
     { '6', ConvertActionEnum::ConvertMp3Enum, "Convert FLAC to MP3 [sources unchanged]",
         "      Input: native FLAC files in the active source libraries, recursively.\n"
-        "      Output: OutDirectory/MP3/<mediaName>/ with relative paths preserved:\n"
+        "      Output: OutDirectory/converted-mp3/<mediaName>/ with relative paths preserved:\n"
         "              MP3 (LAME VBR quality 0 by default), .mp3.flac-metadata sidecars\n"
         "              (or .json; per MetadataSidecars), and unchanged non-audio companion files.\n"
         "      Changes: sources unchanged; existing destinations fail unless overwrite is enabled.\n"
@@ -3031,7 +3058,7 @@ constexpr std::array<MenuEntry, 7> MenuEntries{ {
         "      Defaults: VBR 0, no downmix, no overwrite. RUN confirms the selected settings.\n" },
     { '7', ConvertActionEnum::RepairEnum, "Validate and repair FLAC/MP3 metadata [sources unchanged]",
         "      Input: native FLAC and MP3 files in active libraries, recursively.\n"
-        "      Output: OutDirectory/FIXED/<mediaName>; only folders containing a safe repair\n"
+        "      Output: OutDirectory/repaired-metadata/<mediaName>; only folders containing a safe repair\n"
         "              are copied, with all files in those folders retained unchanged otherwise.\n"
         "      Fix (metadata only): redundant ID3/APE tags, duplicate or empty comments and frames,\n"
         "           wrong picture MIME/size/depth, invalid seek tables, ID3v2.3 text encodings.\n"
@@ -3133,7 +3160,7 @@ int RunLegacyMenu()
 
     //std::cout << "App Settings: " << std::filesystem::path(AppSettingsJson::DefaultConfigDirectory) / AppSettingsJson::DefaultConfigFileName << std::endl;
     spdlog::info("Output root (OutDirectory): {}", appSettingPtr->OutDirectory);
-    spdlog::debug("Database output: OutDirectory/<mediaName>/catalog-v2.sqlite");
+    spdlog::debug("Database output: OutDirectory/catalog-sqlite/<mediaName>/catalog-v2.sqlite");
     spdlog::debug("Configured detailed log level: {}", appSettingPtr->LogLevel);
     spdlog::debug("Use Async Metadata Reads: {}", appSettingPtr->UseAsyncMetadataReads);
     spdlog::debug("Metadata Scan Max Threads: {}", appSettingPtr->MetadataScanMaxThreads);
@@ -3206,7 +3233,7 @@ int RunLegacyMenu()
             std::cout << "  Output: console reports and opened matching album folders.\n"
                 "  Matches are grouped; review pauses after each group: Enter continues; STOP ends review.\n"
                 "  Optional: choose an album number, then type MOVE to move its entire folder to:\n"
-                "    " << pathToUtf8(review.outputRoot / "deleted") << "\n"
+                "    " << pathToUtf8(OutputLayout::Quarantine(review.outputRoot)) << "\n"
                 "  The last remaining album of a group cannot be moved.\n"
                 "  Moves copy and verify all files before removing originals; no destination is overwritten.\n"
                 "  JSON/databases remain unchanged; run option 2 after moving albums.\n"
@@ -3344,7 +3371,7 @@ int RunWithArgumentsImpl(const std::vector<const char*>& arguments)
             }
             options.conversion.sidecarFormat = *sidecarFormat;
             return FolderConvert::ConvertAudioFolderToOutput(
-                inputPath, outputDirectory / (options.conversion.target == AudioTarget::Mp3 ? "MP3" : "FLAC") / name,
+                inputPath, OutputLayout::Conversion(outputDirectory, options.conversion.target, name),
                 options.overwrite, options.conversion) == 0 ? 0 : 1;
         }
 
@@ -3360,7 +3387,7 @@ int RunWithArgumentsImpl(const std::vector<const char*>& arguments)
             AudioRepair::Plan plan;
             auto rules = options.repairRules.empty() ? RepairRules::DefaultRules() : options.repairRules;
             if (options.repairRemoveId3v1) rules.insert("mp3.redundant-id3v1");
-            if (AudioRepair::Prepare(inputPath, outputDirectory / "FIXED" / name,
+            if (AudioRepair::Prepare(inputPath, OutputLayout::Repair(outputDirectory, name),
                     options.overwrite, rules, plan, options.repairJobs, options.repairDryRun) != 0) {
                 return 1;
             }

@@ -17,6 +17,7 @@
 
 #include "CommonUtils.h"
 #include "ConversionOptions.h"
+#include "OutputLayout.h"
 // RapidJSON headers
 #include "rapidjson/document.h"
 #include "rapidjson/writer.h"
@@ -119,7 +120,7 @@ struct MediaDirectoryElement
 
 	std::filesystem::path getMediaDBPath(const std::filesystem::path& outDir) const
 	{
-		return outDir / CommonUtils::path_from_utf8(outputName()) /
+		return OutputLayout::Database(outDir, CommonUtils::path_from_utf8(outputName())) /
 			CommonUtils::path_from_utf8("catalog-v2.sqlite");
 	}
 };

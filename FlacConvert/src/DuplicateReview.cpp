@@ -1,4 +1,5 @@
 #include "DuplicateReview.h"
+#include "OutputLayout.h"
 
 #include "CommonUtils.h"
 #include "PlatformUtils.h"
@@ -131,7 +132,7 @@ void validateMove(const fs::path& source, const fs::path& keep,
     const auto sourceKey = fs::canonical(source);
     const auto keepKey = fs::canonical(keep);
     const auto outputKey = fs::weakly_canonical(outputRoot);
-    const auto deletedKey = fs::weakly_canonical(outputRoot / "deleted");
+    const auto quarantineKey = fs::weakly_canonical(OutputLayout::Quarantine(outputRoot));
     if (DuplicateReview::IsSameOrChildPath(sourceKey, keepKey) ||
         DuplicateReview::IsSameOrChildPath(keepKey, sourceKey)) {
         throw std::runtime_error("Cannot move identical, aliased or nested duplicate album folders.");
@@ -145,9 +146,9 @@ void validateMove(const fs::path& source, const fs::path& keep,
         insideLibrary = insideLibrary || DuplicateReview::IsSameOrChildPath(sourceKey, rootKey);
         if (DuplicateReview::IsSameOrChildPath(outputKey, rootKey) ||
             DuplicateReview::IsSameOrChildPath(rootKey, outputKey) ||
-            DuplicateReview::IsSameOrChildPath(deletedKey, rootKey) ||
-            DuplicateReview::IsSameOrChildPath(rootKey, deletedKey)) {
-            throw std::runtime_error("Deleted output must not overlap any source library.");
+            DuplicateReview::IsSameOrChildPath(quarantineKey, rootKey) ||
+            DuplicateReview::IsSameOrChildPath(rootKey, quarantineKey)) {
+            throw std::runtime_error("Quarantine output must not overlap any source library.");
         }
     }
     if (!insideLibrary) {
@@ -168,8 +169,8 @@ void moveAlbum(const fs::path& source, const fs::path& keep,
     };
     const auto before = inventory(source);
     PlatformUtils::ScopedCurrentDirectory anchor;
-    if (!anchor.EnterValidatedDirectory(outputRoot / "deleted", source, true)) {
-        throw std::runtime_error("Cannot anchor deleted output safely.");
+    if (!anchor.EnterValidatedDirectory(OutputLayout::Quarantine(outputRoot), source, true)) {
+        throw std::runtime_error("Cannot anchor quarantine output safely.");
     }
     const auto receiptDirectory = destination.parent_path();
     if (!fs::create_directory(receiptDirectory)) {
@@ -213,8 +214,8 @@ void moveAlbum(const fs::path& source, const fs::path& keep,
         throw std::runtime_error("Album path changed while copying; originals were not removed.");
     if (inventory(source) != before)
         throw std::runtime_error("Album contents changed while copying; originals were not removed.");
-    if (!anchor.IsAnchored(outputRoot / "deleted"))
-        throw std::runtime_error("Deleted output anchor changed while copying; originals were not removed.");
+    if (!anchor.IsAnchored(OutputLayout::Quarantine(outputRoot)))
+        throw std::runtime_error("Quarantine output anchor changed while copying; originals were not removed.");
     writeReceipt(receiptDirectory, source, destination, "verified");
     spdlog::info("Verified complete album copy at '{}'; removing originals from '{}'.",
         CommonUtils::path_to_utf8(destination), CommonUtils::path_to_utf8(source));
@@ -257,7 +258,7 @@ std::string readResponse(std::istream& input)
 fs::path newDestination(const fs::path& root, const fs::path& source)
 {
     static std::atomic_uint64_t sequence{ 0 };
-    const auto receiptDirectory = root / "deleted" /
+    const auto receiptDirectory = OutputLayout::Quarantine(root) /
         ("album-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) +
             "-" + std::to_string(sequence.fetch_add(1)));
     return receiptDirectory / source.filename();

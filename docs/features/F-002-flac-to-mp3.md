@@ -4,7 +4,7 @@ Status: active
 
 ## Behaviour
 Converts `.flac` files under a source folder to LAME VBR MP3 (`-q:a 0`–`9`, default 0) in
-`<root>/MP3/<source folder name>/`, preserving tags (ID3v2.4, no ID3v1), cover art and chapters. 44.1/48 kHz sources
+`<root>/converted-mp3/<source folder name>/`, preserving tags (ID3v2.4, no ID3v1), cover art and chapters. 44.1/48 kHz sources
 keep their rate; others are resampled to 48 kHz. Multichannel sources are rejected unless downmix is enabled.
 When enabled, a `.flac-metadata` sidecar beside each MP3 preserves the original FLAC metadata byte-for-byte;
 `MetadataSidecars` can select a readable `.flac-metadata.json` form or make it optional/disabled (disabled by
@@ -21,11 +21,12 @@ progress as FLAC conversion (F-001).
 
 ## Design and knowledge
 - DESIGN: `FlacConvert/DESIGN.md` → Conversion; Files and schemas (sidecar)
-- K-038 metadata sidecar policy, K-016 channel policy, K-017 MP3 encoding settings, K-025 per-operation menu options,
+- K-038 metadata sidecar policy, K-016 channel policy, K-017 MP3 encoding settings, K-065 output layout and retained menu defaults,
   K-029 preservation audit
 
 ## Acceptance checks
 - [ ] `ctest --preset windows-debug -R mp3-conversion-integration` (or the matching Linux preset) passes.
+- [ ] Menu and CLI use `converted-mp3/<library-name>`; previous `MP3` output remains untouched.
 - [ ] Output probes as `mp3`, rate 44100/48000, channels = min(source, 2) only when downmix is set.
 - [ ] Sidecar passes `FlacMetadata::Verify` against the source.
 - [ ] With `MetadataSidecars.Format: "json"` the `.mp3.flac-metadata.json` archive decodes to the original bytes.

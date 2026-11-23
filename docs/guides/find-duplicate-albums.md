@@ -18,14 +18,14 @@ source music library.
 AudioLibraryToolkit scan "D:\Music" --output-dir "E:\Catalog"
 ```
 
-The scan writes JSON batches and a manifest under `E:\Catalog\Music`. FLAC and MP3 are scanned by default. The default
+The scan writes JSON batches and a manifest under `E:\Catalog\catalog-json\Music`. FLAC and MP3 are scanned by default. The default
 `catalog` tier reads metadata without decoding audio; add `--tier integrity` if you also want full-decode integrity
 checks. A successful rescan replaces the previously generated scan batches for that library.
 
 ## 3. Compare albums
 
 ```text
-AudioLibraryToolkit duplicates "E:\Catalog\Music"
+AudioLibraryToolkit duplicates "E:\Catalog\catalog-json\Music"
 ```
 
 The command is noninteractive and does not change the music library. It identifies candidates using normalized album
@@ -35,7 +35,7 @@ Use `--open` only if you want matching folders opened in the file manager.
 To save a JSON report, supply a **new** file path outside the source library; existing reports are not overwritten:
 
 ```text
-AudioLibraryToolkit duplicates "E:\Catalog\Music" --report "E:\duplicates-report.json"
+AudioLibraryToolkit duplicates "E:\Catalog\catalog-json\Music" --report "E:\duplicates-report.json"
 ```
 
 ## 4. Review the results
@@ -46,7 +46,7 @@ the files are byte-identical. Higher bitrate or resolution alone does not establ
 files have changed since the catalog was created.
 
 The `duplicates` command does not move or delete albums. In the interactive menu, option 3 can move a selected album
-folder to `OutDirectory/deleted` only after a separate `MOVE` confirmation; the folder is copied and verified before
+folder to `OutDirectory/quarantine` only after a separate `MOVE` confirmation; the folder is copied and verified before
 originals are removed. A cleanup failure can leave partial originals beside a complete verified copy. Rescan afterward.
 
 See the [duplicate feature reference](../features/F-005-duplicate-albums.md) for matching rules, options and limitations.

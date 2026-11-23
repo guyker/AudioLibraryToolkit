@@ -5,7 +5,7 @@ title: "Quarantine duplicate albums only by explicit per-pair choice"
 area: [FlacConvert]
 status: active
 created: 2026-11-18
-reviewed: 2026-11-19
+reviewed: 2026-11-23
 cites:
   - path: FlacConvert/src/DuplicateReview.cpp
     symbol: "DuplicateReview::ReviewPair"

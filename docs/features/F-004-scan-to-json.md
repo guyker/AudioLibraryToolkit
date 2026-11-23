@@ -44,7 +44,7 @@ and duplicate/gapped per-disc track numbering or inconsistent/mismatched declare
 discard otherwise usable records or claim that a folder is a complete album. When asynchronous metadata reads are enabled, each album uses a bounded worker group. A positive
 `MetadataScanMaxThreads` sets the cap; the default value `0` selects hardware concurrency (falling back to 4).
 The scan writes batches of up to `AlbumsSplitThreshold` albums to
-`OutDirectory/<name>/media_out_<name>[_<n>].json`. Previous generated JSON is replaced per library through staging,
+`OutDirectory/catalog-json/<name>/media_out_<name>[_<n>].json`. Previous generated JSON is replaced per library through staging,
 backup and rollback; databases and sources are not touched. The RapidJSON writer escapes control characters and
 omits unavailable optional fields instead of fabricating zero values. The configured `ScanTier` defaults to
 `catalog`; `scan --tier catalog|integrity|analysis` selects metadata-only, full-decode integrity, or decode plus
@@ -71,11 +71,12 @@ then reassemble fragment sets before use.
 - Schema: `docs/schemas/media-catalog-v2.schema.json`
 - Manifest schema: `docs/schemas/scan-manifest-v1.schema.json`
 - Scan report schema: `docs/schemas/scan-report-v2.schema.json` (version 1 remains available for older reports)
-- K-051 manifest-owned scan output replacement; K-053 opt-in FLAC scan archives; K-035 fail scans before installing incomplete metadata;
+- K-051 manifest-owned scan output replacement; K-053 opt-in FLAC scan archives; K-035 fail scans before installing incomplete metadata; K-065 operation layout and legacy input compatibility;
   K-058 source symlink/reparse-point rejection
 
 ## Acceptance checks
 - [ ] Output JSON validates against the v2 schema and contains one object per album with non-empty `Tracks`.
+- [ ] Menu and CLI publish under `catalog-json/<library-name>`; menu options 3 and 4 consume that complete batch set.
 - [ ] A failed scan leaves the previous `media_out_*.json` files unchanged.
 - [ ] Successful scans write a completed `scan-report.json` with discovered, serialized, staged, installed, and diagnostic counts.
 - [ ] Failed scans preserve prior generated JSON and identify the failing album/track plus the underlying diagnostic in `scan-report.json`.

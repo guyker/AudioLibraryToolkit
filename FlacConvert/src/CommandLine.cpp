@@ -105,7 +105,7 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
             return value.empty() ? "input directory must not be empty" : std::string{};
         });
     convert->add_option("--output-dir", options.outputDirectory,
-        "Base output root: <root>/<FLAC|MP3>/<input-folder-name>, preserving relative paths. Defaults to config OutDirectory.")
+        "Base output root: <root>/<normalized-flac|converted-mp3>/<input-folder-name>, preserving relative paths. Defaults to config OutDirectory.")
         ->check([](const std::string& value) {
             return isBlankPath(value) ? "output directory must not be blank" : std::string{};
         })
@@ -135,7 +135,7 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
             return value.empty() ? "input directory must not be empty" : std::string{};
         });
     repair->add_option("--output-dir", options.outputDirectory,
-        "Base output root. Repaired folders are written under <root>/FIXED/<library-name>; defaults to OutDirectory.")
+        "Base output root. Repaired folders are written under <root>/repaired-metadata/<library-name>; defaults to OutDirectory.")
         ->check([](const std::string& value) {
             return isBlankPath(value) ? "output directory must not be blank" : std::string{};
         })
@@ -172,7 +172,7 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
             return value.empty() ? "library directory must not be empty" : std::string{};
         });
     scan->add_option("--output-dir", options.outputDirectory,
-        "Destination root. Defaults to config OutDirectory.")
+        "Base output root: <root>/catalog-json/<library-name>. Defaults to config OutDirectory.")
         ->check([](const std::string& value) {
             return isBlankPath(value) ? "output directory must not be blank" : std::string{};
         })
@@ -190,7 +190,7 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
         ->each([&options](const std::string&) { options.scanTierSpecified = true; });
     add_config_option(scan, options);
     scan->footer(command_footer(
-        "Inputs: one audio library directory. Output: <output-dir>/<library-name>/media_out_<library-name>_<part>.json and scan-manifest.json. Unchanged files reuse prior metadata when Incremental is enabled; --full-rescan forces rereads. --tier selects catalog, integrity, or analysis processing. Native FLAC metadata archives are optional and disabled by default; the archive flags override ScanFlacMetadataArchives. A completed scan replaces generated JSON and retires previous manifest-owned archives only after the new set is ready.",
+        "Inputs: one audio library directory. Output: <output-dir>/catalog-json/<library-name>/media_out_<library-name>_<part>.json and scan-manifest.json. Unchanged files reuse prior metadata when Incremental is enabled; --full-rescan forces rereads. --tier selects catalog, integrity, or analysis processing. Native FLAC metadata archives are optional and disabled by default; the archive flags override ScanFlacMetadataArchives. A completed scan replaces generated JSON and retires previous manifest-owned archives only after the new set is ready.",
         "  AudioLibraryToolkit scan \"D:\\Music\"\n"
         "  AudioLibraryToolkit scan \"D:\\Music\" --output-dir \"E:\\Catalog\""));
     scan->callback([&options] { options.action = CommandAction::Scan; });
@@ -208,9 +208,9 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
     add_config_option(duplicates, options);
     duplicates->footer(command_footer(
         "Inputs: a directory containing generated album JSON files. Duplicate groups are printed without prompting. Use --open to launch matching folders in the operating system's file manager and --report to save a JSON report.",
-        "  AudioLibraryToolkit duplicates \"E:\\Catalog\\Music\"\n"
-        "  AudioLibraryToolkit duplicates \"E:\\Catalog\\Music\" --open\n"
-        "  AudioLibraryToolkit duplicates \"E:\\Catalog\\Music\" --report \"E:\\Reports\\duplicates.json\""));
+        "  AudioLibraryToolkit duplicates \"E:\\Catalog\\catalog-json\\Music\"\n"
+        "  AudioLibraryToolkit duplicates \"E:\\Catalog\\catalog-json\\Music\" --open\n"
+        "  AudioLibraryToolkit duplicates \"E:\\Catalog\\catalog-json\\Music\" --report \"E:\\Reports\\duplicates.json\""));
     duplicates->callback([&options] { options.action = CommandAction::Duplicates; });
 
     auto* database = app.add_subcommand("db", "Database operations.");
@@ -222,16 +222,16 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
             return value.empty() ? "JSON directory must not be empty" : std::string{};
         });
     databaseImport->add_option("--output-dir", options.outputDirectory,
-        "Destination root for the library-named database. Defaults to config OutDirectory.")
+        "Base output root: <root>/catalog-sqlite/<library-name>/catalog-v2.sqlite. Defaults to config OutDirectory.")
         ->check([](const std::string& value) {
             return isBlankPath(value) ? "output directory must not be blank" : std::string{};
         })
         ->each([&options](const std::string&) { options.outputDirectorySpecified = true; });
     add_config_option(databaseImport, options);
     databaseImport->footer(command_footer(
-        "Inputs: schema-v2 catalog JSON files. Output: <output-dir>/<library-name>/catalog-v2.sqlite. Import is transactional; old-format databases are left untouched.",
-        "  AudioLibraryToolkit db import \"E:\\Catalog\\Music\"\n"
-        "  AudioLibraryToolkit db import \"E:\\Catalog\\Music\" --output-dir \"E:\\Databases\""));
+        "Inputs: schema-v2 catalog JSON files. Output: <output-dir>/catalog-sqlite/<library-name>/catalog-v2.sqlite. Import is transactional; old-format databases and outputs at previous locations are left untouched.",
+        "  AudioLibraryToolkit db import \"E:\\Catalog\\catalog-json\\Music\"\n"
+        "  AudioLibraryToolkit db import \"E:\\Catalog\\catalog-json\\Music\" --output-dir \"E:\\Databases\""));
     databaseImport->callback([&options] { options.action = CommandAction::DatabaseImport; });
 
     try

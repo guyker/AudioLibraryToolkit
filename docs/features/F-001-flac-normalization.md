@@ -4,7 +4,7 @@ Status: active
 
 ## Behaviour
 Converts every supported audio file (`.flac .ape .dsf .dff .dsd .wv .wav .m2ts .m4a`) under a source folder to
-16-bit / 44.1 kHz FLAC with triangular dither, in a separate tree `<root>/FLAC/<source folder name>/`. Every written
+16-bit / 44.1 kHz FLAC with triangular dither, in a separate tree `<root>/normalized-flac/<source folder name>/`. Every written
 folder is complete: other regular files there are copied unchanged, including unsupported audio such as MP3/AAC/Ogg
 beside converted tracks, and folders without audio (artwork, scans, empty folders) are retained. A folder subtree
 containing audio but nothing to convert is skipped entirely and listed in `conversion-audit.json`; a library without
@@ -35,10 +35,11 @@ check (F-003).
 ## Design and knowledge
 - DESIGN: `FlacConvert/DESIGN.md` → Key flows / Conversion; Contracts and invariants
 - K-041 install after success, K-048 codec-aware AAC quality gate, K-056 FFmpeg argument vector, K-038 sidecar policy,
-  K-032 configured vs canonical paths, K-026/K-031 output tree layout, K-036 complete folders, K-058 source link rejection
+  K-032 configured vs canonical paths, K-065 operation-based output layout, K-036 complete folders, K-058 source link rejection
 
 ## Acceptance checks
 - [ ] Source tree byte-identical before and after (hash all files).
+- [ ] Menu and CLI use `normalized-flac/<library-name>`; previous `FLAC` output remains untouched.
 - [ ] Every output FLAC probes as 16-bit, 44100 Hz, same channel count, duration within 0.15 s.
 - [ ] A 24-bit/96 kHz source converts; an 8-bit or 22.05 kHz source is rejected with a non-zero exit.
 - [ ] AAC `.m4a` at 44.1 kHz converts with a lossy-quality warning; AAC below 44.1 kHz is rejected.

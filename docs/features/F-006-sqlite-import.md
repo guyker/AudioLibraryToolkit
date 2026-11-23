@@ -3,7 +3,7 @@
 Status: active
 
 ## Behaviour
-Imports schema-v2 catalog JSON into `OutDirectory/<name>/catalog-v2.sqlite` (`PRAGMA user_version=2`). The database
+Imports schema-v2 catalog JSON into `OutDirectory/catalog-sqlite/<name>/catalog-v2.sqlite` (`PRAGMA user_version=2`). The database
 uses normalized searchable tags and source-scoped raw tags, plus file properties, pictures, chapters, measurements,
 findings, and queryable AI-facing schema documentation. File identity is `(library_id, relative_path)`, where the
 library root is carried by each album JSON object. Re-imports update existing file rows without duplication and
@@ -15,6 +15,11 @@ Manifest-marked scans validate the complete batch set, batch hashes, and referen
 Split albums are validated and reassembled before import; incomplete or inconsistent fragments fail before database writes.
 Legacy batches without a manifest ID remain readable.
 
+Menu option 4 reads option 2's `catalog-json/<mediaName>` directory. It can read the previous `<root>/<mediaName>`
+scan directory with a warning only when the current library catalog directory is absent. Empty or corrupt current
+catalogs never trigger fallback. Old database locations are not migrated or modified; a first import at the new
+`catalog-sqlite` location creates a new database.
+
 ## Entry points
 - `AudioLibraryToolkit db import <json dir> [--output-dir]` → `FlacConvertMain.cpp#ImportJsonDirectoryToDatabase`
 - Menu option 4 → `FlacConvertMain.cpp#ExportJSONToDB`
@@ -23,10 +28,12 @@ Legacy batches without a manifest ID remain readable.
 ## Design and knowledge
 - DESIGN: `FlacConvert/DESIGN.md` → Database import; Output-directory anchoring; Files and schemas (SQLite catalog
   schema v2)
-- K-042 SQLite long-path VFS; K-040 library-relative file identity; K-050 complete album fragments
+- K-042 SQLite long-path VFS; K-040 library-relative file identity; K-050 complete album fragments;
+  K-065 operation layout and legacy catalog compatibility
 
 ## Acceptance checks
 - [ ] Imported files have stable `(library_id, relative_path)` identity; re-import does not duplicate rows.
+- [ ] Menu and CLI write `catalog-sqlite/<library-name>/catalog-v2.sqlite`; menu imports consume option 2's new scan location.
 - [ ] Tracks removed from an imported album disappear while albums absent from the import remain untouched.
 - [ ] A failed import rolls back all album and child-row changes.
 - [ ] Every table/view and column has a `schema_docs` entry and schema v2 AI guide metadata exists.

@@ -48,9 +48,13 @@ or once for the current group in the menu, the folders are opened in the file ma
 new JSON report with statistics, aliases, groups, evidence and track pairings; an existing file is never overwritten.
 The report must be outside every source library. Legacy input without trusted library-root metadata cannot be reported.
 
+Menu JSON inputs come from `OutDirectory/catalog-json/<mediaName>`. If that library directory is absent, the menu
+can read the previous `OutDirectory/<mediaName>` scan directory with a warning. An empty or corrupt current catalog
+does not fall back to old data, and the two locations are never merged. CLI JSON inputs remain explicit.
+
 Menu option 3 pauses after each group. Press Enter (or type `CONTINUE`) for the next group, or `STOP` to finish;
 EOF also stops safely. Choose an album number (while more than one album remains) to preview moving that entire album
-folder, including artwork, playlists and subfolders, to a unique folder under `OutDirectory/deleted`. Only typing
+folder, including artwork, playlists and subfolders, to a unique folder under `OutDirectory/quarantine`. Only typing
 `MOVE` at the second confirmation
 executes the move. The complete copy is verified byte-for-byte before originals are removed, including when output
 is on a different drive. No existing destination is overwritten. A failed copy leaves originals intact;
@@ -71,7 +75,8 @@ but retains database albums absent from the import; it does not automatically pu
 
 ## Design and knowledge
 - DESIGN: `FlacConvert/DESIGN.md` → Duplicates
-- Knowledge: K-052 (explicit confirmation for each quarantined album); K-055 (preserve direct-match connectivity)
+- Knowledge: K-052 (explicit confirmation for each quarantined album); K-055 (preserve direct-match connectivity);
+  K-065 (operation layout and legacy catalog compatibility)
 - Related config: `MinMatchingTracksForDuplicate`, `SizeMatchPercentageThreshold`, `DuplicateDurationToleranceSeconds`,
   `DuplicateFuzzyNames`, `DuplicateStripEditionText`, `DuplicatePartialMatches`, `DuplicatePartialMinCoverage`; `ExtraAudioQualityMetrics`
   currently warns and is ignored.
@@ -86,6 +91,7 @@ but retains database albums absent from the import; it does not automatically pu
       library, and fails safely for legacy inputs without trusted library roots.
 - [ ] CLI duplicates and menu review without a confirmed move create or change no files.
 - [ ] CLI without `--open` opens no folders.
+- [ ] Menu option 3 reads option 2's `catalog-json` output; legacy fallback occurs only if that library folder is absent.
 - [ ] Empty JSON directory exits non-zero.
 - [ ] Malformed track metadata fails loading instead of producing partial duplicate results.
 - [ ] Missing, extra, or modified manifest-marked batches and missing/corrupt referenced archives fail before matching.
@@ -108,8 +114,8 @@ but retains database albums absent from the import; it does not automatically pu
 - [ ] Cancellation, invalid choices, copy failures, and unsafe move paths leave originals unchanged.
 - [ ] Source-cleanup failure retains the complete verified copy and stops review.
 - [ ] Moving an album skips later pairs involving it or its descendants without probing nonexistent paths.
-- [ ] Repeated names use separate destinations; existing deleted output and the kept album remain unchanged.
-- [ ] A `deleted` output alias into any active library is refused without writing into that library.
+- [ ] Repeated names use separate destinations under `quarantine`; previous `deleted` output and the kept album remain unchanged.
+- [ ] A `quarantine` output alias into any active library is refused without writing into that library.
 
 ## Known limitations
 - Menu results are logged only; use the CLI `--report` for a JSON report.

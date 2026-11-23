@@ -37,7 +37,8 @@ It runs either as explicit CLI commands or, with no arguments, as a legacy inter
 | Album collection | `src/AlbumCollection.cpp`, `include/AlbumCollection.h` | Discovery (`AlbumCollection::LoadAlbumsCo`), metadata import/cache reuse, JSON save/load, `AlbumCollection::ExportToDatabase` |
 | Duplicate matching | `src/DuplicateMatcher.cpp`, `include/DuplicateMatcher.h` | `DuplicateMatcher::FindDuplicates`: aliases, candidate indexes, pair evaluation, confidence and grouping |
 | Duplicate comparison output | `src/DuplicateComparison.cpp`, `include/DuplicateComparison.h` | Pure descriptions of current album snapshots and scan-time pair evidence; stable group-local album numbers |
-| Duplicate review | `src/DuplicateReview.cpp`, `include/DuplicateReview.h` | Per-group menu choices; explicitly confirmed, verified whole-folder moves to `OutDirectory/deleted` |
+| Duplicate review | `src/DuplicateReview.cpp`, `include/DuplicateReview.h` | Per-group menu choices; explicitly confirmed, verified whole-folder moves to `OutDirectory/quarantine` |
+| Output layout | `include/OutputLayout.h` | Shared operation/library path mapping for menu and CLI output |
 | Platform adapters | `src/PlatformUtils.cpp`, `include/PlatformUtils.h` | Per-user config location, UTF-16/UTF-8, `PlatformUtils::WindowsLongPath`, `PlatformUtils::OpenDirectory` |
 | Utilities | `src/CommonUtils.cpp`, `include/CommonUtils.h`, `include/BoundedTaskRunner.h`, `src/JsonUtils.cpp`, `include/JsonUtils.h` | UTF-8 path helpers, coroutine `Generator`, bounded task runner, JSON helpers |
 | Legacy (unused) | `FolderConvert::ConverAudioFolder`, `FolderConvert::ConverAudioFolder2`, `MediaConvertionAsyncTask` | In-place conversion paths with no caller outside themselves; not part of any current flow |
@@ -58,32 +59,32 @@ flowchart LR
     end
     RWA --> PC
     SRC[(Source library)] --> PC
-    EC --> OUT[(OutDirectory/FLAC or MP3/name)]
+    EC --> OUT[(OutDirectory/normalized-flac or converted-mp3/name)]
     RWA --> AR[AudioRepair::Prepare / Execute]
     SRC --> AR
-    AR --> FIXED[(OutDirectory/FIXED/name)]
+    AR --> FIXED[(OutDirectory/repaired-metadata/name)]
     RWA --> SCAN[ScanFolderAndCreateJSON]
     SRC --> SCAN
     SCAN -->|read-only metadata| TAGLIB[TagLib]
     TAGLIB --> RECORD[MediaRecord]
     RECORD -->|schema v2| JSON
-    SCAN --> JSON[(OutDirectory/name/media_out_*.json)]
+    SCAN --> JSON[(OutDirectory/catalog-json/name/media_out_*.json)]
     SCAN --> MANIFEST[(scan-manifest.json + optional native FLAC metadata archives)]
     JSON --> DUP[ScanFolderProcessJSONAndFindDuplicates]
     DUP --> REP[Console report / open folders]
     JSON --> DB[ExportJSONToDB / ImportJsonDirectoryToDatabase]
-    DB --> SQL[(catalog-v2.sqlite)]
+    DB --> SQL[(OutDirectory/catalog-sqlite/name/catalog-v2.sqlite)]
 ```
 
 ## Entry points
 
 | Mode | Entry | Notes |
 |---|---|---|
-| `convert <input> [--to flac\|mp3] [--mp3-quality 0-9] [--downmix-to-stereo] [--overwrite] [--no-metadata-sidecar] [--output-dir]` | `RunWithArguments` → `FolderConvert::ConvertAudioFolderToOutput` | Output `<root>/<FLAC\|MP3>/<input folder name>` (K-031); `--no-metadata-sidecar` is valid only for an `optional` sidecar policy (K-038) |
+| `convert <input> [--to flac\|mp3] [--mp3-quality 0-9] [--downmix-to-stereo] [--overwrite] [--no-metadata-sidecar] [--output-dir]` | `RunWithArguments` → `FolderConvert::ConvertAudioFolderToOutput` | Output `<root>/<normalized-flac\|converted-mp3>/<input folder name>` (K-065); `--no-metadata-sidecar` is valid only for an `optional` sidecar policy (K-038) |
 | `scan <library> [--output-dir] [--full-rescan] [--tier catalog\|integrity\|analysis] [--archive-flac-metadata\|--no-archive-flac-metadata]` | `ScanFolderAndCreateJSON` | One library; name = folder name; archive flags override configuration |
 | `duplicates <json dir> [--open] [--report <file>]` | `ScanFolderProcessJSONAndFindDuplicates` | Opens folders only with `--open`; `--report` writes a new JSON report |
-| `db import <json dir> [--output-dir]` | `ImportJsonDirectoryToDatabase` | `<output root>/<JSON folder name>/catalog-v2.sqlite`; output root is `--output-dir`, else `OutDirectory` |
-| `repair <input> [--output-dir] [--overwrite] [--rules <ids>]` | `AudioRepair::Prepare` → `AudioRepair::Execute` | `<output root>/FIXED/<input folder name>`; output root is `--output-dir`, else `OutDirectory` |
+| `db import <json dir> [--output-dir]` | `ImportJsonDirectoryToDatabase` | `<output root>/catalog-sqlite/<JSON folder name>/catalog-v2.sqlite`; output root is `--output-dir`, else `OutDirectory` |
+| `repair <input> [--output-dir] [--overwrite] [--rules <ids>]` | `AudioRepair::Prepare` → `AudioRepair::Execute` | `<output root>/repaired-metadata/<input folder name>`; output root is `--output-dir`, else `OutDirectory` |
 | No arguments | `RunLegacyMenu` | Options 1 FLAC, 2 scan, 3 duplicates, 4 DB import, 5 not implemented, 6 MP3, 7 repair; library options use active `MediaDirectoryList` entries |
 
 All commands accept `--config <file>` and `--log-level info\|debug\|trace`. Exit code is 0 on success, non-zero on any failure.
@@ -218,9 +219,9 @@ receives periodic five-second snapshots instead. Phase boundaries are logged in 
 After preparation, menu option 7 shows finding counts by rule and saves one searchable HTML preview per library
 in the system temporary directory, validated to be outside every active source library. Preview reports identify
 proposed per-track edits and unresolved findings; they are retained on cancellation. If the preview cannot be saved
-safely, repair does not start. Only `RUN` authorizes writing to `FIXED`; CLI `repair --dry-run` still prints JSON.
+safely, repair does not start. Only `RUN` authorizes writing to `repaired-metadata`; CLI `repair --dry-run` still prints JSON.
 
-Output is a separate `FIXED/<library-name>` tree. In the menu, a library's repair output may not overlap another active
+Output is a separate `repaired-metadata/<library-name>` tree. In the menu, a library's repair output may not overlap another active
 library's source or another library's repair output (for example, two libraries with the same `mediaName`); either
 fails before any repair is installed. Only folders containing a safe repair are copied, each with its
 subfolders (a nested repaired folder is copied once, as part of its nearest repaired ancestor); every regular
@@ -379,7 +380,7 @@ shows exact paths and requires `MOVE`; any other confirmation cancels the move. 
 again with moved albums marked; later pairs involving a moved folder or its descendants are skipped.
 The summary distinguishes user-stopped review and counts completed comparisons, moved albums, and skipped pairs.
 
-Moves use a unique `OutDirectory/deleted/album-<time>-<sequence>/<original-folder-name>` destination, with a sibling
+Moves use a unique `OutDirectory/quarantine/album-<time>-<sequence>/<original-folder-name>` destination, with a sibling
 `move.json` receipt. They copy regular files and directory structure (including artwork and empty/nested folders),
 verify the complete inventory and each file byte-for-byte (`PreservationAudit::VerifyCopy`), recheck source identity
 and inventory, then remove only enumerated originals after a further per-file verification. The same copy/verify/remove
@@ -398,7 +399,7 @@ catalog. Option 4 reimports current albums but does not purge database albums ab
 
 `ExportJSONToDB` (menu, per library, all JSON batches in one transaction) or `ImportJsonDirectoryToDatabase` (CLI,
 one transaction): `CatalogDatabase::Import` writes catalog schema v2 to
-`OutDirectory/<name>/catalog-v2.sqlite`, leaving any prior `.db` database untouched. File identity is
+`OutDirectory/catalog-sqlite/<name>/catalog-v2.sqlite`, leaving any prior `.db` database untouched. File identity is
 `(library_id, relative_path)` (K-040); records upsert without duplicating files, and missing tracks are deleted only from
 albums included in the import. Albums absent from the import remain untouched. Imports require schema-v2 JSON with a
 consistent `"Library Root"`; database paths inside that library are rejected before directory creation. Existing
@@ -408,6 +409,24 @@ includes all imported albums and rolls back completely on any failure. `schema_d
 `catalog_meta.ai_guide` describe the schema and safe interpretation of measured versus claimed data.
 CLI import reads through the supplied directory path and names the output after that directory, without resolving
 directory aliases; a trailing separator does not change the name.
+
+### Operation-based output layout
+
+`OutputLayout` appends the operation category and library name to the configured `OutDirectory` or CLI
+`--output-dir` base root. It is shared by menu and CLI conversion, scan, repair, database import and quarantine.
+The category names and artifact locations are listed in Files and schemas. Library naming and relative source paths
+are unchanged; lower-level conversion and repair APIs still accept an exact library destination.
+
+`configuredCatalogDirectory` routes menu options 3 and 4 to `catalog-json/<library-name>`. Only when that path is
+absent does it select the previous `<root>/<library-name>` scan directory and log a warning. It never combines
+directories or falls back when current output is empty, corrupt or inaccessible. CLI readers use the explicitly
+supplied JSON directory, including catalogs in previous locations. Manifest validation and fragment reassembly still
+run before matching or importing. Scan staging paths remain independent of the published operation category.
+
+Previous conversion, repair, quarantine, scan and database outputs are left untouched. Scan replacement owns only
+generated files in the new catalog directory. Database import creates or updates the new operation-specific database,
+not a database at the previous location. Source-safety checks, output overwrite policy and quarantine confirmation
+remain unchanged (K-065).
 
 ### Output-directory anchoring
 
@@ -514,18 +533,18 @@ fail configuration loading.
 
 | Artefact | Location | Writer |
 |---|---|---|
-| Converted audio | `<root>/FLAC\|MP3/<name>/<relative path>.flac\|.mp3` | `MediaConvertionTask` |
+| Converted audio | `<root>/normalized-flac\|converted-mp3/<name>/<relative path>.flac\|.mp3` | `MediaConvertionTask` |
 | Metadata sidecar | `<audio file>.flac-metadata` (binary) or `<audio file>.flac-metadata.json` (MP3 and native-FLAC sources, per `MetadataSidecars`) | `FlacMetadata::Save` |
 | Unchanged file copies | Same relative path; non-converted regular files outside skipped subtrees for FLAC, non-audio companions for MP3 | `FolderConvert::ExecuteConversion` |
 | Audit report | `<library output>/conversion-audit.json` | `writeAudit` in `FolderConvert.cpp` |
 | Session log | `%LOCALAPPDATA%\AudioLibraryToolkit\logs\afc-<timestamp>_<pid>_<sequence>.log` (Windows); XDG/HOME state directory elsewhere | `RunLogging::Start` / `RunLogging::Finish` |
 | In-progress marker | `<library output>/.conversion-in-progress/` (directory) | `FolderConvert::ExecuteConversion` |
-| Album JSON | `OutDirectory/<name>/media_out_<name>[_<n>].json` (schema v2; see `docs/schemas/media-catalog-v2.schema.json`) | `AlbumCollection::SaveAlbumsToJSON` |
-| Scan manifest | `OutDirectory/<name>/scan-manifest.json` (schema v1; batch inventory, SHA-256 integrity and archive references) | `writeScanManifest` |
-| FLAC metadata archive | Optional `OutDirectory/<name>/scan_metadata_<source-path-sha256>.flac-metadata` (native metadata blocks only; referenced by manifest) | `FlacMetadata::Save` / `FlacMetadata::Verify` |
-| Quarantined duplicate album | `OutDirectory/deleted/album-<time>-<sequence>/<original-folder-name>/` plus sibling `move.json` | `DuplicateReview::ReviewGroup` after explicit `MOVE` confirmation |
+| Album JSON | `OutDirectory/catalog-json/<name>/media_out_<name>[_<n>].json` (schema v2; see `docs/schemas/media-catalog-v2.schema.json`) | `AlbumCollection::SaveAlbumsToJSON` |
+| Scan manifest | `OutDirectory/catalog-json/<name>/scan-manifest.json` (schema v1; batch inventory, SHA-256 integrity and archive references) | `writeScanManifest` |
+| FLAC metadata archive | Optional `OutDirectory/catalog-json/<name>/scan_metadata_<source-path-sha256>.flac-metadata` (native metadata blocks only; referenced by manifest) | `FlacMetadata::Save` / `FlacMetadata::Verify` |
+| Quarantined duplicate album | `OutDirectory/quarantine/album-<time>-<sequence>/<original-folder-name>/` plus sibling `move.json` | `DuplicateReview::ReviewGroup` after explicit `MOVE` confirmation |
 | JSON diagnostic reports | `<album json>_ffmpeg_error.json` when captured (excluded from inputs); legacy `_error.json` reports are also excluded | `AlbumCollection` |
-| SQLite catalog | `OutDirectory/<name>/catalog-v2.sqlite` (`user_version=2`) | `CatalogDatabase::Import` |
+| SQLite catalog | `OutDirectory/catalog-sqlite/<name>/catalog-v2.sqlite` (`user_version=2`) | `CatalogDatabase::Import` |
 
 **Sidecar:** original leading ID3, `fLaC` marker and every metadata block byte-for-byte, plus trailing APE/ID3v1;
 no audio. Describes the source, not the output.
@@ -619,7 +638,7 @@ value silently gets FLAC behaviour unless each site is updated:
 | Concern | Site |
 |---|---|
 | CLI choice and option validation | `CommandLine.cpp#ParseCommandLine` |
-| Output tree name (`FLAC`/`MP3`) | `FlacConvertMain.cpp#RunWithArguments`, `FlacConvertMain.cpp#ConvertConfiguredLibraries` |
+| Output tree name (`normalized-flac`/`converted-mp3`) | `OutputLayout.h#OutputLayout::Conversion` |
 | Menu entry, prompts, preview text | `FlacConvertMain.cpp#GetUserAction`, `FlacConvertMain.cpp#ConfigureManualMp3`, `FlacConvertMain.cpp#ShowConversionPreview` |
 | Accepted inputs, target extension, sidecar decision | `FolderConvert.cpp#FolderConvert::PrepareConversion` |
 | Audit `target` value, sidecar verification | `FolderConvert.cpp#writeAudit`, `FolderConvert.cpp#FolderConvert::ExecuteConversion` |
@@ -632,5 +651,5 @@ prompt, and `ShowConversionPreview`.
 
 ## Knowledge links
 
-Conversion safety: K-041, K-048, K-056, K-029, K-030, K-032, K-038. Formats: K-016, K-017, K-031. Manual menu: K-024, K-025, K-026, K-049. Catalog/DB: K-051, K-042, K-040, K-050. Platform/build: K-006, K-061, K-043, K-062, K-033.
+Conversion safety: K-041, K-048, K-056, K-029, K-030, K-032, K-038. Formats: K-016, K-017. Output layout and compatibility: K-065. Manual menu: K-024, K-049. Catalog/DB: K-051, K-042, K-040, K-050. Platform/build: K-006, K-061, K-043, K-062, K-033.
 Only live entries are listed; superseded history is in `docs/knowledge/index.md` under "Closed".

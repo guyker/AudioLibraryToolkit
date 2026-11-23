@@ -5,7 +5,7 @@ title: "Keep duplicate review groups directly connected when moving albums"
 area: [FlacConvert]
 status: active
 created: 2026-11-19
-reviewed: 2026-11-19
+reviewed: 2026-11-23
 cites:
   - path: FlacConvert/src/DuplicateReview.cpp
     symbol: "DuplicateReview::ReviewGroup"

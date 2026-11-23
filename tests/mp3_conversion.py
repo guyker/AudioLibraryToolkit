@@ -346,7 +346,7 @@ class ConversionTests(unittest.TestCase):
         return self.destination() / Path(self.name).with_suffix(".mp3")
 
     def destination(self, target="mp3"):
-        return self.output / target.upper() / self.source.name
+        return self.output / {"flac": "normalized-flac", "mp3": "converted-mp3"}[target] / self.source.name
 
     def audit(self, directory):
         report = json.loads((directory / "conversion-audit.json").read_text(encoding="utf-8"))
@@ -377,14 +377,14 @@ class ConversionTests(unittest.TestCase):
         self.original_hash = hashlib.sha256(self.track.read_bytes()).digest()
         (self.source / "booklet.pdf").write_bytes(b"original")
         self.convert(success=False)
-        failed = next((self.output / "MP3").glob("ERROR_AUDIO_*"))
+        failed = next((self.output / "converted-mp3").glob("ERROR_AUDIO_*"))
         report = self.audit(failed)
         self.assertEqual(report["errorType"], "AUDIO")
         self.assertEqual(report["counts"]["installedAudio"], 0)
         self.assertEqual([entry["status"] for entry in report["files"]], ["failed", "not-attempted"])
         self.assertTrue((failed / ".conversion-in-progress").is_dir())
         self.convert(success=False)
-        self.assertEqual(len(list((self.output / "MP3").glob("ERROR_AUDIO_*"))), 2)
+        self.assertEqual(len(list((self.output / "converted-mp3").glob("ERROR_AUDIO_*"))), 2)
         self.assertTrue(Path(str(failed) + "-1").is_dir())
         self.assertFalse(self.destination().exists())
 
@@ -397,7 +397,7 @@ class ConversionTests(unittest.TestCase):
         self.assertTrue(self.destination().is_dir())
         self.assertEqual((self.destination() / "keep.txt").read_bytes(), b"unrelated existing file")
         self.assertEqual(self.audit(self.destination())["status"], "failed")
-        self.assertFalse(list((self.output / "MP3").glob("ERROR_*")))
+        self.assertFalse(list((self.output / "converted-mp3").glob("ERROR_*")))
         self.convert("--overwrite", success=False)
         self.assertEqual(self.audit(self.destination())["errorType"], "AUDIO")
 
@@ -436,7 +436,7 @@ class ConversionTests(unittest.TestCase):
         self.track.write_bytes(original.replace(b"X_CUSTOM=", b"X_CUSTOM?", 1))
         self.original_hash = hashlib.sha256(self.track.read_bytes()).digest()
         self.convert(success=False)
-        failed = next((self.output / "MP3").glob("ERROR_PRESERVATION_*"))
+        failed = next((self.output / "converted-mp3").glob("ERROR_PRESERVATION_*"))
         report = self.audit(failed)
         self.assertTrue(any(item["fatal"] for item in report["files"][0]["resources"]))
         self.assertFalse((failed / self.mp3().name).exists())
@@ -452,7 +452,7 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(path.read_bytes(), original)
         self.assertTrue((self.destination() / ".conversion-in-progress").exists())
         self.assertIn("Conversion failed (IO)", result.stdout + result.stderr)
-        self.assertFalse(list((self.output / "MP3").glob("ERROR_*")))
+        self.assertFalse(list((self.output / "converted-mp3").glob("ERROR_*")))
 
     @unittest.skipUnless(os.name == "nt", "Windows component length limit")
     def test_rename_failure_reports_original_output_path(self):
@@ -464,7 +464,7 @@ class ConversionTests(unittest.TestCase):
             [{"isActive": True, "mediaPath": str(self.source), "mediaName": long_name}], "1\nRUN\n",
             OutDirectory=extendedOutput)
         self.assertNotEqual(result.returncode, 0)
-        directory = Path(extendedOutput) / "FLAC" / long_name
+        directory = Path(extendedOutput) / "normalized-flac" / long_name
         self.assertTrue(directory.is_dir(), result.stdout + result.stderr)
         self.assertIn("Cannot mark failed output folder", result.stdout + result.stderr)
         self.assertIn("Output location: " + str(directory), result.stdout)
@@ -486,7 +486,7 @@ class ConversionTests(unittest.TestCase):
         companion.write_bytes(b"original companion")
         with deny_delete(companion, share=0):
             self.convert(success=False)
-        failed = next((self.output / "MP3").glob("ERROR_COPY_*"))
+        failed = next((self.output / "converted-mp3").glob("ERROR_COPY_*"))
         report = self.audit(failed)
         self.assertEqual(report["counts"]["installedAudio"], 1)
         self.assertEqual(report["counts"]["installedCompanions"], 0)
@@ -541,7 +541,7 @@ class ConversionTests(unittest.TestCase):
         self.assertIn("Audio conversion finished; copying 2 unchanged files.", result.stdout)
         self.assertEqual({p.relative_to(self.source): p.read_bytes()
                           for p in self.source.rglob("*") if p.is_file()}, before)
-        target = self.output / "FLAC" / "Library" / "album" / track.name
+        target = self.output / "normalized-flac" / "Library" / "album" / track.name
         output = self.probe(target)
         audio = next(s for s in output["streams"] if s["codec_type"] == "audio")
         self.assertEqual((audio["codec_name"], audio["sample_rate"], audio["bits_per_raw_sample"]),
@@ -568,7 +568,7 @@ class ConversionTests(unittest.TestCase):
         result = self.repair()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-        target = self.output / "FIXED" / self.source.name / self.track.name
+        target = self.output / "repaired-metadata" / self.source.name / self.track.name
         self.assertTrue(target.is_file())
         self.assertEqual(self.track.read_bytes(), source_before)
         repaired = target.read_bytes()
@@ -600,7 +600,7 @@ class ConversionTests(unittest.TestCase):
         original = source.read_bytes()
         result = self.repair(source=conflict)
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-        report_path = self.output / "FIXED" / conflict.name / "repair-report.json"
+        report_path = self.output / "repaired-metadata" / conflict.name / "repair-report.json"
         report = json.loads(report_path.read_text(encoding="utf-8"))
         self.assertEqual(report["status"], "completed-with-findings")
         self.assertEqual([(item["rule"], item["status"]) for item in report["findings"]],
@@ -619,7 +619,7 @@ class ConversionTests(unittest.TestCase):
                                                       ["CDTOC=A+96+1234;B+96+5678"]))
         joined_result = self.repair(source=joined, output=self.work / "joined-output")
         self.assertNotEqual(joined_result.returncode, 0, joined_result.stdout + joined_result.stderr)
-        joined_report = json.loads((self.work / "joined-output" / "FIXED" / "joined" /
+        joined_report = json.loads((self.work / "joined-output" / "repaired-metadata" / "joined" /
                                     "repair-report.json").read_text(encoding="utf-8"))
         self.assertEqual(joined_report["findings"][0]["status"], "manual-review")
         self.assertEqual(joined_source.read_bytes(),
@@ -661,7 +661,7 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertEqual(self.track.read_bytes(), source_before)
         self.assertEqual(unrelated.read_bytes(), unrelated_before)
-        target = self.output / "FIXED" / self.source.name / self.track.name
+        target = self.output / "repaired-metadata" / self.source.name / self.track.name
         self.assertTrue(target.exists(), result.stdout + result.stderr)
         repaired = target.read_bytes()
         _, flac_offset = parse_id3v23(repaired)
@@ -677,7 +677,7 @@ class ConversionTests(unittest.TestCase):
                       [payload for kind, payload in target_blocks if kind == 6])
         tags = [tag for kind, payload in target_blocks if kind == 4 for tag in parse_vorbis_comments(payload)]
         self.assertNotIn("EMPTYTAG=", tags)
-        self.assertEqual((self.output / "FIXED" / self.source.name / "review" / unrelated.name).read_bytes(),
+        self.assertEqual((self.output / "repaired-metadata" / self.source.name / "review" / unrelated.name).read_bytes(),
                          unrelated_before)
 
         report = json.loads((target.parent / "repair-report.json").read_text(encoding="utf-8"))
@@ -690,7 +690,7 @@ class ConversionTests(unittest.TestCase):
 
         again = self.repair(target.parent, output=self.work / "second")
         self.assertEqual(again.returncode, 1, again.stdout + again.stderr)
-        second = json.loads((self.work / "second" / "FIXED" / target.parent.name /
+        second = json.loads((self.work / "second" / "repaired-metadata" / target.parent.name /
                              "repair-report.json").read_text(encoding="utf-8"))
         self.assertEqual(second["repairedFiles"], 0)
 
@@ -712,15 +712,15 @@ class ConversionTests(unittest.TestCase):
 
         result = self.repair(self.source, "--rules", "flac.leading-id3")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        report_path = self.output / "FIXED" / self.source.name / "repair-report.json"
+        report_path = self.output / "repaired-metadata" / self.source.name / "repair-report.json"
         report = json.loads(report_path
                             .read_text(encoding="utf-8"))
         findings = {(item["source"], item["status"]) for item in report["findings"]
                     if item["rule"] == "flac.leading-id3"}
         self.assertEqual(findings, {("total.flac", "manual-review"), ("artwork.flac", "manual-review"),
                                     ("back-cover.flac", "manual-review"), ("same.flac", "repaired")})
-        self.assertEqual((self.output / "FIXED" / self.source.name / "same.flac").read_bytes(), flac)
-        self.assertTrue((self.output / "FIXED" / self.source.name / "back-cover.flac")
+        self.assertEqual((self.output / "repaired-metadata" / self.source.name / "same.flac").read_bytes(), flac)
+        self.assertTrue((self.output / "repaired-metadata" / self.source.name / "back-cover.flac")
                         .read_bytes().startswith(b"ID3"))
 
     def test_repair_keeps_conflicting_id3v1_genre_and_preserves_source(self):
@@ -737,7 +737,7 @@ class ConversionTests(unittest.TestCase):
 
         result = self.repair(self.source, "--rules", "mp3.duplicate-frames,mp3.redundant-id3v1")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        target = self.output / "FIXED" / self.source.name / source.name
+        target = self.output / "repaired-metadata" / self.source.name / source.name
         self.assertTrue(target.read_bytes().endswith(v1))
         self.assertEqual(source.read_bytes(), original)
         report = json.loads((target.parent / "repair-report.json").read_text(encoding="utf-8"))
@@ -758,7 +758,7 @@ class ConversionTests(unittest.TestCase):
 
         result = self.repair(self.source, "--rules", "mp3.text-encoding,mp3.duplicate-frames")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        target = self.output / "FIXED" / self.source.name / source.name
+        target = self.output / "repaired-metadata" / self.source.name / source.name
         repaired = target.read_bytes()
         output_frames, end = parse_id3v23(repaired)
         self.assertEqual(output_frames, [(b"TIT2", b"\x01\xff\xfe" + "Song".encode("utf-16-le"))])
@@ -785,7 +785,7 @@ class ConversionTests(unittest.TestCase):
         result = self.repair(self.source, "--rules", "mp3.text-encoding")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertEqual(source.read_bytes(), original)
-        report_path = self.output / "FIXED" / self.source.name / "repair-report.json"
+        report_path = self.output / "repaired-metadata" / self.source.name / "repair-report.json"
         report = json.loads(report_path.read_text(encoding="utf-8"))
         self.assertIn(("mp3.text-encoding", "manual-review"),
                       {(item["rule"], item["status"]) for item in report["findings"]},
@@ -816,7 +816,7 @@ class ConversionTests(unittest.TestCase):
                              "mp3.redundant-id3v1")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual({path: path.read_bytes() for path in (track, other)}, before)
-        output = self.output / "FIXED" / self.source.name / "album"
+        output = self.output / "repaired-metadata" / self.source.name / "album"
         self.assertEqual((output / "other.mp3").read_bytes(), before[other])
         repaired = (output / "song.mp3").read_bytes()
         repaired_frames, end = parse_id3v23(repaired)
@@ -848,7 +848,7 @@ class ConversionTests(unittest.TestCase):
 
         result = self.repair()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        target = self.output / "FIXED" / self.source.name / track.name
+        target = self.output / "repaired-metadata" / self.source.name / track.name
         self.assertTrue(target.read_bytes().endswith(v1))
         self.assertEqual(track.read_bytes(), original)
         _, end = parse_id3v23(target.read_bytes())
@@ -857,7 +857,7 @@ class ConversionTests(unittest.TestCase):
         output = self.work / "opt-in"
         result = self.repair(self.source, "--remove-id3v1", output=output)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        target = output / "FIXED" / self.source.name / track.name
+        target = output / "repaired-metadata" / self.source.name / track.name
         _, end = parse_id3v23(target.read_bytes())
         self.assertEqual(target.read_bytes()[end:], audio)
 
@@ -879,7 +879,7 @@ class ConversionTests(unittest.TestCase):
         original = track.read_bytes()
         result = self.repair(self.source, "--rules", "mp3.text-encoding")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        target = self.output / "FIXED" / self.source.name / track.name
+        target = self.output / "repaired-metadata" / self.source.name / track.name
         self.assertTrue(target.exists(), result.stdout + result.stderr)
         repaired = target.read_bytes()
         values, end = parse_id3v23(repaired)
@@ -909,7 +909,7 @@ class ConversionTests(unittest.TestCase):
         self.assertTrue(any(kind == 1 for kind, _ in before))
         result = self.repair(self.source, "--rules", "flac.duplicate-comments")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        target = self.output / "FIXED" / self.source.name / self.track.name
+        target = self.output / "repaired-metadata" / self.source.name / self.track.name
         repaired = target.read_bytes()
         after, output_offset = blocks(repaired)
         self.assertEqual(output_offset, source_offset)
@@ -937,7 +937,7 @@ class ConversionTests(unittest.TestCase):
                              "flac.invalid-comments,flac.empty-comments,flac.duplicate-comments,"
                              "flac.multiple-comment-blocks")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        target = self.output / "FIXED" / self.source.name / source.name
+        target = self.output / "repaired-metadata" / self.source.name / source.name
         repaired = target.read_bytes()
         comment_blocks = [payload for kind, payload in blocks(repaired)[0] if kind == 4]
         self.assertEqual(len(comment_blocks), 2)
@@ -970,7 +970,7 @@ class ConversionTests(unittest.TestCase):
         source_offset = blocks(original)[1]
         result = self.repair(self.source, "--rules", "flac.empty-comments")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        target = self.output / "FIXED" / self.source.name / self.track.name
+        target = self.output / "repaired-metadata" / self.source.name / self.track.name
         repaired = target.read_bytes()
         after, output_offset = blocks(repaired)
         self.assertEqual(output_offset, source_offset)
@@ -1007,7 +1007,7 @@ class ConversionTests(unittest.TestCase):
 
     def test_repair_dry_run_reports_conflicts_and_manual_findings(self):
         self.track.write_bytes(add_vorbis_comments(self.repair_fixture.read_bytes(), ["CDTOC=A", "CDTOC=B"]))
-        existing = self.output / "FIXED" / self.source.name
+        existing = self.output / "repaired-metadata" / self.source.name
         existing.mkdir(parents=True)
         (existing / ".repair-in-progress").mkdir()
         result = self.repair(self.source, "--dry-run", "--rules", "flac.duplicate-comments")
@@ -1027,8 +1027,8 @@ class ConversionTests(unittest.TestCase):
             result = self.repair(self.source, "--jobs", jobs, "--rules", "flac.duplicate-comments",
                                  output=self.work / ("output-" + jobs))
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        one = self.work / "output-1" / "FIXED" / self.source.name
-        four = self.work / "output-4" / "FIXED" / self.source.name
+        one = self.work / "output-1" / "repaired-metadata" / self.source.name
+        four = self.work / "output-4" / "repaired-metadata" / self.source.name
         for source in self.source.iterdir():
             self.assertEqual((one / source.name).read_bytes(), (four / source.name).read_bytes())
             self.assertEqual(source.read_bytes(), data)
@@ -1040,7 +1040,7 @@ class ConversionTests(unittest.TestCase):
         self.track.unlink()
         for name in ("a.flac", "b.flac"):
             (self.source / name).write_bytes(data)
-        target = self.output / "FIXED" / self.source.name
+        target = self.output / "repaired-metadata" / self.source.name
         target.mkdir(parents=True)
         (target / "a.flac").write_bytes(b"existing destination")
         with deny_delete(target / "a.flac"):
@@ -1075,7 +1075,7 @@ class ConversionTests(unittest.TestCase):
         review.mkdir()
         (review / "conflict.flac").write_bytes(add_vorbis_comments(
             self.repair_fixture.read_bytes(), ["CDTOC=A+96+1234", "CDTOC=B+96+5678"]))
-        target = self.output / "FIXED" / self.source.name
+        target = self.output / "repaired-metadata" / self.source.name
         target.mkdir(parents=True)
         (target / "a.flac").write_bytes(b"existing destination")
         with deny_delete(target / "a.flac"):
@@ -1092,7 +1092,7 @@ class ConversionTests(unittest.TestCase):
         self.track.write_bytes(add_vorbis_comments(
             self.repair_fixture.read_bytes(), [toc, toc]))
         source_before = self.track.read_bytes()
-        target = self.output / "FIXED" / self.source.name / self.track.name
+        target = self.output / "repaired-metadata" / self.source.name / self.track.name
         target.parent.mkdir(parents=True)
         target.write_bytes(b"existing destination")
 
@@ -1126,14 +1126,14 @@ class ConversionTests(unittest.TestCase):
         libraries = [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}]
         result = self.legacy(libraries, "7\n\n\nRUN\n")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        output = self.output / "FIXED" / "Library" / album.name
+        output = self.output / "repaired-metadata" / "Library" / album.name
         self.assertEqual((output / "notes.txt").read_bytes(), b"keep unchanged")
         self.assertEqual((output / cover.name).read_bytes(), cover.read_bytes())
         self.assertEqual((output / cue.name).read_bytes(), cue.read_bytes())
         self.assertTrue((output / "track.flac").is_file())
         self.assertEqual({path.relative_to(self.source): path.read_bytes()
                           for path in self.source.rglob("*") if path.is_file()}, before)
-        self.assertIn("Output location: " + str(self.output / "FIXED" / "Library"), result.stdout)
+        self.assertIn("Output location: " + str(self.output / "repaired-metadata" / "Library"), result.stdout)
         self.assertTrue((output.parent / "repair-report.json").is_file())
         summary = (output.parent / "repair-summary.html").read_text(encoding="utf-8")
         self.assertIn("Repair summary:", result.stdout)
@@ -1217,7 +1217,7 @@ class ConversionTests(unittest.TestCase):
         (album / "t3.flac").write_bytes(self.repair_fixture.read_bytes())
         result = self.repair()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        summary = (self.output / "FIXED" / self.source.name / "repair-summary.html").read_text(encoding="utf-8")
+        summary = (self.output / "repaired-metadata" / self.source.name / "repair-summary.html").read_text(encoding="utf-8")
         issues = summary[summary.index("<h2>Issues by severity</h2>"):summary.index("<h2>Albums by severity</h2>")]
         albums = summary[summary.index("<h2>Albums by severity</h2>"):]
         self.assertLess(issues.index("FLAC: duplicate tag values"), issues.index("FLAC: empty tags"))
@@ -1242,7 +1242,7 @@ class ConversionTests(unittest.TestCase):
         libraries = [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}]
         result = self.legacy(libraries, "7\n\nYES\nRUN\n")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        target = self.output / "FIXED" / "Library" / track.name
+        target = self.output / "repaired-metadata" / "Library" / track.name
         _, end = parse_id3v23(target.read_bytes())
         self.assertEqual(target.read_bytes()[end:], audio)
         self.assertEqual(track.read_bytes(), original)
@@ -1253,7 +1253,7 @@ class ConversionTests(unittest.TestCase):
     def test_repair_summary_destination_conflict_preserves_existing_file(self):
         self.track.write_bytes(add_vorbis_comments(
             self.repair_fixture.read_bytes(), ["CDTOC=A", "CDTOC=A"]))
-        target = self.output / "FIXED" / self.source.name
+        target = self.output / "repaired-metadata" / self.source.name
         target.mkdir(parents=True)
         summary = target / "repair-summary.html"
         summary.write_text("existing summary", encoding="utf-8")
@@ -1277,7 +1277,7 @@ class ConversionTests(unittest.TestCase):
         redirected.mkdir()
         sentinel = redirected / "sentinel.txt"
         sentinel.write_text("untouched", encoding="utf-8")
-        output_album = self.output / "FIXED" / self.source.name / "album"
+        output_album = self.output / "repaired-metadata" / self.source.name / "album"
         output_album.parent.mkdir(parents=True)
         result = run(os.environ["ComSpec"], "/c", "mklink", "/J", str(output_album), str(redirected))
         if result.returncode:
@@ -1312,7 +1312,7 @@ class ConversionTests(unittest.TestCase):
                                                                ["CDTOC=A+96+1234", "CDTOC=A+96+1234"]))
         result = self.repair()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        output = self.output / "FIXED" / self.source.name
+        output = self.output / "repaired-metadata" / self.source.name
         self.assertTrue((output / self.track.name).is_file())
         self.assertTrue((output / "album" / "track.flac").is_file())
         self.assertEqual((output / "album" / "notes.txt").read_bytes(), b"keep")
@@ -1406,7 +1406,7 @@ class ConversionTests(unittest.TestCase):
         self.assertIn("Skipped: " + str(unchanged.relative_to(self.source)), result.stdout)
         self.assertEqual({p.relative_to(self.source): p.read_bytes()
                           for p in self.source.rglob("*") if p.is_file()}, before)
-        destination = self.output / "FLAC" / "Library"
+        destination = self.output / "normalized-flac" / "Library"
         skipped = unchanged.relative_to(self.source)
         kept = {relative: content for relative, content in before.items()
                 if skipped not in relative.parents}
@@ -1448,7 +1448,7 @@ class ConversionTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assert_summary(result, "Completed", 0, "audio files")
                 self.assertNotIn("Processing album folder:", result.stdout)
-                destination = self.output / "FLAC" / name
+                destination = self.output / "normalized-flac" / name
                 self.assertEqual([p.name for p in destination.iterdir()], ["conversion-audit.json"])
                 report = self.audit(destination)
                 self.assertEqual(report["status"], "completed")
@@ -1516,7 +1516,7 @@ class ConversionTests(unittest.TestCase):
         track.write_bytes(b"original unconverted audio")
         with deny_delete(track, share=0):
             self.convert(target="flac", success=False)
-        failed = next((self.output / "FLAC").glob("ERROR_COPY_*"))
+        failed = next((self.output / "normalized-flac").glob("ERROR_COPY_*"))
         report = self.audit(failed)
         self.assertEqual(report["errorType"], "COPY")
         self.assertEqual(report["counts"]["installedAudio"], 1)
@@ -1526,7 +1526,7 @@ class ConversionTests(unittest.TestCase):
 
     def test_flac_existing_destinations_and_cross_library_preflight(self):
         libraries = [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}]
-        target = self.output / "FLAC" / "Library" / self.track.name
+        target = self.output / "normalized-flac" / "Library" / self.track.name
         target.parent.mkdir(parents=True)
         sidecar = Path(str(target) + ".flac-metadata")
         sidecar.write_bytes(b"existing metadata")
@@ -1538,7 +1538,7 @@ class ConversionTests(unittest.TestCase):
         second = self.work / "second"
         second.mkdir()
         (second / "two.flac").write_bytes(self.fixture.read_bytes())
-        blocked = self.output / "FLAC" / "Second" / "two.flac"
+        blocked = self.output / "normalized-flac" / "Second" / "two.flac"
         blocked.parent.mkdir(parents=True)
         blocked.write_bytes(b"existing output")
         libraries.append({"isActive": True, "mediaPath": str(second), "mediaName": "Second"})
@@ -1559,7 +1559,7 @@ class ConversionTests(unittest.TestCase):
         library = [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}]
         result = self.legacy(library, "1\nRUN\n", OutDirectory=str(self.source))
         self.assertNotEqual(result.returncode, 0)
-        self.assertFalse((self.source / "FLAC").exists())
+        self.assertFalse((self.source / "normalized-flac").exists())
         (self.source / (self.track.name + ".flac-metadata")).write_bytes(b"collision")
         result = self.legacy(library, "1\nRUN\n")
         self.assertNotEqual(result.returncode, 0)
@@ -1702,12 +1702,12 @@ class ConversionTests(unittest.TestCase):
         result = self.legacy(libraries)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assert_summary(result, "Completed", 2, "audio files", copied=1)
-        target = self.output / "MP3" / "Library \u97f3" / self.mp3().name
+        target = self.output / "converted-mp3" / "Library \u97f3" / self.mp3().name
         self.assertTrue(target.exists())
         self.assertEqual(Path(str(target) + ".flac-metadata").read_bytes(), self.prefix)
         self.assertEqual((target.parent / "cover.png").read_bytes(), self.image)
-        self.assertTrue((self.output / "MP3" / "Second" / "two.mp3").exists())
-        self.assertFalse((self.output / "MP3" / "Inactive").exists())
+        self.assertTrue((self.output / "converted-mp3" / "Second" / "two.mp3").exists())
+        self.assertFalse((self.output / "converted-mp3" / "Inactive").exists())
         before = target.read_bytes()
         result = self.legacy(libraries)
         self.assertNotEqual(result.returncode, 0)
@@ -1798,8 +1798,8 @@ class ConversionTests(unittest.TestCase):
                 self.assertNotIn("Completion summary:", result.stdout)
                 self.assertIn("BACK for the menu, EXIT to quit", result.stdout)
                 self.assertEqual(result.stdout.count("Select run option"), 2 if "BACK" in response else 1)
-        self.assertFalse((self.output / "MP3").exists())
-        self.assertFalse((self.output / "Library" / "catalog-v2.sqlite").exists())
+        self.assertFalse((self.output / "converted-mp3").exists())
+        self.assertFalse((self.output / "catalog-sqlite" / "Library" / "catalog-v2.sqlite").exists())
 
     def test_back_from_flac_preview_can_select_mp3_without_replacing_sources(self):
         result = self.legacy(
@@ -1807,7 +1807,7 @@ class ConversionTests(unittest.TestCase):
             "1\nBACK\n?\n6\n" + DEFAULT_MP3_SETTINGS + "RUN\n")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout.count("Select run option"), 2)
-        self.assertTrue((self.output / "MP3" / "Library" / self.mp3().name).exists())
+        self.assertTrue((self.output / "converted-mp3" / "Library" / self.mp3().name).exists())
         self.assertEqual(hashlib.sha256(self.track.read_bytes()).digest(), self.original_hash)
         self.assertNotIn("Type REPLACE to run", result.stdout)
         self.assertEqual(result.stdout.count("Type RUN to run"), 2)
@@ -1818,7 +1818,7 @@ class ConversionTests(unittest.TestCase):
             [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}],
             "16\ninvalid\n5\n \t6 \t\n" + DEFAULT_MP3_SETTINGS + "RUN\n")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertTrue((self.output / "MP3" / "Library" / self.mp3().name).exists())
+        self.assertTrue((self.output / "converted-mp3" / "Library" / self.mp3().name).exists())
 
     def test_manual_flac_defaults_to_cancel(self):
         libraries = [
@@ -1843,7 +1843,7 @@ class ConversionTests(unittest.TestCase):
         result = self.legacy(libraries, "1\n \tRUN \t\n")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assert_summary(result, "Completed", 1, "audio files")
-        target = self.output / "FLAC" / "Library" / self.track.name
+        target = self.output / "normalized-flac" / "Library" / self.track.name
         self.assertIn("Output location: " + str(target.parent), result.stdout)
         self.assertEqual(hashlib.sha256(self.track.read_bytes()).digest(), self.original_hash)
         audio = self.probe(target)["streams"][0]
@@ -1873,7 +1873,7 @@ class ConversionTests(unittest.TestCase):
                     result = self.legacy(libraries, "1\nRUN\n", OutDirectory=str(extended_output))
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     self.assert_summary(result, "Completed", 1, "audio files")
-                    directory = extended_output / "FLAC" / "Library"
+                    directory = extended_output / "normalized-flac" / "Library"
                     audio = self.probe(directory / self.track.name)["streams"][0]
                     self.assertEqual((audio["codec_name"], audio["sample_rate"], audio["bits_per_raw_sample"]),
                                      ("flac", "44100", "16"))
@@ -1886,10 +1886,10 @@ class ConversionTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "Windows near-MAX_PATH conversion output")
     def test_manual_flac_near_max_path_uses_extended_temporary_paths(self):
         output_root = self.work / "near-max-output"
-        while len(str(output_root / "FLAC" / "Library")) < 235:
-            missing = 235 - len(str(output_root / "FLAC" / "Library"))
+        while len(str(output_root / "normalized-flac" / "Library")) < 235:
+            missing = 235 - len(str(output_root / "normalized-flac" / "Library"))
             output_root /= "p" * min(100, missing - 1)
-        destination = output_root / "FLAC" / "Library"
+        destination = output_root / "normalized-flac" / "Library"
         self.assertEqual(len(str(destination)), 235)
         nested_source = self.source / "nested" / "deeper"
         nested_source.mkdir(parents=True)
@@ -1935,7 +1935,7 @@ class ConversionTests(unittest.TestCase):
         result = run(ARGS.converter, "convert", source, "--output-dir", self.output,
                      "--config", self.config, "--to", "flac")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        destination = self.output / "FLAC" / source.name
+        destination = self.output / "normalized-flac" / source.name
         report = self.audit(destination)
         self.assertEqual(report["status"], "completed")
         resources = report["files"][0]["resources"]
@@ -1960,7 +1960,7 @@ class ConversionTests(unittest.TestCase):
         logs = result.stdout + result.stderr
         self.assertIn("AAC source", logs)
         self.assertIn("cannot restore quality lost during AAC encoding", logs)
-        destination = output / "FLAC" / source.name
+        destination = output / "normalized-flac" / source.name
         audio = self.probe(destination / "track.flac")["streams"][0]
         self.assertEqual((audio["codec_name"], audio["sample_rate"], audio["bits_per_raw_sample"]),
                          ("flac", "44100", "16"))
@@ -1997,7 +1997,7 @@ class ConversionTests(unittest.TestCase):
         second = self.work / "second"
         second.mkdir()
         (second / "two.flac").write_bytes(self.fixture.read_bytes())
-        blocked = self.output / "MP3" / "Second" / "two.mp3"
+        blocked = self.output / "converted-mp3" / "Second" / "two.mp3"
         blocked.parent.mkdir(parents=True)
         blocked.write_bytes(b"existing output")
         libraries.append({"isActive": True, "mediaPath": str(second), "mediaName": "Second"})
@@ -2005,7 +2005,7 @@ class ConversionTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Existing destinations: 1", result.stdout)
         self.assertIn(str(blocked), result.stdout)
-        self.assertFalse((self.output / "MP3" / "Library").exists())
+        self.assertFalse((self.output / "converted-mp3" / "Library").exists())
         self.assertEqual(blocked.read_bytes(), b"existing output")
 
     def test_flac_preview_collision_never_converts(self):
@@ -2037,7 +2037,7 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(result.stdout.count("First pass: Find all folders"), 1)
         self.assertRegex(result.stdout, r"Scan discovery: \d+ entries \(total unknown\), \d+ folders, .* \[done\]")
         self.assertRegex(result.stdout, r"Scan track collection: (\d+)/\1 folders \(100%\), 1 albums, .* \[done\]")
-        json_path = self.output / "Library" / "media_out_Library_1.json"
+        json_path = self.output / "catalog-json" / "Library" / "media_out_Library_1.json"
         self.assertTrue(json_path.exists())
         before = json_path.read_bytes()
         result = self.legacy(libraries, "2\n\n\n")
@@ -2060,14 +2060,14 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Operation preview: import JSON into SQLite", result.stdout)
         self.assertIn("Database: new file", result.stdout)
-        db = self.output / "Library" / "catalog-v2.sqlite"
+        db = self.output / "catalog-sqlite" / "Library" / "catalog-v2.sqlite"
         self.assertFalse(db.exists())
         result = self.legacy(libraries, "4\nRUN\n")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assert_summary(result, "Completed", 1, "JSON batches imported")
         self.assertIn("Output location: " + str(db), result.stdout)
         self.assertTrue(db.exists())
-        self.assertFalse((self.output / "Library" / "media_out_Library.db").exists())
+        self.assertFalse((self.output / "catalog-json" / "Library" / "media_out_Library.db").exists())
         with closing(sqlite3.connect(db)) as connection:
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 2)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM files").fetchone()[0], 1)
@@ -2076,6 +2076,94 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("Database: existing records will be updated", result.stdout)
         self.assertEqual(db.read_bytes(), before_db)
+
+    def test_operation_layout_connects_scan_duplicates_and_database(self):
+        self.track.unlink()
+        libraries = [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}]
+        for name in ("first", "second"):
+            album = self.source / name
+            album.mkdir()
+            (album / "track.flac").write_bytes(self.fixture.read_bytes())
+        original = {path: path.read_bytes() for path in self.source.rglob("*") if path.is_file()}
+        scanned = self.legacy(libraries, "2\n\nRUN\n")
+        self.assertEqual(scanned.returncode, 0, scanned.stdout + scanned.stderr)
+        catalog = self.output / "catalog-json" / "Library"
+        report = self.work / "duplicates.json"
+        duplicates = run(ARGS.converter, "duplicates", catalog, "--report", report, "--config", self.config)
+        self.assertEqual(duplicates.returncode, 0, duplicates.stdout + duplicates.stderr)
+        self.assertIn("Found 1 duplicate album pair(s) in 1 group(s)", duplicates.stdout)
+        preview = self.legacy(libraries, "3\n\n")
+        self.assertEqual(preview.returncode, 0, preview.stdout + preview.stderr)
+        self.assertIn(str(catalog / "media_out_Library_1.json"), preview.stdout)
+        self.assertIn(str(self.output / "quarantine"), preview.stdout)
+        imported = self.legacy(libraries, "4\nRUN\n")
+        self.assertEqual(imported.returncode, 0, imported.stdout + imported.stderr)
+        database = self.output / "catalog-sqlite" / "Library" / "catalog-v2.sqlite"
+        with closing(sqlite3.connect(database)) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM files").fetchone()[0], 2)
+        self.assertEqual({path: path.read_bytes() for path in self.source.rglob("*") if path.is_file()}, original)
+
+    def test_operation_layout_preserves_previous_output_folders(self):
+        previous = []
+        for name in ("FLAC", "MP3", "FIXED", "deleted", self.source.name):
+            directory = self.output / name
+            directory.mkdir(parents=True)
+            file = directory / "catalog-v2.sqlite"
+            file.write_bytes(b"previous output must remain untouched")
+            previous.append(file)
+        self.convert(target="flac")
+        self.convert()
+        repaired = self.repair(None, "--rules", "flac.picture-descriptor")
+        self.assertEqual(repaired.returncode, 0, repaired.stdout + repaired.stderr)
+        self.assertTrue((self.output / "repaired-metadata" / self.source.name / self.track.name).is_file())
+        scanned = run(ARGS.converter, "scan", self.source, "--output-dir", self.output, "--config", self.config)
+        self.assertEqual(scanned.returncode, 0, scanned.stdout + scanned.stderr)
+        imported = run(ARGS.converter, "db", "import", self.output / "catalog-json" / self.source.name,
+                       "--output-dir", self.output, "--config", self.config)
+        self.assertEqual(imported.returncode, 0, imported.stdout + imported.stderr)
+        self.assertTrue((self.output / "catalog-sqlite" / self.source.name / "catalog-v2.sqlite").is_file())
+        for file in previous:
+            self.assertEqual(file.read_bytes(), b"previous output must remain untouched")
+
+    def test_menu_readers_use_legacy_catalog_only_when_current_folder_is_absent(self):
+        libraries = [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}]
+        scanned = self.legacy(libraries, "2\n\nRUN\n")
+        self.assertEqual(scanned.returncode, 0, scanned.stdout + scanned.stderr)
+        catalog = self.output / "catalog-json" / "Library"
+        legacy = self.output / "Library"
+        shutil.move(catalog, legacy)
+        original = {path: path.read_bytes() for path in legacy.iterdir() if path.is_file()}
+        for option in (3, 4):
+            result = self.legacy(libraries, f"{option}\nRUN\n")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Using legacy catalog directory", result.stdout)
+            self.assertIn(str(legacy / "media_out_Library_1.json"), result.stdout)
+        self.assertTrue((self.output / "catalog-sqlite" / "Library" / "catalog-v2.sqlite").is_file())
+        catalog.mkdir()
+        for option in (3, 4):
+            result = self.legacy(libraries, f"{option}\nRUN\n")
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertNotIn("Using legacy catalog directory", result.stdout)
+        self.assertEqual({path: path.read_bytes() for path in legacy.iterdir() if path.is_file()}, original)
+
+    def test_menu_readers_prefer_current_catalog_and_do_not_hide_corruption(self):
+        libraries = [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}]
+        scanned = self.legacy(libraries, "2\n\nRUN\n")
+        self.assertEqual(scanned.returncode, 0, scanned.stdout + scanned.stderr)
+        catalog = self.output / "catalog-json" / "Library"
+        legacy = self.output / "Library"
+        shutil.copytree(catalog, legacy)
+        for option in (3, 4):
+            result = self.legacy(libraries, f"{option}\nRUN\n")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertNotIn("Using legacy catalog directory", result.stdout)
+            self.assertIn(str(catalog / "media_out_Library_1.json"), result.stdout)
+        batch = catalog / "media_out_Library_1.json"
+        batch.write_bytes(batch.read_bytes() + b"\n")
+        for option in (3, 4):
+            result = self.legacy(libraries, f"{option}\nRUN\n")
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertNotIn("Using legacy catalog directory", result.stdout)
 
     def test_manual_scan_flac_archive_choice_and_cancellation(self):
         second = self.work / "second"
@@ -2095,13 +2183,13 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Invalid selection. Enter YES or NO.", result.stdout)
         self.assertIn("Byte-exact FLAC metadata archives: enabled", result.stdout)
-        target = self.output / "Library"
+        target = self.output / "catalog-json" / "Library"
         manifest_path = target / "scan-manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         self.assertEqual(len(manifest["archives"]), 1)
         archive = target / manifest["archives"][0]["file"]
         self.assertEqual(archive.read_bytes(), self.prefix)
-        second_target = self.output / "Second"
+        second_target = self.output / "catalog-json" / "Second"
         second_manifest_path = second_target / "scan-manifest.json"
         second_manifest = json.loads(second_manifest_path.read_text(encoding="utf-8"))
         self.assertEqual(len(second_manifest["archives"]), 1)
@@ -2136,7 +2224,7 @@ class ConversionTests(unittest.TestCase):
         config_path.write_text(json.dumps(config), encoding="utf-8")
         command = [ARGS.converter, "scan", self.source, "--output-dir", self.output,
                    "--config", config_path]
-        target = self.output / self.source.name
+        target = self.output / "catalog-json" / self.source.name
         manifest_path = target / "scan-manifest.json"
 
         result = run(*command)
@@ -2193,7 +2281,7 @@ class ConversionTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "Windows long-path regression")
     def test_manual_scan_archive_toggle_with_long_output(self):
         long_output = self.work / ("a" * 90) / ("b" * 90)
-        target = Path("\\\\?\\" + str(long_output / "Library"))
+        target = Path("\\\\?\\" + str(long_output / "catalog-json" / "Library"))
         libraries = [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}]
         try:
             result = self.legacy(libraries, "2\nYES\nRUN\n", OutDirectory=str(long_output))
@@ -2261,7 +2349,7 @@ class ConversionTests(unittest.TestCase):
             [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}],
             "2\n\nRUN\n")
         self.assertEqual(scanned.returncode, 0, scanned.stdout + scanned.stderr)
-        json_directory = self.output / "Library"
+        json_directory = self.output / "catalog-json" / "Library"
         json_file = json_directory / "media_out_Library_1.json"
         original_json = json_file.read_bytes()
         for first_count, second_count in ((2, 1), (1, 2), (2, 0), (0, 2), (2, 2)):
@@ -2296,14 +2384,14 @@ class ConversionTests(unittest.TestCase):
         result = self.legacy(libraries)
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assert_summary(result, "Partially completed", 1, "audio files", copied=1, failed=1)
-        first_output = self.output / "MP3" / "First"
+        first_output = self.output / "converted-mp3" / "First"
         self.assertTrue((first_output / self.mp3().name).exists())
         self.assertEqual((first_output / "cover.png").read_bytes(), self.image)
-        self.assertFalse((self.output / "MP3" / "Second" / "corrupt.mp3").exists())
+        self.assertFalse((self.output / "converted-mp3" / "Second" / "corrupt.mp3").exists())
         self.assertEqual(corrupt.read_bytes(), self.fixture.read_bytes()[:50])
         self.assertEqual(hashlib.sha256(self.track.read_bytes()).digest(), self.original_hash)
         self.assertIn("Output location: " + str(first_output), result.stdout)
-        failed_output = next((self.output / "MP3").glob("ERROR_*_Second"))
+        failed_output = next((self.output / "converted-mp3").glob("ERROR_*_Second"))
         self.assertIn("Output location: " + str(failed_output), result.stdout)
         self.assertIn("unattempted work is not counted as failed", result.stdout)
 
@@ -2314,11 +2402,11 @@ class ConversionTests(unittest.TestCase):
         libraries = [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}]
         result = self.legacy(libraries, "2\n\nRUN\n")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        (self.output / "Library" / "media_out_Library_2.json").write_bytes(b"{invalid JSON")
+        (self.output / "catalog-json" / "Library" / "media_out_Library_2.json").write_bytes(b"{invalid JSON")
         result = self.legacy(libraries, "4\nRUN\n")
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assert_summary(result, "Failed", 0, "JSON batches imported", failed=1)
-        self.assertFalse((self.output / "Library" / "catalog-v2.sqlite").exists())
+        self.assertFalse((self.output / "catalog-sqlite" / "Library" / "catalog-v2.sqlite").exists())
 
     def test_flac_partial_completion_preserves_sources_and_completed_outputs(self):
         second = self.work / "second"
@@ -2331,8 +2419,8 @@ class ConversionTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assert_summary(result, "Partially completed", 1, "audio files", failed=1)
         self.assertEqual(hashlib.sha256(self.track.read_bytes()).digest(), self.original_hash)
-        self.assertTrue((self.output / "FLAC" / "First" / self.track.name).exists())
-        self.assertFalse((self.output / "FLAC" / "Second" / "corrupt.flac").exists())
+        self.assertTrue((self.output / "normalized-flac" / "First" / self.track.name).exists())
+        self.assertFalse((self.output / "normalized-flac" / "Second" / "corrupt.flac").exists())
         self.assertEqual(corrupt.read_bytes(), self.fixture.read_bytes()[:50])
         self.assertIn("Failure does not imply rollback", result.stdout)
 
@@ -2341,7 +2429,7 @@ class ConversionTests(unittest.TestCase):
         (self.source / "cover.png").write_bytes(self.image)
         result = self.legacy(libraries)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        target = self.output / "MP3" / "Library" / self.mp3().name
+        target = self.output / "converted-mp3" / "Library" / self.mp3().name
         high_size = target.stat().st_size
         (self.source / "cover.png").write_bytes(b"updated companion")
         result = self.legacy(libraries, "6\n9\nNO\nNO\nRUN\n")
@@ -2367,7 +2455,7 @@ class ConversionTests(unittest.TestCase):
         libraries = [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}]
         result = self.legacy(libraries)
         self.assertNotEqual(result.returncode, 0)
-        target = self.output / "MP3" / "Library" / self.mp3().name
+        target = self.output / "converted-mp3" / "Library" / self.mp3().name
         self.assertFalse(target.exists())
         result = self.legacy(libraries, "6\n\nYES\n\nRUN\n")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -2425,14 +2513,14 @@ class ConversionTests(unittest.TestCase):
             {"isActive": True, "mediaPath": str(second), "mediaName": "Second"}]
         result = self.legacy(libraries, "2\n\nRUN\n")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        second_json = self.output / "Second" / "media_out_Second_1.json"
+        second_json = self.output / "catalog-json" / "Second" / "media_out_Second_1.json"
         before = second_json.read_bytes()
         with deny_delete(second_json):
             result = self.legacy(libraries, "2\n\nRUN\n")
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assert_summary(result, "Partially completed", 1, "JSON batch files", failed=1)
         self.assertEqual(second_json.read_bytes(), before)
-        self.assertTrue((self.output / "First" / "media_out_First_1.json").exists())
+        self.assertTrue((self.output / "catalog-json" / "First" / "media_out_First_1.json").exists())
 
     def test_manual_duplicates_validates_each_library_manifest(self):
         first_album = self.source / "album"
@@ -2464,7 +2552,7 @@ class ConversionTests(unittest.TestCase):
                          original_outputs)
 
         for name in ("First", "Second"):
-            directory = self.output / name
+            directory = self.output / "catalog-json" / name
             batch = sorted(directory.glob("media_out_*.json"))[-1]
             original = batch.read_bytes()
             for change in ("missing", "modified"):
@@ -2487,13 +2575,13 @@ class ConversionTests(unittest.TestCase):
         scanned = self.legacy(
             [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}], "2\n\nRUN\n")
         self.assertEqual(scanned.returncode, 0, scanned.stdout + scanned.stderr)
-        albums = (self.output / "Library" / "media_out_Library_1.json").read_bytes()
+        albums = (self.output / "catalog-json" / "Library" / "media_out_Library_1.json").read_bytes()
         albums_data = json.loads(albums)
         for album in albums_data:
             album.pop("Scan Manifest ID", None)
         albums = json.dumps(albums_data).encode("utf-8")
         stem = self.source.name
-        destination = self.output / stem
+        destination = self.output / "catalog-json" / stem
         destination.mkdir(exist_ok=True)
         json_path = destination / f"media_out_{stem}_1.json"
         json_path.write_bytes(albums)
@@ -2503,14 +2591,14 @@ class ConversionTests(unittest.TestCase):
                 library["mediaName"] = name
             result = self.legacy([library], "4\nRUN\n")
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertTrue((destination / "catalog-v2.sqlite").exists())
+            self.assertTrue((self.output / "catalog-sqlite" / stem / "catalog-v2.sqlite").exists())
 
     def test_database_import_uses_supplied_directory_alias(self):
         scanned = self.legacy(
             [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}],
             "2\n\nRUN\n")
         self.assertEqual(scanned.returncode, 0, scanned.stdout + scanned.stderr)
-        json_directory = self.output / "Library"
+        json_directory = self.output / "catalog-json" / "Library"
         json_file = json_directory / "media_out_Library_1.json"
         original = json_file.read_bytes()
         alias = self.work / "Alias \u97f3"
@@ -2526,9 +2614,9 @@ class ConversionTests(unittest.TestCase):
                 result = run(ARGS.converter, "db", "import", input_path, "--output-dir",
                              database_output, cwd=self.work)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                database = database_output / alias.name / "catalog-v2.sqlite"
+                database = database_output / "catalog-sqlite" / alias.name / "catalog-v2.sqlite"
                 self.assertTrue(database.exists())
-                self.assertFalse((database_output / "Library").exists())
+                self.assertFalse((database_output / "catalog-sqlite" / "Library").exists())
                 with closing(sqlite3.connect(database)) as connection:
                     self.assertGreater(connection.execute("SELECT COUNT(*) FROM files").fetchone()[0], 0)
         self.assertEqual(json_file.read_bytes(), original)
@@ -2541,10 +2629,10 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(scanned.returncode, 0, scanned.stdout + scanned.stderr)
         long_output = self.work / "long-db" / ("a" * 90) / ("b" * 90)
         try:
-            result = run(ARGS.converter, "db", "import", self.output / "Library",
+            result = run(ARGS.converter, "db", "import", self.output / "catalog-json" / "Library",
                          "--output-dir", long_output)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            database = Path("\\\\?\\" + str(long_output / "Library" / "catalog-v2.sqlite"))
+            database = Path("\\\\?\\" + str(long_output / "catalog-sqlite" / "Library" / "catalog-v2.sqlite"))
             self.assertTrue(database.is_file())
             self.assertGreater(database.stat().st_size, 0)
         finally:
@@ -2561,7 +2649,7 @@ class ConversionTests(unittest.TestCase):
             [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}],
             "2\n\nRUN\n")
         self.assertEqual(scanned.returncode, 0, scanned.stdout + scanned.stderr)
-        json_directory = self.output / "Library"
+        json_directory = self.output / "catalog-json" / "Library"
         json_file = json_directory / "media_out_Library_1.json"
 
         database_output = self.work / "database-output"
@@ -2570,7 +2658,7 @@ class ConversionTests(unittest.TestCase):
         old_database.write_bytes(b"legacy database must remain untouched")
         result = run(ARGS.converter, "db", "import", json_directory, "--output-dir", database_output)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        database = database_output / "Library" / "catalog-v2.sqlite"
+        database = database_output / "catalog-sqlite" / "Library" / "catalog-v2.sqlite"
         with closing(sqlite3.connect(database)) as connection:
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 2)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM files").fetchone()[0], 3)
@@ -2650,13 +2738,13 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(scanned.returncode, 0, scanned.stdout + scanned.stderr)
 
         database_output = self.work / "incompatible-database-output"
-        database = database_output / "Library" / "catalog-v2.sqlite"
+        database = database_output / "catalog-sqlite" / "Library" / "catalog-v2.sqlite"
         database.parent.mkdir(parents=True)
         with closing(sqlite3.connect(database)) as connection:
             connection.execute("CREATE TABLE old_catalog (value TEXT)")
             connection.execute("PRAGMA user_version=1")
         before = database.read_bytes()
-        result = run(ARGS.converter, "db", "import", self.output / "Library",
+        result = run(ARGS.converter, "db", "import", self.output / "catalog-json" / "Library",
                      "--output-dir", database_output)
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Refusing a database", result.stdout + result.stderr)
@@ -2680,7 +2768,7 @@ class ConversionTests(unittest.TestCase):
         result = run(ARGS.converter, "db", "import", json_directory, "--output-dir", database_output)
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
 
-        database = database_output / "malformed-metadata" / "catalog-v2.sqlite"
+        database = database_output / "catalog-sqlite" / "malformed-metadata" / "catalog-v2.sqlite"
         self.assertFalse(database.exists())
 
     def test_duplicates_report_refuses_legacy_input_without_library_root(self):
@@ -2717,14 +2805,14 @@ class ConversionTests(unittest.TestCase):
                                  UseAsyncFFmpegCalls=asynchronous)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(result.stdout.count("First pass: Find all folders"), 1)
-            menu_files = sorted((self.output / self.source.name).glob("media_out_*_[12].json"))
+            menu_files = sorted((self.output / "catalog-json" / self.source.name).glob("media_out_*_[12].json"))
             self.assertEqual(len(menu_files), 2)
             expected = [json.loads(path.read_text(encoding="utf-8")) for path in menu_files]
             explicit_output = self.work / "explicit"
             result = run(ARGS.converter, "scan", self.source, "--output-dir", explicit_output,
                          "--config", self.menu_config_path)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            explicit_files = sorted((explicit_output / self.source.name).glob("media_out_*_[12].json"))
+            explicit_files = sorted((explicit_output / "catalog-json" / self.source.name).glob("media_out_*_[12].json"))
             actual = [json.loads(path.read_text(encoding="utf-8")) for path in explicit_files]
             for batches in (expected, actual):
                 for batch in batches:
@@ -2755,7 +2843,7 @@ class ConversionTests(unittest.TestCase):
         result = run(ARGS.converter, "scan", self.source, "--output-dir", self.output,
                      "--config", config_path, cwd=self.work, env=environment)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        output = self.output / self.source.name / f"media_out_{self.source.name}_1.json"
+        output = self.output / "catalog-json" / self.source.name / f"media_out_{self.source.name}_1.json"
         data = json.loads(output.read_text(encoding="utf-8"))
         tracks = [track for album in data for track in album["Tracks"]]
         track = next(track for track in tracks
@@ -2777,7 +2865,7 @@ class ConversionTests(unittest.TestCase):
                      "--config", config_path)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-        output = self.output / self.source.name / f"media_out_{self.source.name}_1.json"
+        output = self.output / "catalog-json" / self.source.name / f"media_out_{self.source.name}_1.json"
         data = json.loads(output.read_text(encoding="utf-8"))
         track = next(track for album in data for track in album["Tracks"]
                      if Path(track["file"]["relativePath"]).name == "track.flac")
@@ -2832,7 +2920,7 @@ class ConversionTests(unittest.TestCase):
                      "--config", config_path)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-        output = self.output / self.source.name / f"media_out_{self.source.name}_1.json"
+        output = self.output / "catalog-json" / self.source.name / f"media_out_{self.source.name}_1.json"
         data = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(len(data[0]["Tracks"]), 1000)
 
@@ -2862,7 +2950,7 @@ class ConversionTests(unittest.TestCase):
         result = run(ARGS.converter, "scan", self.source, "--output-dir", self.output,
                      "--config", config_path)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        output = self.output / self.source.name / f"media_out_{self.source.name}_1.json"
+        output = self.output / "catalog-json" / self.source.name / f"media_out_{self.source.name}_1.json"
         previous = output.read_bytes()
         data = json.loads(previous)
         self.assertEqual(len(data[0]["Tracks"]), 1)
@@ -2901,7 +2989,7 @@ class ConversionTests(unittest.TestCase):
         result = run(ARGS.converter, "scan", self.source, "--output-dir", self.output,
                      "--config", config_path)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        output = self.output / self.source.name / f"media_out_{self.source.name}_1.json"
+        output = self.output / "catalog-json" / self.source.name / f"media_out_{self.source.name}_1.json"
         data = json.loads(output.read_text(encoding="utf-8"))
         tracks = {Path(track["file"]["relativePath"]).name: track for track in data[0]["Tracks"]}
         self.assertEqual(len(tracks["chapters.flac"]["chapters"]), 2)
@@ -2922,7 +3010,7 @@ class ConversionTests(unittest.TestCase):
         result = run(ARGS.converter, "scan", self.source, "--output-dir", self.output,
                      "--config", self.config)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        output = self.output / self.source.name / f"media_out_{self.source.name}_1.json"
+        output = self.output / "catalog-json" / self.source.name / f"media_out_{self.source.name}_1.json"
         data = json.loads(output.read_text(encoding="utf-8"))
         artists = [album["Tracks"][0]["tags"]["albumArtists"][0] for album in data]
         self.assertEqual(artists, ["Alpha", "Beta", "Zebra"])
@@ -2936,7 +3024,7 @@ class ConversionTests(unittest.TestCase):
             [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}], "1\nRUN\n")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(wav.read_bytes(), original)
-        target = self.output / "FLAC" / "Library" / self.track.name
+        target = self.output / "normalized-flac" / "Library" / self.track.name
         audio = self.probe(target)["streams"][0]
         self.assertEqual((audio["codec_name"], audio["sample_rate"], audio["bits_per_raw_sample"]),
                          ("flac", "44100", "16"))
@@ -2955,7 +3043,7 @@ class ConversionTests(unittest.TestCase):
         self.assert_summary(result, "Failed", 0, "audio files", failed=1)
         self.assertEqual(self.track.read_bytes(), before)
         self.assertEqual(list(self.source.iterdir()), [self.track])
-        failed = next((self.output / "FLAC").glob("ERROR_*_Library"))
+        failed = next((self.output / "normalized-flac").glob("ERROR_*_Library"))
         self.assertFalse((failed / self.track.name).exists())
         self.assertTrue((failed / ".conversion-in-progress").exists())
         self.assertEqual(json.loads((failed / "conversion-audit.json").read_text())["status"], "failed")
@@ -2977,7 +3065,7 @@ class ConversionTests(unittest.TestCase):
         result = self.legacy(libraries, "7\n\n\nRUN\n")
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("collides with another library's repair output", result.stdout + result.stderr)
-        self.assertFalse((self.output / "FIXED").exists())
+        self.assertFalse((self.output / "repaired-metadata").exists())
 
     def test_menu_configuration_requires_paths_and_validates_libraries(self):
         settings = json.loads(self.config.read_text(encoding="utf-8"))
@@ -3012,7 +3100,7 @@ class ConversionTests(unittest.TestCase):
         self.assertFalse(self.output.exists())
         result = self.legacy([{"isActive": True, "mediaPath": str(self.source)}])
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertTrue((self.output / "MP3" / self.source.name / self.mp3().name).exists())
+        self.assertTrue((self.output / "converted-mp3" / self.source.name / self.mp3().name).exists())
 
     def test_multichannel_requires_explicit_downmix(self):
         self.track.unlink()
@@ -3173,7 +3261,7 @@ class ConversionTests(unittest.TestCase):
             self.assertEqual(self.mp3().read_bytes(), b"existing MP3")
             self.assertEqual(sidecar.read_bytes(), b"existing sidecar")
             self.assertEqual(self.audit(self.destination())["errorType"], "IO")
-            self.assertFalse(list((self.output / "MP3").glob("ERROR_*")))
+            self.assertFalse(list((self.output / "converted-mp3").glob("ERROR_*")))
 
     @unittest.skipUnless(os.name == "nt", "Windows deny-delete replacement failure")
     def test_failed_flac_replacement_restores_sidecar(self):

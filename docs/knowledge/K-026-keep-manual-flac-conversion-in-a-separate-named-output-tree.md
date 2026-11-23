@@ -3,8 +3,9 @@ id: K-026
 kind: decision
 title: "Keep manual FLAC conversion in a separate named output tree"
 area: [FlacConvert]
-status: active
+status: superseded
 supersedes: [K-021]
+superseded_by: K-065
 created: 2026-10-11
 reviewed: 2026-11-19
 cites:

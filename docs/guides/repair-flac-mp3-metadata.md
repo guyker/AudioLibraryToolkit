@@ -30,7 +30,7 @@ After reviewing the findings, run the command without `--dry-run`:
 AudioLibraryToolkit repair "D:\Music" --output-dir "E:\Repaired"
 ```
 
-Repaired copies go under `E:\Repaired\FIXED\Music`. Only affected folders are copied; companion files in those folders
+Repaired copies go under `E:\Repaired\repaired-metadata\Music`. Only affected folders are copied; companion files in those folders
 are retained. Existing destinations are rejected unless you explicitly enable `--overwrite`. The command reports
 manual-review findings and failures with a nonzero exit code.
 

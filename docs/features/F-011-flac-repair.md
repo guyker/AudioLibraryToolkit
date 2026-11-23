@@ -16,7 +16,7 @@ preserved and metadata shrinkage is absorbed into padding when possible.
 
 Repair code writes only to a separate destination tree; source files are read-only and audio bytes are copied unchanged,
 never decoded or re-encoded. Repaired files are written to
-`<output-root>/FIXED/<library-name>` (`--output-dir`, else `OutDirectory` for the CLI); only folders with a repair are
+`<output-root>/repaired-metadata/<library-name>` (`--output-dir`, else `OutDirectory` for the CLI); only folders with a repair are
 copied, retaining all other files unchanged. In menu option 7, repair outputs of different active libraries may not
 overlap each other or another library's source; the run fails before installing anything. Existing nested output
 symlinks/junctions that redirect destinations are rejected and checked again before staging and installation. The
@@ -52,10 +52,11 @@ of terminal control sequences. Phase boundaries are retained in the session log 
 
 ## Design and knowledge
 - DESIGN: `FlacConvert/DESIGN.md` → Metadata repair; rules in `FlacConvert/src/RepairRules.cpp#RepairRules::Analyze`
-- Knowledge: no separate entry; the stable repair and verification contract is documented in DESIGN.
+- Knowledge: K-065 operation-based output layout; the stable repair and verification contract is documented in DESIGN.
 
 ## Acceptance checks
 - [ ] Identical duplicate CDTOC comments are reduced to one in the output; source bytes remain unchanged.
+- [ ] Menu and CLI use `repaired-metadata/<library-name>`; previous `FIXED` output remains untouched.
 - [ ] Fully redundant FLAC leading/trailing tags, valid empty comments, picture MIME/width/height/depth and invalid seek table are fixed; audio bytes unchanged; differing tag values are retained.
 - [ ] Invalid FLAC comments are retained for review; a redundant comment block with a different vendor string is not removed.
 - [ ] MP3 duplicate/empty frames, v2.3 text, custom-text, comment and lyrics encodings, and APIC MIME are fixed; audio bytes unchanged.
@@ -69,7 +70,7 @@ of terminal control sequences. Phase boundaries are retained in the session log 
 - [ ] Only affected folders are copied and companion files remain byte-identical.
 - [ ] Menu option 7 requires `RUN` and reports the output and completed repair count.
 - [ ] A preview with more than 25 findings reports all of them in HTML without printing individual findings to the
-      console. Cancelling leaves sources and `FIXED` untouched, and an unsafe temporary location blocks repair.
+      console. Cancelling leaves sources and `repaired-metadata` untouched, and an unsafe temporary location blocks repair.
 - [ ] The HTML summary groups track findings by folder, shows compatibility cautions and never claims a failed or
       unattempted repair was verified and installed.
 - [ ] Preview and post-repair reports show the same findings by issue (ordered by severity, then album and track) and by album (only albums with findings), mark whole-album versus partial findings and tracks with several issues, and state separate risks for leaving or fixing each issue; JSON distinguishes planned rules from successfully applied rules.

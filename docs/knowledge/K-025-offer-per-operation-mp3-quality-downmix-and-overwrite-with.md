@@ -3,8 +3,9 @@ id: K-025
 kind: decision
 title: "Offer per-operation MP3 quality downmix and overwrite with safe defaults"
 area: [FlacConvert]
-status: active
+status: superseded
 supersedes: [K-019]
+superseded_by: K-065
 created: 2026-10-11
 reviewed: 2026-11-19
 cites:

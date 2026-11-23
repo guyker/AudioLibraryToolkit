@@ -108,15 +108,20 @@ void moveAlbum(int choice, bool longPath = false)
     const auto keep = choice == 1 ? fixture.second : fixture.first;
     const auto trackBytes = read(source / "track.flac");
     const auto keepBytes = read(keep / "track.flac");
-    write(fixture.output / "deleted" / "unrelated.txt", "unrelated");
+    write(fixture.output / "quarantine" / "unrelated.txt", "unrelated");
+    write(fixture.output / "deleted" / "previous.txt", "previous");
     const auto result = fixture.review(std::to_string(choice) + "\nMOVE\n\n");
     require(result.action == DuplicateReview::Action::Continue && result.movedAlbum == choice,
         "Confirmed move failed or did not pause afterward");
     require(!fs::exists(source), "Moved source directory still exists");
+    require(fs::equivalent(result.destination.parent_path().parent_path(), fixture.output / "quarantine"),
+        "Moved album was not placed under quarantine");
     require(read(result.destination / "track.flac") == trackBytes, "Moved track changed");
     require(read(keep / "track.flac") == keepBytes, "Kept album changed");
-    require(read(fixture.output / "deleted" / "unrelated.txt") == "unrelated",
-        "Unrelated deleted output changed");
+    require(read(fixture.output / "quarantine" / "unrelated.txt") == "unrelated",
+        "Unrelated quarantine output changed");
+    require(read(fixture.output / "deleted" / "previous.txt") == "previous",
+        "Previous deleted output changed");
     require(read(result.destination.parent_path() / "move.json").find("\"completed\"") != std::string::npos,
         "Completed move receipt missing");
     if (choice == 1) {
@@ -176,7 +181,7 @@ void unsafeMoves()
         Fixture fixture;
         fs::create_directories(fixture.output);
         std::error_code ec;
-        fs::create_directory_symlink(fixture.second, fixture.output / "deleted", ec);
+        fs::create_directory_symlink(fixture.second, fixture.output / "quarantine", ec);
         if (!ec) {
             require(fixture.review("1\nMOVE\n").action == DuplicateReview::Action::Error,
                 "Deleted output alias into the kept library accepted");

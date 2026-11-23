@@ -85,10 +85,10 @@ def main():
             raise AssertionError("Detailed batch logging leaked into concise console output")
         if "Session log:" not in scan_result.stdout:
             raise AssertionError("The scan did not identify its session log")
-        files = list((output / library.name).glob("media_out_*.json"))
+        files = list((output / "catalog-json" / library.name).glob("media_out_*.json"))
         if len(files) != 1:
             raise AssertionError(f"Expected one generated JSON file, found {len(files)}")
-        manifest_path = output / library.name / "scan-manifest.json"
+        manifest_path = output / "catalog-json" / library.name / "scan-manifest.json"
         subprocess.run(
             [report_validator, manifest_schema, str(manifest_path.resolve())],
             check=True,
@@ -100,7 +100,7 @@ def main():
             raise AssertionError("The scan manifest does not integrity-protect its JSON batch")
         if (manifest["archives"] or manifest["unsupportedFormats"] or
                 not manifest["archivePolicy"].startswith("Disabled") or
-                list((output / library.name).glob("scan_metadata_*.flac-metadata"))):
+                list((output / "catalog-json" / library.name).glob("scan_metadata_*.flac-metadata"))):
             raise AssertionError("Default scans must not create metadata archives")
         default_record = json.loads(files[0].read_text(encoding="utf-8"))[0]["Tracks"][0]
         subprocess.run(
@@ -122,7 +122,7 @@ def main():
         if len(manifest["archives"]) != 1:
             raise AssertionError("Native FLAC metadata was not archived")
         archive_entry = manifest["archives"][0]
-        archive_path = output / library.name / archive_entry["file"]
+        archive_path = output / "catalog-json" / library.name / archive_entry["file"]
         if (not archive_path.is_file() or archive_entry["sourcePath"] != track.name or
                 archive_entry["sha256"] != hashlib.sha256(archive_path.read_bytes()).hexdigest() or
                 archive_path.stat().st_size != archive_entry["sizeBytes"] or
@@ -146,8 +146,8 @@ def main():
         archive_mp3_hash = hashlib.sha256(archived_mp3.read_bytes()).hexdigest()
         archive_output = root / "archive-output"
         archive_output.mkdir()
-        archive_target = archive_output / archive_library.name
-        archive_target.mkdir()
+        archive_target = archive_output / "catalog-json" / archive_library.name
+        archive_target.mkdir(parents=True)
         unrelated_bytes = b"unrelated output must survive"
         database_bytes = b"database placeholder must survive"
         (archive_target / "unrelated.txt").write_bytes(unrelated_bytes)
@@ -266,7 +266,7 @@ def main():
         if not expected_findings.issubset(finding_codes):
             raise AssertionError(
                 f"Tag validation findings were incomplete: {sorted(finding_codes)}")
-        report_path = output / library.name / "scan-report.json"
+        report_path = output / "catalog-json" / library.name / "scan-report.json"
         validate_report(report_path)
         report = json.loads(report_path.read_text(encoding="utf-8"))
         if report["schemaVersion"] != 2 or report["status"] != "completed":
@@ -292,8 +292,8 @@ def main():
                    for item in fallback_report(preflight)["diagnostics"]):
             raise AssertionError("Fallback report omitted the preflight failure")
         blocked_output = root / "blocked-output"
-        blocked_output.mkdir()
-        (blocked_output / library.name).write_text("not a directory", encoding="utf-8")
+        (blocked_output / "catalog-json").mkdir(parents=True)
+        (blocked_output / "catalog-json" / library.name).write_text("not a directory", encoding="utf-8")
         blocked = subprocess.run(
             [converter, "scan", str(library), "--output-dir", str(blocked_output)],
             capture_output=True, text=True, errors="replace", timeout=30, env=fallback_env)
@@ -320,14 +320,14 @@ def main():
         (failed_library / "valid.flac").write_bytes(track.read_bytes())
         failed_track = failed_library / "broken.flac"
         failed_track.write_bytes(b"not an audio stream")
-        failed_output = root / "failed-scan-output" / failed_library.name
+        failed_output = root / "failed-scan-output" / "catalog-json" / failed_library.name
         failed_output.mkdir(parents=True)
         previous_json = failed_output / "media_out_previous.json"
         previous_bytes = b'[{"previous":"catalog"}]\n'
         previous_json.write_bytes(previous_bytes)
         failed_scan = subprocess.run(
             [converter, "scan", str(failed_library), "--output-dir",
-             str(failed_output.parent)],
+             str(failed_output.parent.parent)],
             capture_output=True, timeout=30,
         )
         if failed_scan.returncode == 0:
@@ -370,7 +370,7 @@ def main():
              "--output-dir", str(multiple_output)], capture_output=True, timeout=30)
         if result.returncode == 0:
             raise AssertionError("Invalid first batch unexpectedly succeeded")
-        multiple_report_path = multiple_output / multiple_library.name / "scan-report.json"
+        multiple_report_path = multiple_output / "catalog-json" / multiple_library.name / "scan-report.json"
         validate_report(multiple_report_path)
         multiple_report = json.loads(multiple_report_path.read_text(encoding="utf-8"))
         if (multiple_report["counts"]["albumsDiscovered"] != 2 or
@@ -393,7 +393,7 @@ def main():
         command = [converter, "scan", str(sized_library), "--config", str(size_config),
                    "--output-dir", str(sized_output)]
         subprocess.run(command, check=True)
-        sized_dir = sized_output / sized_library.name
+        sized_dir = sized_output / "catalog-json" / sized_library.name
         initial_parts = list(sized_dir.glob("media_out_*.json"))
         if len(initial_parts) != 1:
             raise AssertionError("Disabled byte target changed album-count batching")
@@ -447,7 +447,7 @@ def main():
         import_command = [converter, "db", "import", str(sized_dir),
                           "--output-dir", str(database_output)]
         subprocess.run(import_command, check=True)
-        database = database_output / sized_library.name / "catalog-v2.sqlite"
+        database = database_output / "catalog-sqlite" / sized_library.name / "catalog-v2.sqlite"
         def db_paths():
             with closing(sqlite3.connect(database)) as connection:
                 return connection.execute("SELECT relative_path FROM files ORDER BY relative_path").fetchall()
@@ -558,8 +558,8 @@ def main():
                         raise AssertionError(f"Long-path scan failed: {result.stdout}\n{result.stderr}")
                     if scan_index and "Incremental scan cache contains 1 catalog record(s)." not in result.stdout:
                         raise AssertionError(f"Long-path scan did not reuse its catalog: {result.stdout}")
-                    validate_report(long_output / library.name / "scan-report.json")
-                    long_target = Path("\\\\?\\" + str(long_output / library.name))
+                    validate_report(long_output / "catalog-json" / library.name / "scan-report.json")
+                    long_target = Path("\\\\?\\" + str(long_output / "catalog-json" / library.name))
                     long_json = long_target / "media_out_library_1.json"
                     if not long_json.is_file():
                         raise AssertionError("Scan did not install JSON under a long Windows output path")
@@ -584,9 +584,9 @@ def main():
             # The directory itself can be below the prefix threshold while archive paths exceed MAX_PATH.
             component_length = max(1, 210 - len(str(root)) - len(library.name) - 2)
             medium_output = root / ("m" * component_length)
-            if len(str(medium_output / library.name)) < 248:
+            if len(str(medium_output / "catalog-json" / library.name)) < 248:
                 try:
-                    medium_target = Path("\\\\?\\" + str(medium_output / library.name))
+                    medium_target = Path("\\\\?\\" + str(medium_output / "catalog-json" / library.name))
                     medium_command = [
                         converter, "scan", str(library), "--output-dir", str(medium_output),
                         "--config", str(default_config)]
@@ -594,7 +594,7 @@ def main():
                     medium_manifest = json.loads((medium_target / "scan-manifest.json").read_text(
                         encoding="utf-8"))
                     medium_archive = medium_target / medium_manifest["archives"][0]["file"]
-                    if len(str(medium_output / library.name / medium_archive.name)) < 260:
+                    if len(str(medium_output / "catalog-json" / library.name / medium_archive.name)) < 260:
                         raise AssertionError("Archive fixture did not exceed the Windows path limit")
                     result = subprocess.run(medium_command, capture_output=True,
                                             text=True, encoding="utf-8", errors="replace")
@@ -642,7 +642,7 @@ def main():
             check=True,
         )
         incremental_json = next(
-            (incremental_output / incremental_library.name).glob("media_out_*.json"))
+            (incremental_output / "catalog-json" / incremental_library.name).glob("media_out_*.json"))
         first_records = json.loads(incremental_json.read_text(encoding="utf-8"))[0]["Tracks"]
         old_catalog = json.loads(incremental_json.read_text(encoding="utf-8"))
         for record in old_catalog[0]["Tracks"]:
@@ -714,7 +714,7 @@ def main():
             check=True,
         )
         unicode_json = next(
-            (unicode_output / unicode_library.name).glob("media_out_*.json"))
+            (unicode_output / "catalog-json" / unicode_library.name).glob("media_out_*.json"))
         unicode_record = json.loads(
             unicode_json.read_text(encoding="utf-8"))[0]["Tracks"][0]
         if unicode_record["file"]["relativePath"] != unicode_track.name:
@@ -759,7 +759,7 @@ def main():
              "--output-dir", str(extended_output)],
             check=True,
         )
-        extended_file = next((extended_output / library.name).glob("media_out_*.json"))
+        extended_file = next((extended_output / "catalog-json" / library.name).glob("media_out_*.json"))
         extended_albums = json.loads(extended_file.read_text(encoding="utf-8"))
         extended_records = extended_albums[0]["Tracks"]
         records_by_path = {item["file"]["relativePath"]: item for item in extended_records}
@@ -790,12 +790,12 @@ def main():
             raise AssertionError("Inconsistent album tags were not reported")
         extended_database_output = root / "extended-database"
         subprocess.run(
-            [converter, "db", "import", str(extended_output / library.name),
+            [converter, "db", "import", str(extended_output / "catalog-json" / library.name),
              "--output-dir", str(extended_database_output)],
             check=True,
         )
         extended_database = (
-            extended_database_output / library.name / "catalog-v2.sqlite")
+            extended_database_output / "catalog-sqlite" / library.name / "catalog-v2.sqlite")
 
         def imported_paths():
             with closing(sqlite3.connect(extended_database)) as connection:
@@ -806,7 +806,7 @@ def main():
         if [row[0] for row in imported_paths()] != expected_imported_paths:
             raise AssertionError("Initial database import omitted catalog files")
         subprocess.run(
-            [converter, "db", "import", str(extended_output / library.name),
+            [converter, "db", "import", str(extended_output / "catalog-json" / library.name),
              "--output-dir", str(extended_database_output)],
             check=True,
         )
@@ -821,7 +821,7 @@ def main():
         ]), encoding="utf-8")
         refresh_manifest_batch(extended_file.parent, extended_file)
         subprocess.run(
-            [converter, "db", "import", str(extended_output / library.name),
+            [converter, "db", "import", str(extended_output / "catalog-json" / library.name),
              "--output-dir", str(extended_database_output)],
             check=True,
         )
@@ -831,7 +831,7 @@ def main():
         ):
             raise AssertionError("Re-import retained a file removed from an imported album")
         foreign_output = root / "foreign-database"
-        foreign_directory = foreign_output / library.name
+        foreign_directory = foreign_output / "catalog-sqlite" / library.name
         foreign_directory.mkdir(parents=True)
         foreign_database = foreign_directory / "catalog-v2.sqlite"
         with closing(sqlite3.connect(foreign_database)) as connection:
@@ -839,7 +839,7 @@ def main():
             connection.execute("PRAGMA user_version=1")
         foreign_database_hash = hashlib.sha256(foreign_database.read_bytes()).hexdigest()
         rejected_import = subprocess.run(
-            [converter, "db", "import", str(extended_output / library.name),
+            [converter, "db", "import", str(extended_output / "catalog-json" / library.name),
              "--output-dir", str(foreign_output)],
             capture_output=True,
             text=True,
@@ -849,7 +849,7 @@ def main():
         if hashlib.sha256(foreign_database.read_bytes()).hexdigest() != foreign_database_hash:
             raise AssertionError("Rejected import modified an incompatible database")
         incomplete_output = root / "incomplete-database"
-        incomplete_directory = incomplete_output / library.name
+        incomplete_directory = incomplete_output / "catalog-sqlite" / library.name
         incomplete_directory.mkdir(parents=True)
         incomplete_database = incomplete_directory / "catalog-v2.sqlite"
         with closing(sqlite3.connect(incomplete_database)) as connection:
@@ -862,7 +862,7 @@ def main():
             connection.execute("PRAGMA user_version=2")
         incomplete_hash = hashlib.sha256(incomplete_database.read_bytes()).hexdigest()
         rejected_import = subprocess.run(
-            [converter, "db", "import", str(extended_output / library.name),
+            [converter, "db", "import", str(extended_output / "catalog-json" / library.name),
              "--output-dir", str(incomplete_output)], capture_output=True,
         )
         if rejected_import.returncode == 0 or hashlib.sha256(
@@ -916,7 +916,7 @@ def main():
             check=True,
         )
         numbering_json = next(
-            (numbering_output / numbering_library.name).glob("media_out_*.json"))
+            (numbering_output / "catalog-json" / numbering_library.name).glob("media_out_*.json"))
         numbering_albums = json.loads(numbering_json.read_text(encoding="utf-8"))
         numbering_records = next(album["Tracks"] for album in numbering_albums
                                  if album["Folder"] == "numbered-album")
@@ -938,12 +938,12 @@ def main():
                 f"Album numbering findings were incomplete: {sorted(numbering_findings)}")
         numbering_database_output = root / "numbering-database"
         subprocess.run(
-            [converter, "db", "import", str(numbering_output / numbering_library.name),
+            [converter, "db", "import", str(numbering_output / "catalog-json" / numbering_library.name),
              "--output-dir", str(numbering_database_output)],
             check=True,
         )
         numbering_database = (
-            numbering_database_output / numbering_library.name / "catalog-v2.sqlite")
+            numbering_database_output / "catalog-sqlite" / numbering_library.name / "catalog-v2.sqlite")
         with closing(sqlite3.connect(numbering_database)) as connection:
             undocumented_numbering_findings = connection.execute(
                 "SELECT DISTINCT f.code FROM findings f "
@@ -964,7 +964,7 @@ def main():
                  "--tier", tier],
                 check=True,
             )
-            tier_file = next((tier_output / library.name).glob("media_out_*.json"))
+            tier_file = next((tier_output / "catalog-json" / library.name).glob("media_out_*.json"))
             tier_record = json.loads(tier_file.read_text(encoding="utf-8"))[0]["Tracks"][0]
             if tier_record["audioAnalysis"]["tier"] != tier:
                 raise AssertionError(f"Scan tier {tier} was not recorded")
@@ -977,16 +977,16 @@ def main():
             if tier == "analysis":
                 database_output = root / "analysis-database"
                 subprocess.run(
-                    [converter, "db", "import", str(output / library.name),
+                    [converter, "db", "import", str(output / "catalog-json" / library.name),
                      "--output-dir", str(database_output)],
                     check=True,
                 )
                 subprocess.run(
-                    [converter, "db", "import", str(tier_output / library.name),
+                    [converter, "db", "import", str(tier_output / "catalog-json" / library.name),
                      "--output-dir", str(database_output)],
                     check=True,
                 )
-                database = database_output / library.name / "catalog-v2.sqlite"
+                database = database_output / "catalog-sqlite" / library.name / "catalog-v2.sqlite"
                 with closing(sqlite3.connect(database)) as connection:
                     measurements = connection.execute(
                         "SELECT kind,status FROM measurements ORDER BY kind").fetchall()
@@ -1029,19 +1029,19 @@ def main():
                     raise AssertionError(
                         f"Database objects are missing inline AI comments: {missing_ddl_comments}")
         subprocess.run(
-            [converter, "duplicates", str(output / library.name)],
+            [converter, "duplicates", str(output / "catalog-json" / library.name)],
             check=True,
         )
         subprocess.run(
-            [converter, "db", "import", str(output / library.name),
+            [converter, "db", "import", str(output / "catalog-json" / library.name),
              "--output-dir", str(root / "database-output")],
             check=True,
         )
         unsafe_import = subprocess.run(
-            [converter, "db", "import", str(output / library.name), "--output-dir", str(root)],
+            [converter, "db", "import", str(output / "catalog-json" / library.name), "--output-dir", str(library)],
             capture_output=True,
         )
-        if unsafe_import.returncode == 0 or (library / "catalog-v2.sqlite").exists():
+        if unsafe_import.returncode == 0 or (library / "catalog-sqlite" / library.name / "catalog-v2.sqlite").exists():
             raise AssertionError("Import wrote a database inside the source library")
 
         for value in ({"AlbumsSplitThreshold": 0}, {"MediaDirectoryList": [5]}):
@@ -1077,7 +1077,7 @@ def main():
              "--tier", "integrity"],
             check=True,
         )
-        unknown_json = next((unknown_output / unknown_library.name).glob("media_out_*.json"))
+        unknown_json = next((unknown_output / "catalog-json" / unknown_library.name).glob("media_out_*.json"))
         unknown_record = json.loads(unknown_json.read_text(encoding="utf-8"))[0]["Tracks"][0]
         if unknown_record["integrity"]["status"] != "ok":
             raise AssertionError("Unknown FLAC STREAMINFO values caused an integrity failure")
@@ -1086,7 +1086,7 @@ def main():
             raise AssertionError("Unknown FLAC STREAMINFO values were treated as real values")
 
         menu_output = root / "menu-output"
-        menu_json = menu_output / library.name
+        menu_json = menu_output / "catalog-json" / library.name
         menu_json.mkdir(parents=True)
         menu_fixture = json.loads(files[0].read_text(encoding="utf-8"))
         for album in menu_fixture:
@@ -1147,7 +1147,7 @@ def main():
                         "--output-dir", str(duplicate_output)], check=True)
         duplicate_report = root / "duplicate-report.json"
         duplicate_run = subprocess.run(
-            [converter, "duplicates", str(duplicate_output / duplicates_library.name),
+            [converter, "duplicates", str(duplicate_output / "catalog-json" / duplicates_library.name),
              "--report", str(duplicate_report)],
             capture_output=True, text=True, timeout=30,
         )
@@ -1159,7 +1159,7 @@ def main():
                 len(report["groups"][0]["pairs"][0]["trackPairs"]) != 2:
             raise AssertionError(f"Duplicate report content is wrong: {report}")
         repeated_report = subprocess.run(
-            [converter, "duplicates", str(duplicate_output / duplicates_library.name),
+            [converter, "duplicates", str(duplicate_output / "catalog-json" / duplicates_library.name),
              "--report", str(duplicate_report)],
             capture_output=True, text=True, timeout=30,
         )
@@ -1167,7 +1167,7 @@ def main():
             raise AssertionError("Existing duplicate report was overwritten")
         source_library_report = duplicates_library / "duplicate-report.json"
         inside_library = subprocess.run(
-            [converter, "duplicates", str(duplicate_output / duplicates_library.name),
+            [converter, "duplicates", str(duplicate_output / "catalog-json" / duplicates_library.name),
              "--report", str(source_library_report)],
             capture_output=True, text=True, timeout=30,
         )
@@ -1212,7 +1212,7 @@ def main():
                 raise OSError(ctypes.get_last_error(), "Could not lock disposable fixture")
             try:
                 failed_probe = subprocess.run(
-                    [converter, "duplicates", str(duplicate_output / duplicates_library.name)],
+                    [converter, "duplicates", str(duplicate_output / "catalog-json" / duplicates_library.name)],
                     capture_output=True, timeout=30,
                 )
                 if failed_probe.returncode == 0:
@@ -1225,7 +1225,7 @@ def main():
         changed_tracks = {path: hashlib.sha256(path.read_bytes()).hexdigest()
                           for album in albums for path in album.glob("*.flac")}
         changed_run = subprocess.run(
-            [converter, "duplicates", str(duplicate_output / duplicates_library.name)],
+            [converter, "duplicates", str(duplicate_output / "catalog-json" / duplicates_library.name)],
             capture_output=True, text=True, timeout=30,
         )
         if changed_run.returncode != 0:
@@ -1248,7 +1248,7 @@ def main():
             raise AssertionError(f"Changed tracks were paired with the wrong scan entries: {comparisons}")
         legacy_dir = root / "legacy-duplicates"
         legacy_dir.mkdir()
-        scanned_json = next((duplicate_output / duplicates_library.name).glob("media_out_*.json"))
+        scanned_json = next((duplicate_output / "catalog-json" / duplicates_library.name).glob("media_out_*.json"))
         legacy_albums = json.loads(scanned_json.read_text(encoding="utf-8"))
         for album in legacy_albums:
             album.pop("Scan Manifest ID", None)
@@ -1318,7 +1318,7 @@ def main():
         bounded_output = root / "bounded-output"
         subprocess.run([converter, "scan", str(bounded_library), "--output-dir", str(bounded_output),
                         "--config", str(bounded_config)], check=True, capture_output=True)
-        bounded_json = bounded_output / bounded_library.name
+        bounded_json = bounded_output / "catalog-json" / bounded_library.name
         scanned_folders = {Path(album["Album Path"]).resolve()
                            for path in bounded_json.glob("media_out_*.json")
                            for album in json.loads(path.read_text(encoding="utf-8"))}
@@ -1349,7 +1349,7 @@ def main():
         )
         if linked_run.returncode == 0:
             raise AssertionError(f"Scan followed or ignored a directory link: {linked_run.stdout}")
-        linked_report_path = linked_output / linked_library.name / "scan-report.json"
+        linked_report_path = linked_output / "catalog-json" / linked_library.name / "scan-report.json"
         validate_report(linked_report_path)
         linked_report = json.loads(linked_report_path.read_text(encoding="utf-8"))
         link_errors = [item for item in linked_report["diagnostics"]
@@ -1357,7 +1357,7 @@ def main():
                        item.get("affectedPath") and Path(item["affectedPath"]).name == "linked"]
         if linked_report["status"] != "failed" or not link_errors:
             raise AssertionError(f"Directory link failure was not reported: {linked_report['diagnostics']}")
-        if list((linked_output / linked_library.name).glob("media_out_*.json")):
+        if list((linked_output / "catalog-json" / linked_library.name).glob("media_out_*.json")):
             raise AssertionError("A scan with a directory link installed catalog JSON.")
         linked_folder.rmdir() if os.name == "nt" else linked_folder.unlink()
         if not (outside_folder / "track.flac").is_file():
@@ -1383,14 +1383,14 @@ def main():
             )
             if file_link_scan.returncode == 0:
                 raise AssertionError(f"Scan followed or ignored a file link: {file_link_scan.stdout}")
-            file_link_report = file_link_output / linked_file_library.name / "scan-report.json"
+            file_link_report = file_link_output / "catalog-json" / linked_file_library.name / "scan-report.json"
             validate_report(file_link_report)
             file_report = json.loads(file_link_report.read_text(encoding="utf-8"))
             if not any(item["severity"] == "error" and
                        item.get("affectedPath") and Path(item["affectedPath"]).name == "track.flac"
                        for item in file_report["diagnostics"]):
                 raise AssertionError(f"File link failure was not reported: {file_report['diagnostics']}")
-            if list((file_link_output / linked_file_library.name).glob("media_out_*.json")):
+            if list((file_link_output / "catalog-json" / linked_file_library.name).glob("media_out_*.json")):
                 raise AssertionError("A scan with a file link installed catalog JSON.")
             if os.name == "nt":
                 file_link.unlink()

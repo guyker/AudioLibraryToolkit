@@ -31,10 +31,10 @@ These Windows examples use an existing `D:\Music` library and output locations o
 own system. On Linux, use Linux paths instead.
 
 ```text
-AudioLibraryToolkit scan "D:\Music" --output-dir "E:\Catalog"
-AudioLibraryToolkit duplicates "E:\Catalog\Music"
-AudioLibraryToolkit repair "D:\Music" --output-dir "E:\Repaired" --dry-run
-AudioLibraryToolkit convert "D:\Music" --to mp3 --output-dir "E:\Converted"
+AudioLibraryToolkit scan "D:\Music" --output-dir "E:\AudioOutput"
+AudioLibraryToolkit duplicates "E:\AudioOutput\catalog-json\Music"
+AudioLibraryToolkit repair "D:\Music" --output-dir "E:\AudioOutput" --dry-run
+AudioLibraryToolkit convert "D:\Music" --to mp3 --output-dir "E:\AudioOutput"
 ```
 
 By default, scanning catalogs FLAC and MP3 without decoding audio; use `scan --tier integrity` for full-decode checks.
@@ -51,6 +51,30 @@ Found 1 duplicate album pair(s) in 1 group(s) (exact 1, strong 0, probable 0, pa
     Match methods: flac-md5=1
     Exact means all paired stored FLAC MD5s matched, NOT byte-identical files or a fresh audio verification.
 ```
+
+## Output layout
+
+`OutDirectory` and CLI `--output-dir` are base roots. Menu and CLI operations use the same operation folders:
+
+| Operation | Output below the base root |
+|---|---|
+| 1 / `convert --to flac` | `normalized-flac\<library-name>` |
+| 2 / `scan` | `catalog-json\<library-name>` |
+| 3 / confirmed duplicate move | `quarantine\<unique-move-folder>\<album-folder>` |
+| 4 / `db import` | `catalog-sqlite\<library-name>\catalog-v2.sqlite` |
+| 6 / `convert --to mp3` | `converted-mp3\<library-name>` |
+| 7 / `repair` | `repaired-metadata\<library-name>` |
+
+Relative source paths are retained within conversion and repair output. Audits, reports and sidecars stay alongside
+the output they describe. CLI commands use the input folder name; menu operations use configured `mediaName` when set.
+
+Menu options 3 and 4 automatically read option 2's `catalog-json` output. If that library's new catalog folder is
+absent, they can read the previous `<base-root>\<library-name>` scan folder with a warning. Old and new batches are
+never merged, and an empty or corrupt new catalog does not fall back to older data. Explicit CLI catalog inputs can
+still point to previous scan locations.
+
+Previous `FLAC`, `MP3`, `FIXED`, `deleted` and catalog folders are not renamed, moved or deleted. Existing databases at
+previous locations are not migrated; importing into a new database location creates a new catalog there.
 
 ## Detailed overview
 
@@ -97,7 +121,7 @@ explicitly. Native metadata inventory is partial for FLAC/MP3 and unsupported fo
    deprecated and ignored).
 3. Menu option 3 opens one matching group at a time and waits: Enter continues; `STOP` finishes. Choose an album number,
    then confirm the displayed paths with `MOVE`, to move that entire album folder (including artwork and subfolders)
-   under `OutDirectory/deleted`. All files are copied and verified before originals are removed, also across drives.
+   under `OutDirectory/quarantine`. All files are copied and verified before originals are removed, also across drives.
    A unique destination and `move.json` receipt are retained; cleanup failure can leave partial originals beside a
    complete verified copy. Direct match relationships are shown, and a move that disconnects the remaining group is
    refused. Later pairs involving a moved folder are skipped. Rerun option 2 afterward to refresh the
@@ -111,7 +135,7 @@ explicitly. Native metadata inventory is partial for FLAC/MP3 and unsupported fo
 The compact menu shows numbered actions; selecting one displays its input, output and file changes. Enter one number and
 press Enter; invalid input is retried, `0` exits, and end-of-input exits without running an action.
 Option `5` is explicitly unavailable: scan with `2`, then import into SQLite with `4`.
-Option `1` writes to `OutDirectory\FLAC\<mediaName>` and leaves the source tree untouched.
+Option `1` writes to `OutDirectory\normalized-flac\<mediaName>` and leaves the source tree untouched.
 It keeps the 16-bit / 44.1 kHz profile with triangular dithering, maps tags and supported embedded pictures,
 archives original native FLAC metadata in `<filename>.flac.flac-metadata` sidecars when
 `MetadataSidecars.ConvertToFlac` is `optional` or `required` (default `disabled`), and keeps every written
@@ -154,12 +178,12 @@ metadata sidecars and copied companions, never to source files. Settings are per
 to safe defaults when selecting option `6` again; they do not modify config.json.
 Option `7` checks FLAC and MP3 files for common metadata defects (redundant ID3/APE tags, duplicate or empty tags,
 wrong picture MIME types or FLAC picture dimensions/depth, invalid FLAC seek tables, ID3v2.3 encoding errors, and more). It writes repaired copies to
-`OutDirectory\FIXED\<mediaName>`, copying only affected folders and keeping other files unchanged; audio bytes are
+`OutDirectory\repaired-metadata\<mediaName>`, copying only affected folders and keeping other files unchanged; audio bytes are
 copied unchanged and repair code does not write to source files. Conflicting values, invalid comments, unsupported
 ID3 layouts and unreadable files are left for manual review and listed in `repair-report.json`. Before `RUN`, option 7
 shows counts by rule and prints the path to a searchable HTML preview with every planned change and unresolved finding,
 grouped by issue with separate risks of leaving each finding unchanged or applying its fix. The preview is saved outside the source libraries;
-cancelling leaves the preview but creates no `FIXED` output. After execution, open the printed `repair-summary.html` path for a
+cancelling leaves the preview but creates no `repaired-metadata` output. After execution, open the printed `repair-summary.html` path for a
 searchable issue-first and album-folder view of installed changes, compatibility cautions and unresolved findings.
 Nested output symlinks/junctions that redirect destinations are rejected and checked again before writes.
 Redundant MP3 ID3v1 tags are kept unless removal is explicitly enabled, to
@@ -173,10 +197,10 @@ The console menu options are:
 - `4` imports JSON files into the SQLite catalog.
 - `5` is unavailable (see above).
 - `6` converts active configured libraries from FLAC to MP3, writing to
-   `OutDirectory\MP3\<mediaName>` (defaults to the source folder name). It defaults to VBR quality 0,
+   `OutDirectory\converted-mp3\<mediaName>` (defaults to the source folder name). It defaults to VBR quality 0,
    preserves metadata/companions, never changes sources, and rejects existing destinations or
    multichannel input unless overwrite or stereo downmix is explicitly enabled.
-- `7` validates and repairs recognized FLAC/MP3 metadata defects into `OutDirectory\FIXED\<mediaName>` without
+- `7` validates and repairs recognized FLAC/MP3 metadata defects into `OutDirectory\repaired-metadata\<mediaName>` without
    changing sources; it requires `RUN` after preview.
 
 ## Build
@@ -290,9 +314,9 @@ AudioLibraryToolkit convert "D:\Music" --to mp3 --mp3-quality 2 --output-dir "E:
 AudioLibraryToolkit scan "D:\Music" --output-dir "E:\Catalog"
 AudioLibraryToolkit scan "D:\Music" --full-rescan --tier integrity
 AudioLibraryToolkit scan "D:\Music" --archive-flac-metadata
-AudioLibraryToolkit duplicates "E:\Catalog\Music"
-AudioLibraryToolkit duplicates "E:\Catalog\Music" --report "E:\Reports\duplicates.json"
-AudioLibraryToolkit db import "E:\Catalog\Music" --output-dir "E:\Databases"
+AudioLibraryToolkit duplicates "E:\Catalog\catalog-json\Music"
+AudioLibraryToolkit duplicates "E:\Catalog\catalog-json\Music" --report "E:\Reports\duplicates.json"
+AudioLibraryToolkit db import "E:\Catalog\catalog-json\Music" --output-dir "E:\Databases"
 AudioLibraryToolkit repair "D:\Music" --output-dir "E:\Repaired"
 AudioLibraryToolkit repair "D:\Music" --rules flac.duplicate-comments,mp3.redundant-id3v1
 AudioLibraryToolkit repair "D:\Music" --dry-run --jobs 2
@@ -321,7 +345,7 @@ separately by `MetadataSidecars`. Duplicate detection, database import, and incr
 manifest before using marked batches. `DecodeWorkers` caps the independent full-decode stage. `duplicates` reports matches without
 opening folders; pass `--open` to open matched folders in Explorer. `db import` creates or updates a library-named
 `catalog-v2.sqlite` database and leaves legacy `.db` files untouched. `repair` writes metadata-only FLAC/MP3 fixes to
-`<output-root>\FIXED\<input-folder-name>`; `--rules` limits it to listed rule ids (see `AudioLibraryToolkit repair --help`).
+`<output-root>\repaired-metadata\<input-folder-name>`; `--rules` limits it to listed rule ids (see `AudioLibraryToolkit repair --help`).
 `--dry-run` prints a complete JSON report without writing repair output, and `--jobs` selects 1–16 workers
 (default 4). Normal session logs still apply. It verifies byte-identical audio before installation and reports
 unresolved findings rather than guessing.
@@ -329,9 +353,9 @@ unresolved findings rather than guessing.
 ### FLAC output preservation
 
 `convert --output-dir` is a **base root**, matching the manual menu: output is
-`<root>\<FLAC|MP3>\<input-folder-name>` (manual libraries may use their configured name).
+`<root>\<normalized-flac|converted-mp3>\<input-folder-name>` (manual libraries may use their configured name).
 For example, `convert D:\Music\AlbumA --output-dir E:\Converted --to flac` writes
-`E:\Converted\FLAC\AlbumA`. Relative paths inside the library are retained.
+`E:\Converted\normalized-flac\AlbumA`. Relative paths inside the library are retained.
 
 Both manual option `1` and explicit `convert --to flac` use the same folder planning and installation path.
 All libraries are checked before manual execution; source/output overlap, duplicate destinations and existing
@@ -375,7 +399,7 @@ Native metadata sidecars do not contain audio or restore precision lost through 
 A folder whose source subtree contains audio but no file to convert (for example an MP3-only album) is skipped
 entirely, so the output never holds a partial copy of an untouched album. Only the topmost such folder is listed
 in the audit's `skippedUnchangedDirectories`, with its file and audio counts. A library without conversions writes
-only `FLAC\<mediaName>\conversion-audit.json` listing `"."`. Because the rule is per folder, an MP3-only `CD2` beside a
+only `normalized-flac\<mediaName>\conversion-audit.json` listing `"."`. Because the rule is per folder, an MP3-only `CD2` beside a
 converted `CD1` is skipped. Directory symlinks/junctions, broken links and special filesystem entries fail FLAC
 planning explicitly, including inside a subtree that would otherwise be skipped. Regular-file symlinks and other
 reparse points are rejected too; links are neither followed nor materialized as file contents.

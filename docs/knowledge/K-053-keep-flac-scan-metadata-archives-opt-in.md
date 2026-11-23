@@ -5,7 +5,7 @@ title: "Keep FLAC scan metadata archives opt-in"
 area: [FlacConvert]
 status: active
 created: 2026-11-19
-reviewed: 2026-11-19
+reviewed: 2026-11-23
 cites:
   - path: FlacConvert/src/FlacConvertMain.cpp
     symbol: ScanFolderAndCreateJSON
