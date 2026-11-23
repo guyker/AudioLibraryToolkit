@@ -12,6 +12,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -124,6 +125,7 @@ struct Media
     bool isFlac{ false };
     bool nativeFlac{ false };
     TagMap tags;
+    std::optional<Mp3TagMetadata::TagMap> id3Tags;
     std::vector<Picture> pictures;
     std::vector<Chapter> chapters;
 };
@@ -752,12 +754,45 @@ bool isAudioDerivedTag(const std::string& key)
 
 void compareTags(PreservationAudit::Result& result, const Media& source, const Media& output,
     const NativeMetadata* sourceNative, const NativeMetadata* outputNative,
-    bool verifiedArchive)
+    bool verifiedArchive, const Mp3TagIssues::Resolutions& resolutions)
 {
     TagMap sourceTags = source.tags;
     TagMap outputTags = output.tags;
+    // Keys changed by a selected tag-issue resolution, with the resolutions that changed them.
+    std::map<std::string, std::string> resolvedKeys;
     if (sourceNative != nullptr) {
-        sourceTags = makeTagMap(sourceNative->comments);
+        std::vector<Mp3TagIssues::Comment> raw;
+        raw.reserve(sourceNative->comments.size());
+        for (const auto& tag : sourceNative->comments) raw.emplace_back(tag.key, tag.value);
+        const auto toTagMap = [](const std::vector<Mp3TagIssues::Comment>& comments) {
+            std::vector<Tag> tags;
+            tags.reserve(comments.size());
+            for (const auto& [key, value] : comments) tags.push_back({ key, value });
+            return makeTagMap(tags);
+        };
+        const auto rawTags = toTagMap(raw);
+        for (const auto kind : Mp3TagIssues::AllKinds) {
+            const auto action = resolutions.Get(kind);
+            if (action != Mp3TagIssues::Action::Apply && action != Mp3TagIssues::Action::Alternative) continue;
+            Mp3TagIssues::Resolutions single;
+            single.Set(kind, action);
+            const auto changed = toTagMap(Mp3TagIssues::Resolve(raw, single));
+            std::set<std::string> keys;
+            for (const auto& [key, values] : rawTags) { (void)values; keys.insert(key); }
+            for (const auto& [key, values] : changed) { (void)values; keys.insert(key); }
+            for (const auto& key : keys) {
+                const auto before = rawTags.find(key);
+                const auto after = changed.find(key);
+                if ((before == rawTags.end()) != (after == changed.end()) ||
+                    (before != rawTags.end() && before->second != after->second)) {
+                    auto& names = resolvedKeys[key];
+                    if (!names.empty()) names += "; ";
+                    names += std::string(Mp3TagIssues::Name(kind)) + ": " +
+                        Mp3TagIssues::ActionLabel(kind, action);
+                }
+            }
+        }
+        sourceTags = toTagMap(Mp3TagIssues::Resolve(raw, resolutions));
     }
     if (outputNative != nullptr) {
         outputTags = makeTagMap(outputNative->comments);
@@ -767,6 +802,11 @@ void compareTags(PreservationAudit::Result& result, const Media& source, const M
         if (native != nullptr) {
             for (const auto& tag : native->comments)
                 names[canonicalKey(tag.key)].insert(asciiLower(tag.key));
+        } else if (media.id3Tags) {
+            for (const auto& [key, values] : *media.id3Tags) {
+                (void)values;
+                names[canonicalKey(key)].insert(asciiLower(key));
+            }
         } else {
             const auto collect = [&](const AVDictionary* dictionary) {
                 const AVDictionaryEntry* tag = nullptr;
@@ -803,6 +843,10 @@ void compareTags(PreservationAudit::Result& result, const Media& source, const M
         (void)values;
         keys.insert(key);
     }
+    for (const auto& [key, names] : resolvedKeys) {
+        (void)names;
+        keys.insert(key);
+    }
 
     for (const auto& key : keys) {
         const auto sourceFound = sourceTags.find(key);
@@ -819,13 +863,26 @@ void compareTags(PreservationAudit::Result& result, const Media& source, const M
             continue;
         }
 
+        const auto resolvedKey = resolvedKeys.find(key);
+        if (equal && resolvedKey != resolvedKeys.end()) {
+            addEntry(result, PreservationAudit::Status::Normalized, "tags", key,
+                "Changed by the selected tag-issue resolution (" + resolvedKey->second +
+                "); output matches the resolved source.");
+            continue;
+        }
+
         if (equal) {
             std::string detail = "All observed occurrences match.";
             if (isAudioDerivedTag(key)) {
                 detail += " ReplayGain/R128 data is copied metadata and may be stale after audio transformation.";
-                spdlog::warn("Preservation audit [tags / {}]: ReplayGain/R128 may be stale after transformation.", key);
+                if (resolutions.Get(Mp3TagIssues::Kind::ReplayGain) == Mp3TagIssues::Action::Unresolved) {
+                    spdlog::warn("Preservation audit [tags / {}]: ReplayGain/R128 may be stale after transformation.", key);
+                }
             }
-            const bool aliasChanged = sourceSpellings.at(key) != outputSpellings.at(key);
+            const auto sourceSpelling = sourceSpellings.find(key);
+            const auto outputSpelling = outputSpellings.find(key);
+            const bool aliasChanged = sourceSpelling != sourceSpellings.end() &&
+                outputSpelling != outputSpellings.end() && sourceSpelling->second != outputSpelling->second;
             if (aliasChanged) detail += " Container tag-key alias changed; values are unchanged.";
             addEntry(result, aliasChanged ? PreservationAudit::Status::Normalized :
                 PreservationAudit::Status::Preserved, "tags", key, std::move(detail));
@@ -972,7 +1029,7 @@ bool sameOpaqueBlock(const RawBlock& left, const RawBlock& right)
 }
 
 void compareOpaqueBlocks(PreservationAudit::Result& result, const NativeMetadata& source,
-    const NativeMetadata* output, bool verifiedArchive)
+    const NativeMetadata* output, bool verifiedArchive, bool discardSelected)
 {
     if (verifiedArchive) {
         addEntry(result, PreservationAudit::Status::Preserved, "metadata-archive",
@@ -1026,6 +1083,10 @@ void compareOpaqueBlocks(PreservationAudit::Result& result, const NativeMetadata
         else if (verifiedArchive) {
             addEntry(result, PreservationAudit::Status::SidecarOnly, "flac-block", name,
                 "Non-transferable block is retained in the verified original-metadata archive.");
+        }
+        else if (discardSelected) {
+            addEntry(result, PreservationAudit::Status::SourceOnly, "flac-block", name,
+                "Discarded by the selected tag-issue resolution; the source file is unchanged.");
         }
         else {
             addEntry(result, PreservationAudit::Status::MissingOrChanged, "flac-block", name,
@@ -1100,8 +1161,33 @@ const char* StatusName(Status status)
     }
 }
 
+bool ReadFlacTagSource(const std::filesystem::path& flac, Mp3TagIssues::FlacTagSource& source,
+    std::string& error)
+{
+    source = {};
+    try {
+        if (!hasNativeFlacMarker(flac)) {
+            error = "Not a native FLAC file.";
+            return false;
+        }
+        const auto native = readNativeFlac(flac);
+        source.comments.reserve(native.comments.size());
+        for (const auto& tag : native.comments) source.comments.emplace_back(tag.key, tag.value);
+        source.flacOnlyBlocks = native.opaqueBlocks.size();
+        return true;
+    }
+    catch (const ParseError& exception) {
+        error = exception.what();
+    }
+    catch (const std::filesystem::filesystem_error& exception) {
+        error = exception.what();
+    }
+    return false;
+}
+
 Result Compare(const std::filesystem::path& source,
-    const std::filesystem::path& temporaryOutput, bool verifiedArchive)
+    const std::filesystem::path& temporaryOutput, bool verifiedArchive,
+    const Mp3TagIssues::Resolutions& resolutions)
 {
     Result result;
     Media sourceMedia;
@@ -1117,13 +1203,13 @@ Result Compare(const std::filesystem::path& source,
             return result;
         }
         if (outputMedia.audioCodec == AV_CODEC_ID_MP3) {
-            Mp3TagMetadata::TagMap id3Tags;
-            if (!Mp3TagMetadata::Read(temporaryOutput, id3Tags, error)) {
+            outputMedia.id3Tags.emplace();
+            if (!Mp3TagMetadata::Read(temporaryOutput, *outputMedia.id3Tags, error)) {
                 addFatalNotVerified(result, "media-metadata", "TagLib ID3", error);
                 return result;
             }
             outputMedia.tags.clear();
-            for (const auto& [key, values] : id3Tags) {
+            for (const auto& [key, values] : *outputMedia.id3Tags) {
                 for (const auto& value : values) {
                     addTag(outputMedia.tags, key, value);
                 }
@@ -1170,11 +1256,12 @@ Result Compare(const std::filesystem::path& source,
                 "only observed fields, chapters and attached pictures are compared.");
         }
         compareTags(result, sourceMedia, outputMedia, sourceNative, outputNative,
-            hasVerifiedFlacArchive);
+            hasVerifiedFlacArchive, resolutions);
         comparePictures(result, sourceMedia.pictures, outputMedia.pictures, hasVerifiedFlacArchive);
         compareChapters(result, sourceMedia.chapters, outputMedia.chapters, hasVerifiedFlacArchive);
         if (sourceNative != nullptr) {
-            compareOpaqueBlocks(result, *sourceNative, outputNative, hasVerifiedFlacArchive);
+            compareOpaqueBlocks(result, *sourceNative, outputNative, hasVerifiedFlacArchive,
+                resolutions.Get(Mp3TagIssues::Kind::FlacOnlyBlocks) == Mp3TagIssues::Action::Apply);
         }
     }
     catch (const ParseError& exception) {

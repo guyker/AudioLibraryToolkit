@@ -33,6 +33,7 @@ add_library(FlacConvertCore STATIC
     src/ffmpeg.cpp
     src/FolderConvert.cpp
     src/FlacMetadata.cpp
+    src/Mp3TagIssues.cpp
     src/Mp3TagMetadata.cpp
     src/PreservationAudit.cpp
     src/JsonUtils.cpp

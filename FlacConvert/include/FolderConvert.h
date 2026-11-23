@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <string>
 #include <string_view>
 #include <cstddef>
@@ -35,6 +36,12 @@ struct SkippedDirectory {
     std::size_t audioFiles{ 0 };
 };
 
+// An MP3 source whose FLAC metadata has tag issues needing a resolution choice.
+struct TagIssueFile {
+    fs::path source;
+    Mp3TagIssues::Found found;
+};
+
 struct FolderConversionPlan {
     fs::path input;
     fs::path output;
@@ -47,6 +54,8 @@ struct FolderConversionPlan {
     std::vector<fs::path> skippedAudio;
     std::vector<fs::path> existingTargets;
     std::vector<fs::path> collisions;
+    std::vector<TagIssueFile> tagIssueFiles;
+    std::vector<fs::path> tagIssueSkipped;
 };
 
 struct ConversionProgress {
@@ -64,10 +73,16 @@ public:
         const std::filesystem::path& inputDirectory,
         const std::filesystem::path& outputDirectory,
         bool overwrite,
-        ConversionOptions options = {});
+        ConversionOptions options = {},
+        bool autoResolveTagIssues = false);
     static int PrepareConversion(
         const fs::path& input, const fs::path& output, bool overwrite,
         ConversionOptions options, FolderConversionPlan& plan);
+    // Number of planned files affected by each tag-issue kind.
+    static std::array<std::size_t, Mp3TagIssues::KindCount> CountTagIssues(const FolderConversionPlan& plan);
+    // Stores the resolutions in the plan and removes files (and companions of folders left without audio)
+    // affected by a kind resolved as SkipFiles. Stop must be handled by the caller before this call.
+    static void ApplyTagIssueResolutions(FolderConversionPlan& plan, const Mp3TagIssues::Resolutions& resolutions);
     // Reports blocked plans with console summaries and file-only paths; returns whether execution is blocked.
     static bool ReportDestinationConflicts(const FolderConversionPlan& plan);
     // Optional counters accumulate across plans, only after successful installation.

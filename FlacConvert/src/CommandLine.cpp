@@ -37,6 +37,7 @@ const std::string kConfigurationHelp =
     "  MetadataScanMaxThreads (integer >=0, default 0): per-album metadata worker cap; 0 uses hardware concurrency (fallback 4).\n"
     "  UseFFmpegLibraryAPI (deprecated): ignored; metadata re-probes always use FFmpeg libraries.\n"
     "  ScanTier (catalog|integrity|analysis, default catalog): default metadata scan depth; scan --tier overrides it.\n"
+    "  TagIssueResolution (ask|auto, default ask): FLAC-to-MP3 tag issues with several possible fixes; ask prompts in the menu before RUN and makes CLI convert stop before writing, auto applies the recommended fix.\n"
     "  DecodeWorkers (integer >=0, default 0): separate full-decode worker cap; 0 uses at most 4 workers.\n"
     "  ExtraAudioQualityMetrics (bool, default false): deprecated compatibility setting; use ScanTier analysis.\n"
     "  MinMatchingTracksForDuplicate (integer, default 1): minimum matched tracks for a duplicate pair.\n"

@@ -1446,6 +1446,78 @@ void ShowConversionPreview(const FolderConversionPlan& plan)
         }
     }
 }
+
+// One choice per tag-issue kind, applied to every affected file in all plans.
+MenuConfirmation ResolveMenuTagIssues(std::vector<FolderConversionPlan>& plans)
+{
+    std::array<std::size_t, Mp3TagIssues::KindCount> counts{};
+    for (const auto& plan : plans) {
+        const auto planCounts = FolderConvert::CountTagIssues(plan);
+        for (std::size_t index = 0; index < counts.size(); ++index) counts[index] += planCounts[index];
+        for (const auto& file : plan.tagIssueFiles) {
+            std::string kinds;
+            for (const auto kind : Mp3TagIssues::AllKinds) {
+                if (!file.found.Has(kind)) continue;
+                if (!kinds.empty()) kinds += ", ";
+                kinds += Mp3TagIssues::Name(kind);
+            }
+            spdlog::debug("Tag issues in '{}': {}.", pathToUtf8(file.source), kinds);
+        }
+    }
+    if (std::all_of(counts.begin(), counts.end(), [](std::size_t count) { return count == 0; })) {
+        return MenuConfirmation::Run;
+    }
+    const bool automatic = AppSettingsJson::AppSetting()->TagIssueResolution == "auto";
+    Mp3TagIssues::Resolutions resolutions;
+    std::cout << "\nTag issues found (the affected files are listed in the session log):\n";
+    for (const auto kind : Mp3TagIssues::AllKinds) {
+        const auto count = counts[static_cast<std::size_t>(kind)];
+        if (count == 0) continue;
+        const auto choices = Mp3TagIssues::Choices(kind);
+        if (automatic) {
+            resolutions.Set(kind, choices.front().action);
+            std::cout << "  " << Mp3TagIssues::Name(kind) << " (" << count << " file(s)): "
+                << choices.front().label << " [auto]\n";
+            continue;
+        }
+        std::cout << "\n  " << Mp3TagIssues::Name(kind) << " (" << count << " file(s))\n"
+            << "  " << Mp3TagIssues::Explanation(kind) << '\n';
+        for (std::size_t index = 0; index < choices.size(); ++index) {
+            std::cout << "    " << index + 1 << " - " << choices[index].label
+                << (index == 0 ? " (recommended)" : "") << '\n';
+        }
+        const std::string prompt = "  Choose [1-" + std::to_string(choices.size()) + ", Enter = 1]: ";
+        for (;;) {
+            std::string response;
+            const auto choice = ReadManualSetting(prompt.c_str(), response);
+            if (choice != MenuConfirmation::Run) return choice;
+            std::size_t selected = 1;
+            if (!response.empty()) {
+                selected = response.size() == 1 && response[0] >= '1' && response[0] <= '9'
+                    ? static_cast<std::size_t>(response[0] - '0') : 0;
+            }
+            if (selected >= 1 && selected <= choices.size()) {
+                resolutions.Set(kind, choices[selected - 1].action);
+                break;
+            }
+            std::cout << "Invalid selection. Enter a listed number.\n";
+        }
+        if (resolutions.Get(kind) == Mp3TagIssues::Action::Stop) {
+            std::cout << "Stopped for tag issues. No action was started.\n";
+            return MenuConfirmation::Back;
+        }
+    }
+    std::size_t skipped = 0;
+    for (auto& plan : plans) {
+        FolderConvert::ApplyTagIssueResolutions(plan, resolutions);
+        skipped += plan.tagIssueSkipped.size();
+    }
+    if (skipped != 0) {
+        std::cout << "  Files skipped by tag-issue choices: " << skipped
+            << " (folders left without audio are omitted).\n";
+    }
+    return MenuConfirmation::Run;
+}
 }
 
 int ConvertConfiguredLibraries(const std::vector<MediaDirectoryElement>& mediaDirectoryList,
@@ -1531,6 +1603,12 @@ int ConvertConfiguredLibraries(const std::vector<MediaDirectoryElement>& mediaDi
             "  Written folders keep every file; other audio (e.g. MP3) beside conversions is copied unchanged.\n"
             "  Folders with audio but nothing to convert are skipped and listed in conversion-audit.json.\n"
             "  Sources unchanged. Source quality is verified during conversion.\n";
+    }
+    if (mp3) {
+        const auto tagChoice = ResolveMenuTagIssues(plans);
+        if (tagChoice != MenuConfirmation::Run) {
+            return cancelledMenuResult(tagChoice);
+        }
     }
     const auto confirmation = ConfirmPreview();
     if (confirmation != MenuConfirmation::Run) {
@@ -3059,7 +3137,10 @@ constexpr std::array<MenuEntry, 7> MenuEntries{ {
         "      Audit: conversion-audit.json lists preservation differences and installation states.\n"
         "             Newly created failed library folders receive an error prefix; existing folders stay.\n"
         "      Prompts configure quality (0-9), stereo downmix and overwrite before preview.\n"
-        "      Defaults: VBR 0, no downmix, no overwrite. RUN confirms the selected settings.\n" },
+        "      Defaults: VBR 0, no downmix, no overwrite. RUN confirms the selected settings.\n"
+        "      Tag issues (empty values, numeric genres, NULs, FLAC-only blocks, ReplayGain) are\n"
+        "      offered as choices after preview, once per issue type, unless\n"
+        "      TagIssueResolution is \"auto\" (recommended fixes applied).\n" },
     { '7', ConvertActionEnum::RepairEnum, "Validate and repair FLAC/MP3 metadata [sources unchanged]",
         "      Input: native FLAC and MP3 files in active libraries, recursively.\n"
         "      Output: OutDirectory/repaired-metadata/<mediaName>; only folders containing a safe repair\n"
@@ -3376,7 +3457,7 @@ int RunWithArgumentsImpl(const std::vector<const char*>& arguments)
             options.conversion.sidecarFormat = *sidecarFormat;
             return FolderConvert::ConvertAudioFolderToOutput(
                 inputPath, OutputLayout::Conversion(outputDirectory, options.conversion.target, name),
-                options.overwrite, options.conversion) == 0 ? 0 : 1;
+                options.overwrite, options.conversion, settings->TagIssueResolution == "auto") == 0 ? 0 : 1;
         }
 
         case CommandAction::Repair: {

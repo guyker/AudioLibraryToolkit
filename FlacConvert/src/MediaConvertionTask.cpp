@@ -632,9 +632,12 @@ int MediaConvertionTask::ConvertFile()
     _failureType = "PRESERVATION";
     if (_options.target == AudioTarget::Mp3) {
         std::string tagError;
-        if (!Mp3TagMetadata::WriteFromFlac(_sourcePath, _targetTMPPath, tagError)) {
+        if (!Mp3TagMetadata::WriteFromFlac(_sourcePath, _targetTMPPath, _options.tagIssues, tagError)) {
             spdlog::error("Cannot write MP3 metadata for '{}': {}",
                 CommonUtils::path_to_utf8(_sourcePath), tagError);
+            _audit = {};
+            _audit.ok = false;
+            _audit.entries.push_back({ PreservationAudit::Status::NotVerified, "tags", "tag writing", tagError, true });
             removeTemporary(_targetTMPPath);
             if (_preserveOriginalMetadata) {
                 removeTemporary(sidecarPath(_targetTMPPath, _options.sidecarFormat));
@@ -651,7 +654,8 @@ int MediaConvertionTask::ConvertFile()
         _status = -1;
         return _status;
     }
-    _audit = PreservationAudit::Compare(_sourcePath, _targetTMPPath, verifiedArchive);
+    _audit = PreservationAudit::Compare(_sourcePath, _targetTMPPath, verifiedArchive,
+        _options.target == AudioTarget::Mp3 ? _options.tagIssues : Mp3TagIssues::Resolutions{});
     if (!_audit.ok) {
         removeTemporary(_targetTMPPath);
         if (_preserveOriginalMetadata) removeTemporary(sidecarPath(_targetTMPPath, _options.sidecarFormat));

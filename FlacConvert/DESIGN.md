@@ -28,6 +28,7 @@ It runs either as explicit CLI commands or, with no arguments, as a legacy inter
 | Folder conversion | `src/FolderConvert.cpp`, `include/FolderConvert.h` | `FolderConvert::PrepareConversion` (plan) and `FolderConvert::ExecuteConversion` (run, audit report, markers) |
 | File conversion | `src/MediaConvertionTask.cpp`, `include/MediaConvertionTask.h` | `MediaConvertionTask`: quality gate, FFmpeg child process, output verification, sidecar, audit, installation |
 | MP3 tags | `src/Mp3TagMetadata.cpp`, `include/Mp3TagMetadata.h` | TagLib maps source FLAC comments into ID3v2.4 and reads MP3 ID3 properties for preservation auditing |
+| MP3 tag issues | `src/Mp3TagIssues.cpp`, `include/Mp3TagIssues.h` | Detects MP3 tag issues, lists resolution choices (recommended first) and applies the selected resolutions to source comments |
 | Metadata repair | `src/AudioRepair.cpp`, `include/AudioRepair.h`, `src/RepairRules.cpp`, `include/RepairRules.h` | `RepairRules::Analyze` detects FLAC/MP3 metadata defects and plans byte-range edits; `AudioRepair::Prepare` plans repairs; `AudioRepair::Execute` stages, verifies and installs repaired copies and `repair-report.json` |
 | Metadata archive | `src/FlacMetadata.cpp`, `include/FlacMetadata.h` | `FlacMetadata::Save` / `FlacMetadata::Verify` byte-exact archive as binary `.flac-metadata` or `.flac-metadata.json` (readable scan-schema metadata + Base64 archive; only the archive is verified); scan optionally writes binary metadata-only archives for native FLAC |
 | Preservation audit | `src/PreservationAudit.cpp`, `include/PreservationAudit.h` | `PreservationAudit::Compare` (tags, pictures, chapters, opaque blocks), `PreservationAudit::VerifyCopy` |
@@ -176,16 +177,31 @@ Per file, `MediaConvertionTask::ConvertFile`:
    temporary when the run's `ConversionOptions::sidecarFormat` is not `None` (K-038); with format `None` it
    only prepares a clean input when appended tags must be removed;
 4. runs `ffmpeg` via `runFFmpeg` with `conversionArguments` (K-056, K-017);
-5. for MP3 output, `Mp3TagMetadata::WriteFromFlac` maps source FLAC comments into ID3v2.4 using TagLib while
-   preserving FFmpeg-generated artwork and chapters;
+5. for MP3 output, `Mp3TagMetadata::WriteFromFlac` clears FFmpeg's text properties and writes source FLAC comment
+   properties into ID3v2.4 using TagLib, avoiding duplicate alias frames. `DESCRIPTION`/`COMMENT` and
+   `YEAR`/`DATE` values are combined without deduplication; artwork and chapter frames remain intact. Comments are
+   read natively from the FLAC (keeping empty values and order) and pass through `Mp3TagIssues::Resolve` with the
+   run's `ConversionOptions::tagIssues` first;
 6. verifies output codec, rate, depth/channels and duration (±0.15 s);
 7. verifies the archive again (when written) and runs `PreservationAudit::Compare` (K-029); for MP3, the audit
-   reads ID3 properties directly through `Mp3TagMetadata::Read`, so repeated mapped values can be verified without
-   a sidecar. Without an archive, metadata not represented in verifiable output (for example, FLAC application
-   blocks) remains fatal (fail-closed).
+   reads both ID3 values and tag-key spellings through `Mp3TagMetadata::Read`, rather than mixing that read with
+   FFmpeg's flattened dictionary, so repeated mapped values can be verified without a sidecar. Without an archive,
+   metadata not represented in verifiable output (for example, FLAC application
+   blocks) remains fatal (fail-closed), unless a selected tag-issue resolution explains the difference: then the
+   resolved value is recorded as `Normalized` and discarded FLAC-only blocks as non-fatal `SourceOnly`.
+   A tag-write failure is recorded as a fatal `NotVerified` tags entry.
    For MP4-family sources, container descriptors (`major_brand`, `minor_version`, `compatible_brands`) and
    FFmpeg's default stream tags (`handler_name=SoundHandler`, `language=und`, `vendor_id=0x0000`) are treated as
    generated metadata rather than user-tag losses.
+
+**MP3 tag issues.** For the MP3 target, `PrepareConversion` runs `Mp3TagIssues::Detect` on each source's native
+comments (`PreservationAudit::ReadFlacTagSource`) and records affected files in `FolderConversionPlan::tagIssueFiles`.
+Kinds: empty values, numeric genres, embedded NUL, FLAC-only blocks and ReplayGain; empty values and FLAC-only blocks
+are ignored when a sidecar is written. `Mp3TagIssues::Choices` lists actions with the recommendation first. The menu
+(`ResolveMenuTagIssues`) asks once per kind after the preview and before `RUN`; `TagIssueResolution: "auto"` takes
+the recommendations. CLI `ask` fails in `ConvertAudioFolderToOutput` before writing, logging the file list to the
+session log. `ApplyTagIssueResolutions` stores choices in `plan.options.tagIssues`, removes `SkipFiles` audio and the
+companions of the topmost folder left without audio. Resolutions apply only to output tags; sources are unchanged.
 
 **Sidecar policy.** `MetadataSidecarSettings::Resolve` turns the configured `MetadataSidecars` policy for the target
 (`ConvertToFlac` / `ConvertToMp3`) and the run's disable request into the effective format: `disabled` (default) → none;
@@ -549,6 +565,7 @@ fail configuration loading.
 | `FLACSettings.ffmpeg_exe_name` | `ffmpeg` | Conversion executable; the other `FLACSettings` strings are not used at runtime |
 | `MetadataSidecars.Format` | `binary` (`binary`\|`json`) | Sidecar encoding for conversions |
 | `MetadataSidecars.ConvertToFlac`, `MetadataSidecars.ConvertToMp3` | `disabled` (`disabled`\|`optional`\|`required`) | Per-target sidecar policy; invalid values fail loading |
+| `TagIssueResolution` | `ask` (`ask`\|`auto`) | MP3 tag issues: `ask` prompts in the menu and fails the CLI before writing; `auto` applies `Mp3TagIssues` recommendations |
 | `MediaDirectoryList[]` | empty | Menu requires at least one active `{ isActive, mediaPath, mediaName }`; `mediaName` must be a single directory name; active entries require a non-empty `mediaPath` |
 
 `DatabaseFileName`, `resultPath` and `dbPath` are not used for output naming.
@@ -577,7 +594,8 @@ no audio. Describes the source, not the output.
 (`completed`/`failed`), `errorType` (`""`, `AUDIO`, `PRESERVATION`, `COPY`, `IO`, `INCOMPLETE`), `counts`
 {`plannedAudio`, `plannedCompanions`, `installedAudio`, `installedCompanions`, `skippedAudio`,
 `plannedDirectories`, `skippedUnchangedDirectories`}, `skippedUnchangedDirectories[]` {`source` (relative
-directory, `"."` for root), `files`, `audioFiles`}, `skippedAudio[]`,
+directory, `"."` for root), `files`, `audioFiles`}, `skippedAudio[]`, MP3 only: `counts.skippedByTagIssue`,
+`tagIssueResolutions` {issue key → chosen action label}, `skippedByTagIssue[]` (relative sources),
 `files[]` {`source`, `output` (relative), `kind` (`audio`/`companion`), `status`
 (`not-attempted`/`failed`/`audited`/`installed`), `metadataArchive`?, `preservationChecked`, `preservationPassed`,
 `resources[]` {`status`, `resource`, `name`, `detail`, `fatal`}}. Resource statuses are

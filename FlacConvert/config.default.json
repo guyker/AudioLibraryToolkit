@@ -21,6 +21,10 @@
     "ConvertToFlac": "disabled",
     "ConvertToMp3": "disabled"
   },
+  // FLAC-to-MP3 tag issues with several possible fixes (empty values, numeric genre, NUL characters,
+  // FLAC-only blocks, ReplayGain). "ask": the menu asks once per issue type before RUN and CLI convert
+  // stops before writing; "auto": the recommended fix is applied and recorded in conversion-audit.json.
+  "TagIssueResolution": "ask",
   "LogLevel": 1,
   "UseAsyncMetadataReads": true,
   "Incremental": true,

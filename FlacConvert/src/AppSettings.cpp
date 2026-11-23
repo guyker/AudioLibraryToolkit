@@ -417,6 +417,7 @@ std::string AppSettingsJson::toJsonString() const {
     doc.AddMember("Incremental", Incremental, allocator);
     doc.AddMember("ScanFlacMetadataArchives", ScanFlacMetadataArchives, allocator);
     doc.AddMember("ScanTier", rapidjson::Value(ScanTier.c_str(), allocator), allocator);
+    doc.AddMember("TagIssueResolution", rapidjson::Value(TagIssueResolution.c_str(), allocator), allocator);
     doc.AddMember("MetadataScanMaxThreads", MetadataScanMaxThreads, allocator);
     doc.AddMember("DecodeWorkers", DecodeWorkers, allocator);
     rapidjson::Value catalogExtensions(rapidjson::kArrayType);
@@ -581,6 +582,13 @@ bool AppSettingsJson::loadFromJsonText(const std::string& text) {
         spdlog::error("ScanTier must be catalog, integrity, or analysis.");
         return false;
     }
+    if (doc.HasMember("TagIssueResolution") &&
+        (!doc["TagIssueResolution"].IsString() ||
+            (std::string_view(doc["TagIssueResolution"].GetString()) != "ask" &&
+                std::string_view(doc["TagIssueResolution"].GetString()) != "auto"))) {
+        spdlog::error("TagIssueResolution must be ask or auto.");
+        return false;
+    }
     if (doc.HasMember("UseFFmpegLibraryAPI")) {
         spdlog::warn("UseFFmpegLibraryAPI is deprecated and ignored; metadata re-probes always use FFmpeg libraries.");
     }
@@ -725,6 +733,9 @@ bool AppSettingsJson::loadFromJsonText(const std::string& text) {
     }
     if (doc.HasMember("ScanTier")) {
         ScanTier = doc["ScanTier"].GetString();
+    }
+    if (doc.HasMember("TagIssueResolution")) {
+        TagIssueResolution = doc["TagIssueResolution"].GetString();
     }
     if (doc.HasMember("MetadataScanMaxThreads")) {
         MetadataScanMaxThreads = doc["MetadataScanMaxThreads"].GetInt();

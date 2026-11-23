@@ -160,6 +160,8 @@ struct AppSettingsJson
 	FLACEncodingSettings FLACSettings{};
 	std::vector<MediaDirectoryElement> MediaDirectoryList{};
 	MetadataSidecarSettings MetadataSidecars{};
+	// MP3 tag issues with several resolutions: "ask" (menu prompts; CLI stops) or "auto" (recommended).
+	std::string TagIssueResolution{ "ask" };
 	std::vector<std::string> CatalogExtensions{ ".flac", ".mp3" };
 	double DuplicateDurationToleranceSeconds{ 2.0 }; // minimum absolute duplicate duration tolerance
 	bool DuplicateFuzzyNames{ false };
@@ -221,6 +223,7 @@ struct AppSettingsJson
 			},
 			{},
 			{}, // MetadataSidecars: binary, disabled for both targets
+			"ask", // TagIssueResolution
 		};
 
 		return appSettingsJson;

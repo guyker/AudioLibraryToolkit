@@ -403,6 +403,129 @@ class ConversionTests(unittest.TestCase):
         self.assertTrue(date_audit)
         self.assertFalse(any(item["fatal"] for item in date_audit))
 
+    def test_mp3_taglib_replaces_ffmpeg_comment_encodedby_and_label_aliases(self):
+        fields = ["TITLE=Fixture", "COMMENT=Note \u00e9", "ENCODEDBY=Encoder One",
+                  "LABEL=Label One", "X_CUSTOM=Custom \u97f3"]
+        source = replace_vorbis_comment_blocks(
+            self.plain, [vorbis_comment_payload("Generated fixture",
+                                               [field.encode("utf-8") for field in fields])])
+        self.track.write_bytes(source)
+        self.original_hash = hashlib.sha256(source).digest()
+        self.convert(config=self.sidecar_config(ConvertToMp3="disabled"))
+
+        frames = id3_frames(self.mp3().read_bytes())
+        for frame_id, expected in ((b"TENC", b"Encoder One"), (b"TPUB", b"Label One")):
+            self.assertEqual([payload for name, payload in frames if name == frame_id],
+                             [b"\x03" + expected])
+        comments = [payload for name, payload in frames if name == b"COMM"]
+        self.assertEqual(len(comments), 1)
+        self.assertEqual(comments[0][0], 3)
+        self.assertEqual(comments[0][4:], b"\0Note \xc3\xa9")
+        resources = self.audit(self.destination())["files"][0]["resources"]
+        for key in ("comment", "encodedby", "label", "x_custom"):
+            entries = [item for item in resources if item["resource"] == "tags" and item["name"] == key]
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["status"], "Preserved")
+        self.assertFalse(list(self.destination().glob("*.flac-metadata*")))
+
+    def test_mp3_taglib_preserves_repeated_comment_aliases_and_text_values(self):
+        fields = ["TITLE=Fixture", "COMMENT=Note", "COMMENT=Note", "DESCRIPTION=Other note",
+                  "ENCODEDBY=Encoder One", "ENCODEDBY=Encoder Two",
+                  "LABEL=Label One", "LABEL=Label One", "LABEL=Label Two",
+                  "X_CUSTOM=Value One", "X_CUSTOM=Value Two"]
+        source = replace_vorbis_comment_blocks(
+            self.plain, [vorbis_comment_payload("Generated fixture",
+                                               [field.encode("utf-8") for field in fields])])
+        self.track.write_bytes(source)
+        self.original_hash = hashlib.sha256(source).digest()
+        self.convert(config=self.sidecar_config(ConvertToMp3="disabled"))
+
+        frames = id3_frames(self.mp3().read_bytes())
+        for frame_id, expected in ((b"TENC", [b"Encoder One", b"Encoder Two"]),
+                                   (b"TPUB", [b"Label One", b"Label One", b"Label Two"])):
+            payloads = [payload for name, payload in frames if name == frame_id]
+            self.assertEqual(len(payloads), 1)
+            self.assertEqual(payloads[0][0], 3)
+            self.assertEqual(payloads[0][1:].split(b"\0"), expected)
+        comments = [payload[1:].split(b"\0")[1:] for name, payload in frames
+                    if name == b"TXXX" and payload[1:].startswith(b"COMMENT\0")]
+        self.assertEqual(comments, [[b"Note", b"Note", b"Other note"]])
+        self.assertFalse(any(name == b"COMM" for name, _ in frames))
+        resources = self.audit(self.destination())["files"][0]["resources"]
+        self.assertFalse(any(item["fatal"] or item["status"] == "SidecarOnly" for item in resources))
+        self.assertFalse(list(self.destination().glob("*.flac-metadata*")))
+
+    def tag_issue_source(self, base, fields):
+        source = replace_vorbis_comment_blocks(base, [vorbis_comment_payload("Generated fixture", fields)])
+        self.track.write_bytes(source)
+        self.original_hash = hashlib.sha256(source).digest()
+
+    def test_cli_ask_tag_issues_stop_before_writing(self):
+        self.tag_issue_source(self.plain, [b"TITLE=Fixture", b"COMPOSER=", b"GENRE=17"])
+        result = self.convert(config=self.sidecar_config(ConvertToMp3="disabled"), success=False)
+        self.assertIn("Tag issues: Empty tag values (1 file(s))", result.stdout)
+        self.assertIn("Tag issues: Numeric genre (1 file(s))", result.stdout)
+        self.assertIn("TagIssueResolution", result.stdout)
+        self.assertNotIn("Conversion started:", result.stdout)
+        self.assertNotIn(self.name, result.stdout)
+        self.assertIn(self.name, self.session_log(result))
+        self.assertFalse(self.destination().exists())
+
+    def test_cli_auto_applies_recommended_tag_issue_resolutions(self):
+        self.tag_issue_source(self.fixture.read_bytes(), [
+            b"TITLE=Fixture", b"COMPOSER=", b"GENRE=17", b"ARTIST=One\x00Two",
+            b"REPLAYGAIN_TRACK_GAIN=-6.00 dB", b"DATE=2020-01-02T03:04"])
+        settings = json.loads(self.sidecar_config(ConvertToMp3="disabled").read_text(encoding="utf-8"))
+        settings["TagIssueResolution"] = "auto"
+        config = self.work / "auto-tag-issues.json"
+        config.write_text(json.dumps(settings), encoding="utf-8")
+        result = self.convert(config=config)
+        self.assertIn("Tag issues: Numeric genre (1 file(s)): Convert ID3v1 genre numbers to names", result.stdout)
+
+        frames = id3_frames(self.mp3().read_bytes())
+        text = {name: payload[1:].split(b"\0") for name, payload in frames if name.startswith(b"T")}
+        self.assertEqual(text[b"TCON"], [b"Rock"])
+        self.assertEqual(text[b"TPE1"], [b"One", b"Two"])
+        self.assertEqual(text[b"TDRC"], [b"2020-01-02T03:04"])
+        self.assertNotIn(b"TCOM", text)
+        self.assertTrue(any(name == b"TXXX" and b"REPLAYGAIN_TRACK_GAIN" in payload.upper()
+                            for name, payload in frames))
+        report = self.audit(self.destination())
+        self.assertEqual(report["status"], "completed")
+        self.assertEqual(set(report["tagIssueResolutions"]),
+                         {"emptyValues", "numericGenre", "embeddedNul", "flacOnlyBlocks", "replayGain"})
+        resources = report["files"][0]["resources"]
+        self.assertFalse(any(item["fatal"] for item in resources))
+        for key in ("genre", "artist", "composer"):
+            self.assertTrue(any(item["name"] == key and "tag-issue resolution" in item["detail"]
+                                for item in resources), key)
+        self.assertTrue(any(item["resource"] == "flac-block" and item["status"] == "SourceOnly" and
+                            "tag-issue resolution" in item["detail"] for item in resources))
+
+    def test_menu_tag_issue_choices_skip_or_stop_without_writing_affected_folders(self):
+        affected = self.source / "numeric genre"
+        affected.mkdir()
+        (affected / "genre.flac").write_bytes(replace_vorbis_comment_blocks(
+            self.fixture.read_bytes(), [vorbis_comment_payload("Generated fixture", [b"GENRE=17"])]))
+        (affected / "cover.jpg").write_bytes(b"affected artwork")
+        affected_hash = hashlib.sha256((affected / "genre.flac").read_bytes()).digest()
+        libraries = [{"isActive": True, "mediaPath": str(self.source)}]
+
+        stopped = self.legacy(libraries, "6\n" + DEFAULT_MP3_SETTINGS + "4\n0\n")
+        self.assertIn("Numeric genre (1 file(s))", stopped.stdout)
+        self.assertIn("Stopped for tag issues. No action was started.", stopped.stdout)
+        self.assertFalse((self.output / "converted-mp3").exists())
+
+        result = self.legacy(libraries, "6\n" + DEFAULT_MP3_SETTINGS + "3\nRUN\n")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Files skipped by tag-issue choices: 1", result.stdout)
+        self.assertTrue(self.mp3().exists())
+        self.assertFalse((self.destination() / "numeric genre").exists())
+        report = self.audit(self.destination())
+        self.assertEqual(report["tagIssueResolutions"], {"numericGenre": "Skip the affected files"})
+        self.assertEqual([Path(p) for p in report["skippedByTagIssue"]], [Path("numeric genre/genre.flac")])
+        self.assertEqual(hashlib.sha256((affected / "genre.flac").read_bytes()).digest(), affected_hash)
+
     def test_failure_report_unique_folder_and_unattempted_companions(self):
         self.track.write_bytes(b"invalid audio")
         self.original_hash = hashlib.sha256(self.track.read_bytes()).digest()

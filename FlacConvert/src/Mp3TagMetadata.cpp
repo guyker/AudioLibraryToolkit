@@ -1,30 +1,21 @@
 #include "Mp3TagMetadata.h"
 
-#include <map>
-#include <memory>
 #include <mutex>
-#include <set>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include <spdlog/spdlog.h>
 #include <taglib/flac/flacfile.h>
 #include <taglib/mpeg/mpegfile.h>
 #include <taglib/mpeg/id3v2/id3v2tag.h>
-#include <taglib/mpeg/id3v2/id3v2frame.h>
-#include <taglib/mpeg/id3v2/id3v2framefactory.h>
-#include <taglib/mpeg/id3v2/frames/commentsframe.h>
 #include <taglib/mpeg/id3v2/frames/textidentificationframe.h>
-#include <taglib/mpeg/id3v2/frames/uniquefileidentifierframe.h>
-#include <taglib/mpeg/id3v2/frames/unsynchronizedlyricsframe.h>
-#include <taglib/mpeg/id3v2/frames/urllinkframe.h>
 #include <taglib/ogg/xiphcomment.h>
 #include <taglib/toolkit/tfilestream.h>
 #include <taglib/toolkit/tpropertymap.h>
 #include <taglib/toolkit/tdebuglistener.h>
 
 #include "CommonUtils.h"
+#include "PreservationAudit.h"
 
 namespace
 {
@@ -72,28 +63,6 @@ std::string toUtf8(const TagLib::String& value)
     return value.to8Bit(true);
 }
 
-std::string frameIdentity(const TagLib::ID3v2::Frame& frame)
-{
-    const auto id = frame.frameID();
-    std::string identity(id.data(), id.size());
-    if (const auto* text = dynamic_cast<const TagLib::ID3v2::UserTextIdentificationFrame*>(&frame)) {
-        return identity + ":" + toUtf8(text->description());
-    }
-    if (const auto* comments = dynamic_cast<const TagLib::ID3v2::CommentsFrame*>(&frame)) {
-        return identity + ":" + toUtf8(comments->description());
-    }
-    if (const auto* url = dynamic_cast<const TagLib::ID3v2::UserUrlLinkFrame*>(&frame)) {
-        return identity + ":" + toUtf8(url->description());
-    }
-    if (const auto* lyrics = dynamic_cast<const TagLib::ID3v2::UnsynchronizedLyricsFrame*>(&frame)) {
-        return identity + ":" + toUtf8(lyrics->description());
-    }
-    if (const auto* identifier = dynamic_cast<const TagLib::ID3v2::UniqueFileIdentifierFrame*>(&frame)) {
-        return identity + ":" + toUtf8(identifier->owner());
-    }
-    return identity;
-}
-
 TagLib::FileName tagLibFileName(const std::filesystem::path& path, std::string& utf8Path)
 {
 #ifdef _WIN32
@@ -103,35 +72,6 @@ TagLib::FileName tagLibFileName(const std::filesystem::path& path, std::string& 
     utf8Path = CommonUtils::path_to_utf8(path);
     return TagLib::FileName(utf8Path.c_str());
 #endif
-}
-
-struct MappedProperty
-{
-    TagLib::String key;
-    TagLib::StringList values;
-    TagLib::ByteVector frameId;
-    std::string identity;
-};
-
-std::set<std::string> equivalentFrameIdentities(const MappedProperty& property)
-{
-    std::set<std::string> identities{ property.identity };
-    auto key = toUtf8(property.key);
-    for (char& character : key) {
-        if (character >= 'A' && character <= 'Z') {
-            character = static_cast<char>(character - 'A' + 'a');
-        }
-    }
-    if (key == "comment" || key == "description") {
-        identities.insert("COMM:");
-        identities.insert("TXXX:DESCRIPTION");
-    }
-    else if (key == "date" || key == "year") {
-        identities.insert("TDRC");
-        identities.insert("TXXX:DATE");
-        identities.insert("TXXX:YEAR");
-    }
-    return identities;
 }
 
 TagLib::String normalizedPropertyKey(const TagLib::String& key)
@@ -153,29 +93,23 @@ TagLib::String normalizedPropertyKey(const TagLib::String& key)
 }
 
 bool Mp3TagMetadata::WriteFromFlac(const std::filesystem::path& sourceFlac,
-    const std::filesystem::path& temporaryMp3, std::string& error)
+    const std::filesystem::path& temporaryMp3, const Mp3TagIssues::Resolutions& resolutions,
+    std::string& error)
 {
     ensureTagLibLogListener();
     const ScopedTagLibSource sourceLog(sourceFlac);
-    std::string sourceUtf8;
-    std::string outputUtf8;
-    const auto sourceName = tagLibFileName(sourceFlac, sourceUtf8);
-    const auto outputName = tagLibFileName(temporaryMp3, outputUtf8);
-    TagLib::FileStream sourceStream(sourceName, true);
-    if (!sourceStream.isOpen()) {
-        error = "TagLib could not open the FLAC source read-only.";
+    // Native comments keep empty values and file order, which TagLib's Xiph map does not expose.
+    Mp3TagIssues::FlacTagSource source;
+    if (!PreservationAudit::ReadFlacTagSource(sourceFlac, source, error)) {
+        error = "Could not read the FLAC source comments: " + error;
         return false;
     }
-    TagLib::FLAC::File sourceFile(&sourceStream, false);
-    if (!sourceFile.isValid()) {
-        error = "TagLib could not parse the FLAC source.";
-        return false;
-    }
-    auto* comments = sourceFile.xiphComment();
-    if (comments == nullptr || comments->fieldListMap().isEmpty()) {
+    if (source.comments.empty()) {
         return true;
     }
 
+    std::string outputUtf8;
+    const auto outputName = tagLibFileName(temporaryMp3, outputUtf8);
     TagLib::MPEG::File outputFile(outputName, false, TagLib::MPEG::Properties::Fast);
     if (!outputFile.isValid()) {
         error = "TagLib could not open the temporary MP3 for tag writing.";
@@ -187,55 +121,22 @@ bool Mp3TagMetadata::WriteFromFlac(const std::filesystem::path& sourceFlac,
         return false;
     }
 
-    std::map<std::string, MappedProperty> mappedProperties;
-    auto* factory = TagLib::ID3v2::FrameFactory::instance();
-    for (const auto& [sourceKey, sourceValues] : comments->fieldListMap()) {
-        const auto propertyKey = normalizedPropertyKey(sourceKey);
-        std::unique_ptr<TagLib::ID3v2::Frame> candidate(
-            factory->createFrameForProperty(propertyKey, sourceValues));
-        if (!candidate) {
-            error = "TagLib could not map FLAC comment '" + toUtf8(sourceKey) +
-                "' to an ID3 frame.";
-            return false;
-        }
-        const auto identity = frameIdentity(*candidate);
-        const auto [it, inserted] = mappedProperties.try_emplace(identity,
-            MappedProperty{ propertyKey, sourceValues, candidate->frameID(), identity });
-        if (!inserted) {
-            it->second.values.append(sourceValues);
-        }
+    TagLib::PropertyMap properties;
+    for (const auto& [key, value] : Mp3TagIssues::Resolve(source.comments, resolutions)) {
+        // ID3v2 cannot store empty text values; unresolved empties are reported by the audit.
+        if (value.empty()) continue;
+        properties.insert(normalizedPropertyKey(TagLib::String(key, TagLib::String::UTF8)),
+            TagLib::StringList(TagLib::String(value, TagLib::String::UTF8)));
     }
 
-    std::set<std::string> identitiesToReplace;
-    for (const auto& [identity, property] : mappedProperties) {
-        (void)identity;
-        const auto aliases = equivalentFrameIdentities(property);
-        identitiesToReplace.insert(aliases.begin(), aliases.end());
+    // Clear FFmpeg text properties first; TagLib retains non-property frames such as APIC and CHAP/CTOC.
+    if (!outputTag->setProperties(TagLib::PropertyMap{}).isEmpty()) {
+        error = "TagLib could not clear the encoded MP3 text properties.";
+        return false;
     }
-    std::vector<TagLib::ID3v2::Frame*> replacedFrames;
-    for (auto* existing : outputTag->frameList()) {
-        if (identitiesToReplace.contains(frameIdentity(*existing))) {
-            replacedFrames.push_back(existing);
-        }
-    }
-    for (auto* existing : replacedFrames) {
-        outputTag->removeFrame(existing);
-    }
-
-    for (auto& [identity, property] : mappedProperties) {
-        (void)identity;
-        std::unique_ptr<TagLib::ID3v2::Frame> frame(
-            factory->createFrameForProperty(property.key, property.values));
-        if (!frame || frame->frameID() != property.frameId) {
-            error = "TagLib could not create the mapped ID3 frame.";
-            return false;
-        }
-        if (frameIdentity(*frame) != property.identity) {
-            error = "TagLib mapped a FLAC comment to an inconsistent ID3 frame.";
-            return false;
-        }
-
-        outputTag->addFrame(frame.release());
+    if (!outputTag->setProperties(properties).isEmpty()) {
+        error = "TagLib could not represent all FLAC comments as ID3 properties.";
+        return false;
     }
 
     if (!outputFile.save(TagLib::MPEG::File::ID3v2, TagLib::MPEG::File::StripOthers,
@@ -269,6 +170,20 @@ bool Mp3TagMetadata::Read(const std::filesystem::path& mp3, TagMap& tags, std::s
         for (const auto& value : property->second) {
             values.push_back(toUtf8(value));
         }
+    }
+    // properties() turns numeric genres into names and rewrites date separators; audit the stored text.
+    const auto& frames = tag->frameListMap();
+    for (const auto& [frameId, key] : { std::pair<const char*, const char*>{ "TCON", "GENRE" },
+             std::pair<const char*, const char*>{ "TDRC", "DATE" } }) {
+        const auto found = frames.find(frameId);
+        if (found == frames.end()) continue;
+        std::vector<std::string> raw;
+        for (const auto* frame : found->second) {
+            const auto* text = dynamic_cast<const TagLib::ID3v2::TextIdentificationFrame*>(frame);
+            if (text == nullptr) continue;
+            for (const auto& value : text->fieldList()) raw.push_back(toUtf8(value));
+        }
+        if (!raw.empty()) tags[key] = std::move(raw);
     }
     return true;
 }

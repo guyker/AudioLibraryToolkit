@@ -398,7 +398,7 @@ scan-JSON shape plus the exact archive as Base64; only the archive is verified).
 or `required` (always written; `--no-metadata-sidecar` is an error); both default to `disabled`. The sample
 `config.json` uses `//` comments, accepted by the config loader, to explain these choices. Without a sidecar,
 metadata the output cannot carry (application blocks, repeated tags, unsupported pictures, etc.) stops the
-conversion instead of being lost.
+conversion instead of being lost, unless a tag-issue choice for MP3 (see FLAC to MP3) explicitly discards it.
 Scan, duplicates and database import are unaffected.
 Every regular file not selected for FLAC conversion in a written folder is copied unchanged, including MP3, AAC,
 Ogg and other unsupported audio beside converted tracks. Folders without audio, including empty folders, stay with
@@ -462,6 +462,14 @@ Standard and custom tags, chapters and supported embedded pictures are mapped to
 Pictures are copied without image re-encoding, including their types/descriptions. Xing/LAME timing
 information remains enabled for seeking and gapless playback. Unsupported pictures remain in the
 sidecar, rather than being silently discarded. Not every player displays every ID3 field or multiple pictures.
+
+Before conversion, MP3 runs detect **tag issues**: empty values, numeric ID3v1 genres (`17`), values containing NUL,
+FLAC-only blocks (application, cue sheet, seek table; ignored with a sidecar, like empty values) and ReplayGain tags.
+The menu asks once per issue type after the preview, with the recommended fix first (Enter): for example map `17` to
+`Rock`, drop empty values, split NUL values, discard FLAC-only blocks or keep ReplayGain; you can also skip the
+affected files or stop. The CLI cannot ask, so by default it stops before writing and prints a summary. Set
+`"TagIssueResolution": "auto"` in `config.json` to always apply the recommendations. Choices change only the MP3 tags,
+never the source, and are recorded in `conversion-audit.json` (`tagIssueResolutions`, `skippedByTagIssue`).
 
 When `MetadataSidecars.ConvertToMp3` is `optional` or `required` (the default is `disabled`, see above), each
 MP3 has a `<filename>.mp3.flac-metadata` sidecar (binary, or JSON per `MetadataSidecars.Format`): the original

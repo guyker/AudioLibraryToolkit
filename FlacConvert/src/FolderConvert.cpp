@@ -3,6 +3,7 @@
 #include "MediaConvertionAsyncTask.h"
 #include "FlacMetadata.h"
 #include "PlatformUtils.h"
+#include "PreservationAudit.h"
 
 #include <iostream>
 #include <algorithm>
@@ -184,7 +185,23 @@ bool writeAudit(const FolderConversionPlan& plan, const fs::path& outputDirector
     writer.Key("skippedAudio"); writer.Uint64(plan.skippedAudio.size());
     writer.Key("plannedDirectories"); writer.Uint64(plan.directories.size());
     writer.Key("skippedUnchangedDirectories"); writer.Uint64(plan.skippedDirectories.size());
+    writer.Key("skippedByTagIssue"); writer.Uint64(plan.tagIssueSkipped.size());
     writer.EndObject();
+    if (plan.options.target == AudioTarget::Mp3) {
+        writer.Key("tagIssueResolutions"); writer.StartObject();
+        for (const auto kind : Mp3TagIssues::AllKinds) {
+            const auto action = plan.options.tagIssues.Get(kind);
+            if (action == Mp3TagIssues::Action::Unresolved) continue;
+            text(Mp3TagIssues::Key(kind), Mp3TagIssues::ActionLabel(kind, action));
+        }
+        writer.EndObject();
+        writer.Key("skippedByTagIssue"); writer.StartArray();
+        for (const auto& skipped : plan.tagIssueSkipped) {
+            const auto path = CommonUtils::path_to_utf8(skipped.lexically_relative(plan.input));
+            writer.String(path.data(), static_cast<rapidjson::SizeType>(path.size()));
+        }
+        writer.EndArray();
+    }
     writer.Key("skippedUnchangedDirectories"); writer.StartArray();
     for (const auto& skipped : plan.skippedDirectories) {
         writer.StartObject();
@@ -330,13 +347,104 @@ int FolderConvert::ConvertAudioFolderToOutput(
     const fs::path& inputDirectory,
     const fs::path& outputDirectory,
     bool overwrite,
-    ConversionOptions options)
+    ConversionOptions options,
+    bool autoResolveTagIssues)
 {
     FolderConversionPlan plan;
     if (PrepareConversion(inputDirectory, outputDirectory, overwrite, options, plan) != 0) {
         return -1;
     }
+    if (!plan.tagIssueFiles.empty()) {
+        const auto counts = CountTagIssues(plan);
+        Mp3TagIssues::Resolutions resolutions;
+        for (const auto kind : Mp3TagIssues::AllKinds) {
+            const auto count = counts[static_cast<std::size_t>(kind)];
+            if (count == 0) continue;
+            if (autoResolveTagIssues) {
+                resolutions.Set(kind, Mp3TagIssues::Action::Apply);
+                spdlog::info("Tag issues: {} ({} file(s)): {} [auto].", Mp3TagIssues::Name(kind), count,
+                    Mp3TagIssues::ActionLabel(kind, Mp3TagIssues::Action::Apply));
+            }
+            else {
+                spdlog::error("Tag issues: {} ({} file(s)). {}", Mp3TagIssues::Name(kind), count,
+                    Mp3TagIssues::Explanation(kind));
+            }
+        }
+        if (!autoResolveTagIssues) {
+            std::string details = "Files with tag issues under '" + CommonUtils::path_to_utf8(plan.input) + "':";
+            for (const auto& file : plan.tagIssueFiles) {
+                details += "\n    " + CommonUtils::path_to_utf8(file.source.lexically_relative(plan.input));
+            }
+            RunLogging::RecordError(details);
+            spdlog::error("No conversion was started. Choose resolutions in the interactive menu, "
+                "or set TagIssueResolution to \"auto\" in the configuration to apply the recommended ones.");
+            return -1;
+        }
+        ApplyTagIssueResolutions(plan, resolutions);
+    }
     return ExecuteConversion(plan);
+}
+
+std::array<std::size_t, Mp3TagIssues::KindCount> FolderConvert::CountTagIssues(const FolderConversionPlan& plan)
+{
+    std::array<std::size_t, Mp3TagIssues::KindCount> counts{};
+    for (const auto& file : plan.tagIssueFiles) {
+        for (const auto kind : Mp3TagIssues::AllKinds) {
+            if (file.found.Has(kind)) ++counts[static_cast<std::size_t>(kind)];
+        }
+    }
+    return counts;
+}
+
+void FolderConvert::ApplyTagIssueResolutions(FolderConversionPlan& plan, const Mp3TagIssues::Resolutions& resolutions)
+{
+    plan.options.tagIssues = resolutions;
+    std::set<fs::path> skipped;
+    for (const auto& file : plan.tagIssueFiles) {
+        for (const auto kind : Mp3TagIssues::AllKinds) {
+            if (file.found.Has(kind) && resolutions.Get(kind) == Mp3TagIssues::Action::SkipFiles) {
+                skipped.insert(file.source);
+                break;
+            }
+        }
+    }
+    if (skipped.empty()) return;
+
+    const auto within = [](const fs::path& path, const fs::path& directory) {
+        const auto relative = path.lexically_relative(directory);
+        return !relative.empty() && *relative.begin() != "..";
+    };
+    std::erase_if(plan.audio, [&](const PlannedFileConversion& file) {
+        if (!skipped.contains(file.source)) return false;
+        plan.tagIssueSkipped.push_back(file.source);
+        spdlog::debug("Skipped by tag-issue resolution: '{}'.", CommonUtils::path_to_utf8(file.source));
+        return true;
+    });
+    const auto hasAudio = [&](const fs::path& directory) {
+        return std::any_of(plan.audio.begin(), plan.audio.end(),
+            [&](const PlannedFileConversion& file) { return within(file.source, directory); });
+    };
+    // Drop companions of the highest folder (below the input root) left without planned audio.
+    std::set<fs::path> emptied;
+    for (const auto& source : plan.tagIssueSkipped) {
+        fs::path highest;
+        for (auto directory = source.parent_path();
+             directory != plan.input && within(directory, plan.input) && !hasAudio(directory);
+             directory = directory.parent_path()) {
+            highest = directory;
+        }
+        if (!highest.empty()) emptied.insert(highest);
+    }
+    std::erase_if(plan.companions, [&](const PlannedFileConversion& file) {
+        for (const auto& directory : emptied) {
+            if (within(file.source, directory)) {
+                spdlog::debug("Companion omitted with its tag-issue-skipped folder: '{}'.",
+                    CommonUtils::path_to_utf8(file.source));
+                return true;
+            }
+        }
+        return false;
+    });
 }
 
 int FolderConvert::PrepareConversion(
@@ -629,6 +737,21 @@ int FolderConvert::PrepareConversion(
         }
 
         plan.audio.push_back({ source, target, makeTemporaryOutputPath(target, ++nextTemporaryId) });
+        if (options.target == AudioTarget::Mp3) {
+            Mp3TagIssues::FlacTagSource tagSource;
+            std::string tagError;
+            if (PreservationAudit::ReadFlacTagSource(source, tagSource, tagError)) {
+                const bool sidecar = options.sidecarFormat != MetadataSidecarFormat::None &&
+                    FlacMetadata::AppliesTo(source, options);
+                const auto found = Mp3TagIssues::Detect(tagSource, sidecar);
+                if (found.Any()) plan.tagIssueFiles.push_back({ source, found });
+            }
+            else {
+                // The conversion audit reports unreadable metadata for this file later.
+                spdlog::debug("Tag-issue detection skipped for '{}': {}",
+                    CommonUtils::path_to_utf8(source), tagError);
+            }
+        }
     }
     for (const auto& entry : companions) {
         planning.Advance();

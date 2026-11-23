@@ -10,8 +10,10 @@ copies are verified byte-for-byte, including unsupported audio retained by FLAC 
 denotes the library root. While running, a
 `.conversion-in-progress` marker exists; it is removed on success.
 For FLAC-to-MP3 conversion, TagLib writes mapped FLAC comments to ID3v2.4 and the audit reads the resulting ID3
-properties directly through TagLib, including repeated values; unsupported FLAC metadata still requires a verified
-sidecar.
+properties directly through TagLib, including repeated values and their key spellings; FFmpeg's flattened tag
+dictionary is not used for MP3 tag comparison. Unsupported FLAC metadata still requires a verified sidecar or a
+selected tag-issue resolution (F-002). MP3 reports add `counts.skippedByTagIssue`, `tagIssueResolutions` (issue key →
+chosen action) and `skippedByTagIssue[]`; resolved tags are `Normalized` and discarded FLAC-only blocks `SourceOnly`.
 On failure the report is still written and, if this run created the library folder, the folder is renamed
 `ERROR_<AUDIO|PRESERVATION|COPY|IO>_<name>` or `INCOMPLETE_<name>`. If the rename is not possible (for example,
 because the prefixed name exceeds the Windows component-length limit), the report and marker remain at the original
