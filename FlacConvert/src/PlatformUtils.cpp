@@ -16,6 +16,7 @@
 #endif
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
@@ -924,6 +925,22 @@ bool ScopedCurrentDirectory::Restore()
             throw std::ios_base::failure("Cannot read setup input");
         }
         return false;
+    }
+
+    std::size_t ConsoleWidth() {
+#ifdef _WIN32
+        CONSOLE_SCREEN_BUFFER_INFO info{};
+        if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info)) {
+            const auto width = info.srWindow.Right - info.srWindow.Left + 1;
+            if (width > 0) return static_cast<std::size_t>(width);
+        }
+#else
+        winsize size{};
+        if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) {
+            return size.ws_col;
+        }
+#endif
+        return 80;
     }
 
     bool EnableVirtualTerminal() {

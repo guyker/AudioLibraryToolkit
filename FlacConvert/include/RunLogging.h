@@ -26,9 +26,9 @@ namespace RunLogging
     std::optional<std::filesystem::path> CurrentLogPath();
     void Finish(int exitCode);
 
-    // Phase progress for long operations: logs the start, redraws one console line every second when interactive,
+    // Phase progress: redraws one interactive line every second or when detail changes,
     // logs a snapshot every five seconds when redirected, and logs a final line. Counters are thread-safe.
-    // Message: "<label>: <count>[/<total>] <unit> (<percent>% | total unknown)[, <n> <secondaryUnit>], <elapsed>[, ETA]".
+    // Message: "<label>: <count>[/<total>] <unit> (<percent>% | total unknown)[, <n> <secondaryUnit>][ | detail], <elapsed>[, ETA]".
     class PhaseProgress
     {
     public:
@@ -40,6 +40,7 @@ namespace RunLogging
 
         void Advance(std::size_t count = 1) { _completed.fetch_add(count, std::memory_order_relaxed); }
         void AdvanceSecondary(std::size_t count = 1) { _secondary.fetch_add(count, std::memory_order_relaxed); }
+        void SetDetail(std::string detail);
         void Finish(bool success = true);
 
     private:
@@ -55,7 +56,10 @@ namespace RunLogging
         std::chrono::steady_clock::time_point _started{ std::chrono::steady_clock::now() };
         bool _finished = false;
         std::mutex _mutex;
+        bool _detailChanged = false;
         std::condition_variable_any _wake;
+        mutable std::mutex _detailMutex;
+        std::string _detail;
         std::jthread _worker;
     };
 }

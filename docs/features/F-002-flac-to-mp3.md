@@ -15,7 +15,14 @@ loss of such metadata still fails the conversion.
 Non-FLAC audio is reported as skipped; companions are copied, except that the topmost folders containing audio
 but no FLAC (for example MP3-only albums) are omitted with all their files and listed in
 `conversion-audit.json` (`skippedUnchangedDirectories`), as in F-001. Preparation reports the same discovery and planning
-progress as FLAC conversion (F-001).
+progress as FLAC conversion (F-001). Execution also shares F-001's overall installed-file and current-track progress:
+one updating line across libraries, with the track's encoding percentage and verification/install stages.
+Real encoding measurements trigger immediate interactive redraws. Startup shows `Starting encoder` until the
+first measurement; very short encodes may finish without an intermediate percentage.
+Audio-specific encoder timestamps keep the percentage moving even when FFmpeg 7.1 reports no mux-wide time for
+files with cover art; these are real measurements, not estimated animation.
+Unchanged tag-key aliases (for example `COMMENT`/`DESCRIPTION`, `DATE`/`YEAR`) are not console warnings;
+they remain in the session log at warning level and in the preservation audit.
 Menu and CLI destination conflicts use the same concise summaries and file-only path details as FLAC conversion
 (F-001, F-010); enabling overwrite never bypasses duplicate output-path conflicts.
 
@@ -51,6 +58,11 @@ discard FLAC-only blocks, keep ReplayGain); every type can also skip the affecte
 ## Acceptance checks
 - [ ] `ctest --preset windows-debug -R mp3-conversion-integration` (or the matching Linux preset) passes.
 - [ ] Menu and CLI use `converted-mp3/<library-name>`; previous `MP3` output remains untouched.
+- [ ] Overall progress spans all selected libraries and counts only installed files; per-track encoding progress
+      does not bypass verification, and failure finishes with `[stopped]`.
+- [ ] Intermediate track measurements redraw before the one-second timer; encoder startup does not claim 0%.
+- [ ] Benign tag-key aliases and selected tag fixes stay out of the console, including with file logging disabled;
+      aliases remain in the session log at `info` and in `conversion-audit.json`.
 - [ ] Output probes as `mp3`, rate 44100/48000, channels = min(source, 2) only when downmix is set.
 - [ ] Sidecar passes `FlacMetadata::Verify` against the source.
 - [ ] With `MetadataSidecars.Format: "json"` the `.mp3.flac-metadata.json` archive decodes to the original bytes.

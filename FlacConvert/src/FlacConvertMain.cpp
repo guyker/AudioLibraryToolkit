@@ -1615,15 +1615,20 @@ int ConvertConfiguredLibraries(const std::vector<MediaDirectoryElement>& mediaDi
         return cancelledMenuResult(confirmation);
     }
     summary.Start();
+    std::size_t totalFiles = 0;
+    for (const auto& plan : plans) totalFiles += plan.audio.size() + plan.companions.size();
+    RunLogging::PhaseProgress overallProgress("Conversion overall", totalFiles);
     for (std::size_t index = 0; index < plans.size(); ++index) {
         spdlog::info("Conversion source folder: '{}'.", pathToUtf8(plans[index].input));
-        const int result = FolderConvert::ExecuteConversion(plans[index], &summary.conversion);
+        const int result = FolderConvert::ExecuteConversion(plans[index], &summary.conversion, &overallProgress);
         if (!summary.conversion.actualOutput.empty())
             summary.outputs[index] = summary.conversion.actualOutput;
         if (result != 0) {
+            overallProgress.Finish(false);
             return 1;
         }
     }
+    overallProgress.Finish();
     return 0;
 }
 

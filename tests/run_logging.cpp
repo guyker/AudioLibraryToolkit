@@ -11,6 +11,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #include <spdlog/spdlog.h>
@@ -18,6 +19,7 @@
 
 #ifdef _WIN32
 #include <process.h>
+#include <windows.h>
 #else
 #include <unistd.h>
 #endif
@@ -126,15 +128,79 @@ void checkMetadataBatchProgress()
         console.find("[done] Scan metadata:", completion + 1) == std::string::npos,
         "Metadata completion was missing or logged more than once.");
 }
+
+void checkPhaseDetail()
+{
+    RunLogging::PhaseProgress progress("Conversion overall test", 2);
+    progress.SetDetail("Track 1/2 Encoding: [=====     ] 50%");
+    progress.Advance();
+    progress.Finish(false);
+    progress.Finish();
 }
 
-int main()
+#ifdef _WIN32
+void checkInteractiveProgress()
+{
+    const auto output = GetStdHandle(STD_OUTPUT_HANDLE);
+    const auto position = [&] {
+        CONSOLE_SCREEN_BUFFER_INFO info{};
+        require(GetConsoleScreenBufferInfo(output, &info) != 0, "A real console is required.");
+        return info.dwCursorPosition;
+    };
+    RunLogging::PhaseProgress progress("Conversion overall", 2);
+    const auto initial = position();
+    const auto requireTrackPercentage = [&](const wchar_t* expected) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+        do {
+            wchar_t line[80]{};
+            DWORD copied = 0;
+            require(ReadConsoleOutputCharacterW(output, line, 80, { 0, initial.Y }, &copied) != 0,
+                "Could not read the live progress row.");
+            if (std::wstring_view(line, copied).find(expected) != std::wstring_view::npos) return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        } while (std::chrono::steady_clock::now() < deadline);
+        require(false, "An intermediate track percentage was not displayed before the next timer tick.");
+    };
+    progress.SetDetail("Track 1/2 [==        ] 25%");
+    requireTrackPercentage(L"25%");
+    progress.SetDetail("Track 1/2 [=====     ] 50% - " +
+        CommonUtils::path_to_utf8(fs::path(u8"album-\u97f3-\U0001f3b5-")) + std::string(200, 'x'));
+    requireTrackPercentage(L"50%");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    require(position().Y == initial.Y, "Long track progress wrapped onto another console row.");
+    spdlog::error("readable error during track progress");
+    const auto afterError = position();
+    require(afterError.Y == initial.Y + 1, "An error was not written on its own console row.");
+    progress.SetDetail("Track 2/2 Verifying metadata");
+    progress.Advance();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    require(position().Y == afterError.Y, "Progress after an error created another console row.");
+    progress.SetDetail({});
+    progress.Finish(false);
+}
+#endif
+}
+
+int main(int argc, char** argv)
 {
     auto testName = fs::path(u8"afc-log-\u97f3-");
     testName += std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
     const auto testDirectory = fs::temp_directory_path() / testName;
     try {
         require(fs::create_directory(testDirectory), "Could not create session-log test directory.");
+#ifdef _WIN32
+        if (argc == 2 && std::string_view(argv[1]) == "--interactive-progress") {
+            require(RunLogging::Start("progress-console-test", testDirectory), "Could not start progress logger.");
+            checkInteractiveProgress();
+            RunLogging::Finish(0);
+            spdlog::shutdown();
+            fs::remove_all(testDirectory);
+            return 0;
+        }
+#else
+        (void)argc;
+        (void)argv;
+#endif
 
         const auto oldLog = testDirectory / "afc-expired.log";
         const auto unrelatedLog = testDirectory / "unrelated.log";
@@ -167,6 +233,7 @@ int main()
             "File-only warnings should be retained at the info threshold.");
         checkFfmpegDiagnosticRouting();
         checkMetadataBatchProgress();
+        checkPhaseDetail();
         RunLogging::ShowProgress("transient progress 1/100");
         RunLogging::ShowProgress("transient progress 100/100");
         spdlog::warn("session warning retained");
@@ -180,6 +247,11 @@ int main()
         spdlog::shutdown();
 
         const auto infoContent = readFile(*infoLog);
+        require(infoContent.find("Conversion overall test: 1/2 files (50%) | Track 1/2 Encoding: [=====     ] 50%")
+                != std::string::npos && infoContent.find("[stopped]") != std::string::npos,
+            "Phase detail lost the current track or treated partial progress as completion.");
+        require(infoContent.find("Conversion overall test: 2/2") == std::string::npos,
+            "Encoding progress advanced the installed-file count.");
         require(infoContent.find("Request started: logging-test") != std::string::npos,
             "Session start was not recorded.");
         require(infoContent.find("session info retained") != std::string::npos &&

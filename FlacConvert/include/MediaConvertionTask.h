@@ -6,6 +6,10 @@
 #include <algorithm>
 #include <mutex>
 #include <future>
+#include <functional>
+#include <optional>
+#include <string_view>
+#include <utility>
 
 #include <chrono>
 #include <thread>
@@ -18,6 +22,7 @@ namespace fs = std::filesystem;
 
 class MediaConvertionTask {
 public:
+    using ProgressCallback = std::function<void(std::optional<double>, std::string_view)>;
     MediaConvertionTask() = delete;
     MediaConvertionTask(const fs::path sourcePath, const fs::path targetPath, const fs::path targetTMPPath,
         bool overwriteTarget = true, ConversionOptions options = {}) :
@@ -31,6 +36,7 @@ public:
     static bool InstallOutputFile(const fs::path& temporary, const fs::path& target, bool overwrite);
     const PreservationAudit::Result& GetPreservationAudit() const { return _audit; }
     const char* GetFailureType() const { return _failureType; }
+    void SetProgressCallback(ProgressCallback callback) { _progressCallback = std::move(callback); }
 
     virtual ~MediaConvertionTask() {}
 
@@ -47,6 +53,7 @@ protected:
     bool _preserveOriginalMetadata{ false };
     PreservationAudit::Result _audit;
     const char* _failureType{ "AUDIO" };
+    ProgressCallback _progressCallback;
 
     int _status;
 };

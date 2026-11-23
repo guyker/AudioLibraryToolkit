@@ -82,7 +82,7 @@ def pipe():
     return read, write
 
 
-def main(interrupted=False):
+def main(interrupted=False, progress=False):
     converter = Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="alt-console-") as directory:
         root = Path(directory)
@@ -95,7 +95,8 @@ def main(interrupted=False):
         input_read, input_write = pipe()
         output_read, output_write = pipe()
         console = wintypes.HANDLE()
-        result = kernel.CreatePseudoConsole(Coord(120, 40), input_read, output_write, 0, ctypes.byref(console))
+        result = kernel.CreatePseudoConsole(Coord(80 if progress else 120, 40),
+                                            input_read, output_write, 0, ctypes.byref(console))
         if result != 0:
             raise OSError(f"CreatePseudoConsole failed: HRESULT {result:#x}")
         size = ctypes.c_size_t()
@@ -110,7 +111,7 @@ def main(interrupted=False):
         startup.startup.flags = STARTF_USESTDHANDLES
         startup.attributes = ctypes.addressof(attributes)
         process = ProcessInfo()
-        command = ctypes.create_unicode_buffer(f'"{converter}"')
+        command = ctypes.create_unicode_buffer(f'"{converter}"' + (" --interactive-progress" if progress else ""))
         check(kernel.CreateProcessW(str(converter), command, None, None, False,
                                     CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
                                     ctypes.cast(block, ctypes.c_void_p), str(root),
@@ -146,6 +147,12 @@ def main(interrupted=False):
             assert written.value == len(data)
 
         try:
+            if progress:
+                assert kernel.WaitForSingleObject(process.process, 15000) == 0, "Progress test did not exit"
+                exit_code = wintypes.DWORD()
+                check(kernel.GetExitCodeProcess(process.process, ctypes.byref(exit_code)))
+                assert exit_code.value == 0, output.decode("utf-8", "replace")
+                return
             wait_for("Output directory:")
             if interrupted:
                 send("\x1a\r")
@@ -181,5 +188,8 @@ def main(interrupted=False):
 
 
 if __name__ == "__main__":
-    main()
-    main(interrupted=True)
+    if "--progress" in sys.argv:
+        main(progress=True)
+    else:
+        main()
+        main(interrupted=True)

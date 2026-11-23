@@ -100,6 +100,9 @@ if(WIN32)
     add_test(NAME config-windows-console
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/windows_console_setup.py"
             "$<TARGET_FILE:AudioLibraryToolkit>")
+    add_test(NAME progress-windows-console
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/windows_console_setup.py"
+            "$<TARGET_FILE:run_logging_test>" --progress)
 endif()
 add_test(NAME mp3-conversion-integration
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/mp3_conversion.py"

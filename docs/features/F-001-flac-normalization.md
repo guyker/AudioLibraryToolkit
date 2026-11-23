@@ -21,14 +21,23 @@ it may contain previous run results, and suggests a different output root or exp
 paths from different source items are reported separately and cannot be fixed by overwrite. Full conflict paths
 are in the session log, not listed on the console (F-010). Unrelated files or an empty existing output folder alone
 do not block conversion.
-The console reports conversion start, coarse progress and completion, along with meaningful warnings/errors. Before
+The console reports conversion start, overall and current-track progress, and completion, along with meaningful warnings/errors. Before
 the preview, preparation reports per-library `Conversion discovery` progress (entries visited and convertible audio
 found, total unknown) and `Conversion planning` progress (destinations checked of the known total, with ETA), updated
-every second on an interactive console and every five seconds when redirected. Before
+every second on an interactive console and every five seconds when redirected. Execution uses the same shared
+updating line: overall installed-file counts span all selected libraries; the current track shows an encoding bar
+and percentage, followed by verification/install stages. Real encoding measurements update the interactive line
+immediately, without waiting for the one-second phase timer. Until the first measurement, the track shows
+`Starting encoder`, not an artificial 0%; very short encodes can finish between FFmpeg reports.
+Companion copying and final verification are identified
+separately. Track encoding at 100% is not counted as installed until verification and installation succeed.
+Long names are clipped to the terminal width rather than wrapping; redirected output uses periodic snapshots.
+Before
 converting tracks in a different folder, it shows the full source album folder path; root-level tracks and disc
 subfolders use their own containing folder. It also signals when audio conversion ends and unchanged files are being
 copied. Per-file success details and expected generated encoder/vendor normalization are available at debug level in
-the session log (F-010); other preservation differences remain warnings, and `conversion-audit.json` retains every
+the session log (F-010). Tag aliases with unchanged values and selected tag fixes are file-only warnings; other
+preservation differences remain visible warnings, and `conversion-audit.json` retains every
 check (F-003).
 
 ## Entry points
@@ -62,6 +71,8 @@ check (F-003).
 - [ ] `conversion-audit.json` exists with `status: completed` (see F-003).
 - [ ] Before converting a folder's tracks, the console identifies the current source album folder without a line per track.
 - [ ] Console output stays concise while the session log retains detailed per-file and preservation diagnostics (F-010).
+- [ ] Multi-library conversion has one overall total; a failed track does not advance installed-file counts or
+      produce a successful progress completion.
 - [ ] A written folder retains unsupported audio, extensionless files and audio-free/empty subfolders byte-for-byte.
 - [ ] A folder with audio but no conversions is absent from output and listed once (topmost) with its counts.
 - [ ] The preview shows skipped-folder counts without individual paths; those paths remain available in the

@@ -268,6 +268,13 @@ void logAudit(const PlannedFileConversion& file, const PreservationAudit::Result
                     PreservationAudit::StatusName(entry.status),
                     entry.resource, entry.name, entry.detail);
             }
+            else if (entry.status == PreservationAudit::Status::Normalized && entry.resource == "tags" &&
+                (entry.detail == "All observed occurrences match. Container tag-key alias changed; values are unchanged." ||
+                 entry.detail.starts_with("Changed by the selected tag-issue resolution ("))) {
+                RunLogging::RecordWarning(fmt::format("Preservation {} [{} / {}]: {}",
+                    PreservationAudit::StatusName(entry.status),
+                    entry.resource, entry.name, entry.detail));
+            }
             else {
                 spdlog::warn("Preservation {} [{} / {}]: {}",
                     PreservationAudit::StatusName(entry.status),
@@ -279,12 +286,12 @@ void logAudit(const PlannedFileConversion& file, const PreservationAudit::Result
         CommonUtils::path_to_utf8(file.target), audit.entries.size(), differences, auditFilename);
 }
 
-// Phase progress that logs a final "[stopped]" line when a planning phase exits early.
-class PreparationProgress : public RunLogging::PhaseProgress
+// Ensure early returns report stopped, not completed, work.
+class ScopedPhaseProgress : public RunLogging::PhaseProgress
 {
 public:
     using PhaseProgress::PhaseProgress;
-    ~PreparationProgress() { Finish(false); }
+    ~ScopedPhaseProgress() { Finish(false); }
 };
 }
 
@@ -537,7 +544,7 @@ int FolderConvert::PrepareConversion(
             }
         };
         try {
-            PreparationProgress discovery("Conversion discovery", std::nullopt, "entries", "audio files");
+            ScopedPhaseProgress discovery("Conversion discovery", std::nullopt, "entries", "audio files");
             for (const auto& entry : fs::recursive_directory_iterator(inputRoot)) {
                 discovery.Advance();
                 if (PlatformUtils::IsLinkOrReparsePoint(entry.path())) {
@@ -688,7 +695,7 @@ int FolderConvert::PrepareConversion(
         return true;
     };
 
-    PreparationProgress planning("Conversion planning",
+    ScopedPhaseProgress planning("Conversion planning",
         plan.directories.size() + audio.size() + companions.size(), "destinations");
     for (const auto& directory : plan.directories) {
         planning.Advance();
@@ -804,7 +811,8 @@ bool FolderConvert::ReportDestinationConflicts(const FolderConversionPlan& plan)
     return true;
 }
 
-int FolderConvert::ExecuteConversion(const FolderConversionPlan& plan, ConversionProgress* progress)
+int FolderConvert::ExecuteConversion(const FolderConversionPlan& plan, ConversionProgress* progress,
+    RunLogging::PhaseProgress* overallProgress)
 {
     if (ReportDestinationConflicts(plan)) {
         spdlog::error("No conversion was started; source files and existing outputs are unchanged.");
@@ -824,19 +832,11 @@ int FolderConvert::ExecuteConversion(const FolderConversionPlan& plan, Conversio
     const std::size_t totalFiles = plan.audio.size() + plan.companions.size();
     spdlog::info("Conversion started: {} audio files, {} companion files, {} unchanged audio folders.",
         plan.audio.size(), plan.companions.size(), plan.skippedDirectories.size());
-    std::size_t completedFiles = 0;
-    std::size_t nextProgressPercent = 10;
-    const auto reportProgress = [&] {
-        ++completedFiles;
-        if (totalFiles == 0) return;
-        const auto percent = static_cast<std::size_t>(
-            static_cast<long double>(completedFiles) * 100.0L / totalFiles);
-        if (percent >= nextProgressPercent || completedFiles == totalFiles) {
-            spdlog::info("Conversion progress: {}/{} files ({}%).",
-                completedFiles, totalFiles, percent);
-            while (nextProgressPercent <= percent) nextProgressPercent += 10;
-        }
-    };
+    std::unique_ptr<ScopedPhaseProgress> localProgress;
+    if (!overallProgress) {
+        localProgress = std::make_unique<ScopedPhaseProgress>("Conversion overall", totalFiles);
+        overallProgress = localProgress.get();
+    }
     const auto outputPath = [&](const fs::path& path) {
         return outputDirectory.ResolvePath(path);
     };
@@ -856,6 +856,8 @@ int FolderConvert::ExecuteConversion(const FolderConversionPlan& plan, Conversio
             }
             else {
                 if (fs::remove(outputPath(markerFilename), ec) && !ec) {
+                    overallProgress->SetDetail({});
+                    if (localProgress) localProgress->Finish();
                     spdlog::info("Conversion completed: {} audio files converted, {} companion files copied; output '{}'; audit '{}'.",
                         plan.audio.size(), plan.companions.size(),
                         CommonUtils::path_to_utf8(actualOutput),
@@ -909,6 +911,7 @@ int FolderConvert::ExecuteConversion(const FolderConversionPlan& plan, Conversio
             }
         }
         if (progress) progress->actualOutput = actualOutput;
+        if (localProgress) localProgress->Finish(false);
         spdlog::error("Conversion failed ({}); output '{}'; in-progress marker {}.",
             errorType, CommonUtils::path_to_utf8(actualOutput),
             markerPresent ? "retained" : "could not be confirmed");
@@ -975,10 +978,23 @@ int FolderConvert::ExecuteConversion(const FolderConversionPlan& plan, Conversio
             conversion.source, anchoredOutputPath(relativeTarget, plan.output),
             anchoredOutputPath(relativeTemporary, plan.output),
             plan.overwrite, plan.options);
+        const auto trackLabel = fmt::format("Track {}/{} ", current, plan.audio.size());
+        const auto trackName = CommonUtils::path_to_utf8(conversion.source.lexically_relative(plan.input));
+        task->SetProgressCallback([&](std::optional<double> fraction, std::string_view stage) {
+            std::string detail = trackLabel;
+            if (fraction) {
+                const auto percent = static_cast<std::size_t>(*fraction * 100);
+                detail += "[" + CommonUtils::get_raw_progress_bar(100, percent, 10) +
+                    "] " + std::to_string(percent) + "%";
+            }
+            else detail += stage;
+            overallProgress->SetDetail(detail + " - " + trackName);
+        });
         const int run = task->Run();
         record.resources = task->GetPreservationAudit();
         if (run != 0) return finish(task->GetFailureType());
         record.status = "audited";
+        overallProgress->SetDetail(trackLabel + "Installing - " + trackName);
         if (task->PostRun() != 0) {
             record.status = "failed";
             return finish(task->GetFailureType());
@@ -990,13 +1006,15 @@ int FolderConvert::ExecuteConversion(const FolderConversionPlan& plan, Conversio
         if (progress) {
             ++progress->converted;
         }
-        reportProgress();
+        overallProgress->Advance();
     }
 
     if (plan.options.target == AudioTarget::Flac && !plan.companions.empty()) {
         spdlog::info("Audio conversion finished; copying {} unchanged files.", plan.companions.size());
     }
     for (const auto& copy : plan.companions) {
+        overallProgress->SetDetail("Copying companions - " +
+            CommonUtils::path_to_utf8(copy.source.lexically_relative(plan.input)));
         auto& record = files[current++];
         record.status = "failed";
         const auto relativeTarget = copy.target.lexically_relative(plan.output);
@@ -1052,7 +1070,7 @@ int FolderConvert::ExecuteConversion(const FolderConversionPlan& plan, Conversio
         spdlog::debug("Copied {}file unchanged: {}",
             plan.options.target == AudioTarget::Mp3 ? "companion " : "",
             CommonUtils::path_to_utf8(relativeTarget));
-        reportProgress();
+        overallProgress->Advance();
     }
 
     }
@@ -1064,6 +1082,7 @@ int FolderConvert::ExecuteConversion(const FolderConversionPlan& plan, Conversio
         spdlog::error("Conversion interrupted: {}", error.what());
         return finish("INCOMPLETE");
     }
+    overallProgress->SetDetail("Verifying installed outputs");
     for (auto& record : files) {
         const auto relativeTarget = record.file->target.lexically_relative(plan.output);
         if (record.status != "installed" ||

@@ -122,13 +122,24 @@ Menu actions log every active source library before preparation, and CLI command
 the current source library. Startup logs the absolute configuration path and notes that the file can be edited, including for
 help/version requests. `RunLogging` serializes transient progress with console log messages so warnings/errors
 end the progress line cleanly; transient redraws are not written to session logs or redirected output.
-Long phases use `RunLogging::PhaseProgress` (repair phases, conversion discovery and planning, scan discovery and scan
+Long phases use `RunLogging::PhaseProgress` (repair phases, conversion discovery/planning/execution, scan discovery and scan
 track collection): it logs the
-phase start, redraws one line every second when interactive, logs a snapshot every five seconds when redirected, and
+phase start, redraws one line every second and whenever track detail changes when interactive, logs a snapshot every
+five seconds when redirected, and
 logs a final `[done]`/`[stopped]` line with counts, elapsed time and, when the total is known, an ETA. Scan metadata
 progress spans every batch of a library rather than restarting per batch. Metadata batches redraw the shared
 console progress line, without cursor-up sequences or per-batch completion logs; only the final metadata batch
 logs completion. Batch-read details are debug-only, and catalog installation retains its separate result summary.
+Conversion execution uses one overall phase across all selected libraries (one library for CLI conversion), counting
+audio and companion files only after successful installation. `PhaseProgress::SetDetail` adds the current track's
+index, encoding bar/percentage, relative filename, or preparation/audio verification/metadata verification/install
+stage; companion copying and final installed-output verification are identified separately. Track encoding reaching
+100% is not counted as installation. Transient lines are clipped to the console width at a UTF-8 boundary to avoid
+wrapping, with a conservative 80-column fallback. Redirected output retains periodic snapshots and final
+`[done]`/`[stopped]` counts, without terminal controls.
+Benign tag-key alias normalization (unchanged values) and already-selected tag fixes are file-only warnings via
+`RunLogging::RecordWarning`; generated-field normalization remains debug-only. The audit retains every result,
+and actionable preservation warnings and errors remain visible.
 
 ## Key flows
 
@@ -176,7 +187,19 @@ Per file, `MediaConvertionTask::ConvertFile`:
 3. for MP3 or native FLAC sources (`FlacMetadata::AppliesTo`), writes and verifies a metadata sidecar to a
    temporary when the run's `ConversionOptions::sidecarFormat` is not `None` (K-038); with format `None` it
    only prepares a clean input when appended tags must be removed;
-4. runs `ffmpeg` via `runFFmpeg` with `conversionArguments` (K-056, K-017);
+4. runs `ffmpeg` via `runFFmpeg` with `conversionArguments` (K-056, K-017). `-progress pipe:1` reports mux-wide
+   timestamps through the captured child output. `-stats_enc_post:a:0 pipe:1` with format `afc_audio_time={t}`
+   additionally reports actual encoded audio packet timestamps: FFmpeg 7.1 can report mux-wide `out_time_us=N/A`
+   for MP3s with attached artwork. `FFmpegProgressOutput` consumes both kinds of protocol records, using audio
+   timestamps or valid `out_time_us` and the probed source duration for a clamped, non-decreasing track percentage.
+   Measured updates are throttled to once per 250 ms, with a final 100% report at encoder completion.
+   Without a verified
+   duration, encoding remains indeterminate until it ends. Encoder startup is also indeterminate: a percentage is
+   shown only after a real timestamp arrives. Measurements request an immediate interactive redraw, rather than
+   waiting for the phase's one-second timer; very short encodes may still finish between FFmpeg's reports.
+   Other child output stays in the detailed diagnostic log.
+   `MediaConvertionTask::SetProgressCallback` passes track progress/stages to the shared phase without changing
+   process exit checks, verification or installation;
 5. for MP3 output, `Mp3TagMetadata::WriteFromFlac` clears FFmpeg's text properties and writes source FLAC comment
    properties into ID3v2.4 using TagLib, avoiding duplicate alias frames. `DESCRIPTION`/`COMMENT` and
    `YEAR`/`DATE` values are combined without deduplication; artwork and chapter frames remain intact. Comments are

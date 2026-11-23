@@ -1,10 +1,13 @@
 #include "FlacMetadata.h"
 #include "PreservationAudit.h"
+#include "AppSettings.h"
+#include "MediaConvertionTask.h"
 
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <algorithm>
+#include <chrono>
 #include <functional>
 #include <vector>
 #include <stdexcept>
@@ -19,9 +22,63 @@ int wmain(int argc, wchar_t** argv) {
 int main(int argc, char** argv) {
 #endif
     try {
-        require(argc == 3, "Expected source FLAC and disposable scratch directory");
+        require(argc >= 3 && argc <= 5,
+            "Expected source FLAC, scratch directory, optional FFmpeg and optional live-progress FLAC");
         const std::filesystem::path source = argv[1];
         const std::filesystem::path scratch = argv[2];
+        if (argc >= 4) {
+            const std::filesystem::path progressSource = argc == 5 ? argv[4] : argv[1];
+            auto settings = AppSettingsJson::GetDefaultSettings();
+            settings.FLACSettings.ffmpeg_exe_name = std::filesystem::path(argv[3]).wstring();
+            const auto config = scratch / "conversion-progress-config.json";
+            settings.saveToFile(config);
+            std::string error;
+            require(AppSettingsJson::LoadForCommandLine(config, error) != nullptr,
+                "Could not load conversion-progress fixture configuration");
+            for (const auto target : { AudioTarget::Mp3, AudioTarget::Flac }) {
+                const auto extension = target == AudioTarget::Mp3 ? ".mp3" : ".flac";
+                const auto destination = scratch / (std::string("progress-output") + extension);
+                const auto temporary = scratch / (std::string("progress-temporary") + extension);
+                ConversionOptions options{};
+                options.target = target;
+                options.sidecarFormat = MetadataSidecarFormat::Binary;
+                MediaConvertionTask task(progressSource, destination, temporary, false, options);
+                std::vector<double> fractions;
+                std::vector<std::chrono::steady_clock::time_point> measurements;
+                std::vector<std::string> stages;
+                task.SetProgressCallback([&](std::optional<double> fraction, std::string_view stage) {
+                    require(!std::filesystem::exists(destination),
+                        "A track was installed before encoding and verification completed");
+                    if (stage == "Starting encoder") {
+                        require(!fraction, "Encoder startup claimed a measured percentage");
+                    }
+                    if (fraction) {
+                        fractions.push_back(*fraction);
+                        measurements.push_back(std::chrono::steady_clock::now());
+                    }
+                    if (stages.empty() || stages.back() != stage) stages.emplace_back(stage);
+                });
+                require(task.Run() == 0, "Conversion with progress failed");
+                require(fractions.size() >= 2 && fractions.back() == 1 &&
+                    std::is_sorted(fractions.begin(), fractions.end()),
+                    "FFmpeg progress was missing, unbounded, or moved backwards");
+                require(std::all_of(fractions.begin(), fractions.end(),
+                    [](double value) { return value >= 0 && value <= 1; }),
+                    "Encoding progress exceeded its percentage bounds");
+                if (argc == 5) {
+                    require(std::any_of(fractions.begin(), fractions.end(),
+                        [](double value) { return value > 0 && value < 1; }),
+                        "No intermediate encoding percentage arrived for the artwork-bearing track");
+                    require(measurements.back() - measurements.front() >= std::chrono::milliseconds(250),
+                        "Encoding timestamps were buffered until the end instead of arriving live");
+                }
+                require(stages == std::vector<std::string>{
+                    "Preparing", "Starting encoder", "Encoding", "Verifying audio", "Verifying metadata" },
+                    "Track progress did not distinguish encoding from verification");
+                require(task.PostRun() == 0 && std::filesystem::is_regular_file(destination),
+                    "Verified conversion with progress was not installed");
+            }
+        }
         const auto sidecar = scratch / "archive.flac-metadata";
         bool prepared = false;
         const auto binary = MetadataSidecarFormat::Binary;

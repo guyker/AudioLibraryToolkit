@@ -5,6 +5,8 @@
 #include <string>
 #include <cerrno>
 #include <charconv>
+#include <chrono>
+#include <cstdint>
 #include <cmath>
 #include <filesystem>
 #include <optional>
@@ -37,7 +39,73 @@ namespace fs = std::filesystem;
 
 namespace
 {
-void logFFmpegOutput(std::string& pending, std::string_view chunk, const fs::path& source)
+class FFmpegProgressOutput
+{
+public:
+    FFmpegProgressOutput(std::optional<double> duration, const MediaConvertionTask::ProgressCallback& callback)
+        : _duration(duration), _callback(callback) {}
+
+    bool Consume(std::string_view line)
+    {
+        // Machine progress shares the capture pipe with diagnostics; consume only protocol keys.
+        const auto separator = line.find('=');
+        if (separator == std::string_view::npos) return false;
+        const auto key = line.substr(0, separator);
+        const auto value = line.substr(separator + 1);
+        // Mux-wide out_time_us may be N/A for MP3s with attached pictures.
+        if (key == "afc_audio_time") {
+            double seconds = 0;
+            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), seconds);
+            if (parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size()) {
+                ReportTime(seconds);
+            }
+            return true;
+        }
+        if (key == "out_time_us") {
+            std::int64_t microseconds = 0;
+            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), microseconds);
+            if (parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size() && microseconds >= 0) {
+                ReportTime(static_cast<double>(microseconds) / 1000000.0);
+            }
+            return true;
+        }
+        if (key == "progress") {
+            if (value == "end") {
+                _fraction = 1.0;
+                _reported = true;
+                _lastReport = std::chrono::steady_clock::now();
+                if (_callback) _callback(_fraction, "Encoding");
+            }
+            else if (value == "continue" && !_reported && _callback) _callback(std::nullopt, "Encoding");
+            return value == "end" || value == "continue";
+        }
+        return key == "frame" || key == "fps" || key == "bitrate" || key == "total_size" ||
+            key == "out_time_ms" || key == "out_time" || key == "dup_frames" ||
+            key == "drop_frames" || key == "speed" ||
+            (key.starts_with("stream_") && key.ends_with("_q"));
+    }
+
+private:
+    void ReportTime(double seconds)
+    {
+        if (!_duration || !std::isfinite(*_duration) || *_duration <= 0 || !std::isfinite(seconds)) return;
+        _fraction = (std::max)(_fraction, std::clamp(seconds / *_duration, 0.0, 1.0));
+        const auto now = std::chrono::steady_clock::now();
+        if (_reported && now - _lastReport < std::chrono::milliseconds(250)) return;
+        if (_callback) _callback(_fraction, "Encoding");
+        _lastReport = now;
+        _reported = true;
+    }
+
+    std::optional<double> _duration;
+    const MediaConvertionTask::ProgressCallback& _callback;
+    double _fraction{ 0 };
+    bool _reported = false;
+    std::chrono::steady_clock::time_point _lastReport{};
+};
+
+void logFFmpegOutput(std::string& pending, std::string_view chunk, const fs::path& source,
+    FFmpegProgressOutput& progress)
 {
     pending.append(chunk);
     std::size_t newline = 0;
@@ -45,7 +113,7 @@ void logFFmpegOutput(std::string& pending, std::string_view chunk, const fs::pat
         auto line = pending.substr(0, newline);
         pending.erase(0, newline + 1);
         if (!line.empty() && line.back() == '\r') line.pop_back();
-        if (!line.empty()) {
+        if (!line.empty() && !progress.Consume(line)) {
             RunLogging::RecordWarning(fmt::format("FFmpeg [{}]: {}", CommonUtils::path_to_utf8(source), line));
         }
     }
@@ -57,10 +125,10 @@ void logFFmpegOutput(std::string& pending, std::string_view chunk, const fs::pat
     }
 }
 
-void flushFFmpegOutput(std::string& pending, const fs::path& source)
+void flushFFmpegOutput(std::string& pending, const fs::path& source, FFmpegProgressOutput& progress)
 {
     if (!pending.empty() && pending.back() == '\r') pending.pop_back();
-    if (!pending.empty()) {
+    if (!pending.empty() && !progress.Consume(pending)) {
         RunLogging::RecordWarning(fmt::format("FFmpeg [{}]: {}", CommonUtils::path_to_utf8(source), pending));
     }
 }
@@ -258,8 +326,10 @@ std::vector<std::string> conversionArguments(const ConversionOptions& options,
 }
 
 int runFFmpeg(const std::wstring& executable, const fs::path& source, const fs::path& destination,
-    bool overwrite, const std::vector<std::string>& conversion, const fs::path& diagnosticSource)
+    bool overwrite, const std::vector<std::string>& conversion, const fs::path& diagnosticSource,
+    std::optional<double> duration, const MediaConvertionTask::ProgressCallback& callback)
 {
+    FFmpegProgressOutput progress(duration, callback);
 #ifdef _WIN32
     std::vector<std::wstring> arguments{ executable, L"-nostdin", L"-xerror", L"-i",
         PlatformUtils::WindowsLongPath(source) };
@@ -267,7 +337,9 @@ int runFFmpeg(const std::wstring& executable, const fs::path& source, const fs::
         arguments.push_back(CommonUtils::utf8ToWstring(argument));
     }
     arguments.insert(arguments.end(), { overwrite ? L"-y" : L"-n", L"-v", L"warning",
-        L"-nostats", PlatformUtils::WindowsLongPath(destination) });
+        L"-nostats", L"-stats_period", L"0.25", L"-progress", L"pipe:1",
+        L"-stats_enc_post:a:0", L"pipe:1", L"-stats_enc_post_fmt:a:0", L"afc_audio_time={t}",
+        PlatformUtils::WindowsLongPath(destination) });
     // The Windows CRT joins spawn arguments into a command line without quoting them.
     std::vector<std::wstring> quotedArguments;
     quotedArguments.reserve(arguments.size());
@@ -336,9 +408,9 @@ int runFFmpeg(const std::wstring& executable, const fs::path& source, const fs::
             break;
         }
         if (bytesRead == 0) break;
-        logFFmpegOutput(pending, std::string_view(buffer, bytesRead), diagnosticSource);
+        logFFmpegOutput(pending, std::string_view(buffer, bytesRead), diagnosticSource, progress);
     }
-    flushFFmpegOutput(pending, diagnosticSource);
+    flushFFmpegOutput(pending, diagnosticSource, progress);
     CloseHandle(readPipe);
 
     const DWORD waitResult = WaitForSingleObject(process.hProcess, INFINITE);
@@ -369,7 +441,9 @@ int runFFmpeg(const std::wstring& executable, const fs::path& source, const fs::
     std::vector<std::string> arguments{ executableUtf8, "-nostdin", "-xerror", "-i", source.string() };
     arguments.insert(arguments.end(), conversion.begin(), conversion.end());
     arguments.insert(arguments.end(), {
-        overwrite ? "-y" : "-n", "-v", "warning", "-nostats", destination.string() });
+        overwrite ? "-y" : "-n", "-v", "warning", "-nostats",
+        "-stats_period", "0.25", "-progress", "pipe:1",
+        "-stats_enc_post:a:0", "pipe:1", "-stats_enc_post_fmt:a:0", "afc_audio_time={t}", destination.string() });
     std::vector<char*> pointers;
     pointers.reserve(arguments.size() + 1);
     for (const auto& argument : arguments) {
@@ -416,9 +490,10 @@ int runFFmpeg(const std::wstring& executable, const fs::path& source, const fs::
             break;
         }
         if (bytesRead == 0) break;
-        logFFmpegOutput(pending, std::string_view(buffer, static_cast<std::size_t>(bytesRead)), diagnosticSource);
+        logFFmpegOutput(pending, std::string_view(buffer, static_cast<std::size_t>(bytesRead)),
+            diagnosticSource, progress);
     }
-    flushFFmpegOutput(pending, diagnosticSource);
+    flushFFmpegOutput(pending, diagnosticSource, progress);
     close(diagnosticPipe[0]);
 
     int status = 0;
@@ -449,6 +524,7 @@ int runFFmpeg(const std::wstring& executable, const fs::path& source, const fs::
 
 int MediaConvertionTask::ConvertFile()
 {
+    if (_progressCallback) _progressCallback(std::nullopt, "Preparing");
     const auto metadata = FFmpeg::GetFFprobeMetadataAPI(_sourcePath);
     if (!isAtLeastCDQuality(_sourcePath, metadata)) {
         _status = -1;
@@ -570,8 +646,9 @@ int MediaConvertionTask::ConvertFile()
     spdlog::debug("Processing: {}", CommonUtils::path_to_utf8(_sourcePath));
     _failureType = "AUDIO";
     const auto arguments = conversionArguments(_options, metadata);
+    if (_progressCallback) _progressCallback(std::nullopt, "Starting encoder");
     const int result = runFFmpeg(executable, preparedInput ? temporaryInputPath(_targetTMPPath) : _sourcePath,
-        _targetTMPPath, false, arguments, _sourcePath);
+        _targetTMPPath, false, arguments, _sourcePath, metadata.format.duration, _progressCallback);
     if (preparedInput) {
         removeTemporary(temporaryInputPath(_targetTMPPath));
     }
@@ -587,6 +664,7 @@ int MediaConvertionTask::ConvertFile()
         _status = -1;
         return _status;
     }
+    if (_progressCallback) _progressCallback(std::nullopt, "Verifying audio");
     if (_options.target == AudioTarget::Mp3) {
         const auto output = FFmpeg::GetFFprobeMetadataAPI(_targetTMPPath);
         const auto audio = std::find_if(output.streams.begin(), output.streams.end(),
@@ -630,6 +708,7 @@ int MediaConvertionTask::ConvertFile()
     }
 
     _failureType = "PRESERVATION";
+    if (_progressCallback) _progressCallback(std::nullopt, "Verifying metadata");
     if (_options.target == AudioTarget::Mp3) {
         std::string tagError;
         if (!Mp3TagMetadata::WriteFromFlac(_sourcePath, _targetTMPPath, _options.tagIssues, tagError)) {

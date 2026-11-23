@@ -18,7 +18,8 @@ On failure the report is still written and, if this run created the library fold
 `ERROR_<AUDIO|PRESERVATION|COPY|IO>_<name>` or `INCOMPLETE_<name>`. If the rename is not possible (for example,
 because the prefixed name exceeds the Windows component-length limit), the report and marker remain at the original
 output path and the failure is logged. Expected generated encoder/vendor normalization is detailed in the per-request
-session log rather than repeated as a console warning; the audit still records all such differences (F-010).
+session log rather than repeated as a console warning. Unchanged tag-key aliases and already-selected tag fixes
+are file-only warnings; the audit still records all such differences (F-010).
 
 ## Entry points
 - `FolderConvert.cpp#FolderConvert::ExecuteConversion` (marker, finish, rename), `FolderConvert.cpp#writeAudit`

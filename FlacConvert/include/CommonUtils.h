@@ -232,6 +232,7 @@ namespace CommonUtils
     void show_circular_progress(std::string str = "");
     void show_progress_bar(std::shared_ptr<ProgressBarInfo> progressInfoPtr, ProgressBarType progressType = ProgressBarType::Progress);
     std::string format_progress_bar(const ProgressBarInfo& progressInfo, ProgressBarType progressType);
+    std::string get_raw_progress_bar(std::size_t total, std::size_t count, int barWidth);
 
     inline std::string utf8string_to_string(const std::u8string& u8str) {
         return std::string(u8str.begin(), u8str.end());

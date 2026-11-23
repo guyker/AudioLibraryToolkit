@@ -27,7 +27,13 @@ def main():
                 "-map", "0:a", "-map", "1:v", "-c:a", "flac", "-sample_fmt", "s32",
                 "-bits_per_raw_sample", "24", "-c:v", "copy", "-disposition:v", "attached_pic",
                 "-metadata", "title=Native regression", fixture)
-            run(executable, fixture, root)
+            progress_fixture = root / "progress-with-cover.flac"
+            run(ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i",
+                "sine=frequency=997:sample_rate=48000:duration=900", "-i", cover,
+                "-map", "0:a", "-map", "1:v", "-c:a", "flac", "-sample_fmt", "s32",
+                "-bits_per_raw_sample", "24", "-c:v", "copy", "-disposition:v", "attached_pic",
+                progress_fixture)
+            run(executable, fixture, root, ffmpeg, progress_fixture)
         elif kind == "warnings":
             sine = root / "sine.wav"
             silence = root / "silence.wav"

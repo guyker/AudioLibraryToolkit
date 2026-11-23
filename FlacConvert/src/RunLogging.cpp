@@ -87,9 +87,21 @@ public:
     {
         std::lock_guard lock(_mutex);
         if (!PlatformUtils::IsStdoutInteractive()) return;
-        const auto padding = _lineLength > message.size() ? _lineLength - message.size() : 0;
-        std::cout << '\r' << message << std::string(padding, ' ') << std::flush;
-        _lineLength = message.size();
+        auto display = message;
+        for (auto& character : display) {
+            if (static_cast<unsigned char>(character) < 32 || character == '\x7f') character = '?';
+        }
+        const auto limit = PlatformUtils::ConsoleWidth() - 1;
+        if (display.size() > limit) {
+            // A byte budget conservatively bounds UTF-8 columns; never split a code point.
+            auto end = limit;
+            while (end > 0 && (static_cast<unsigned char>(display[end]) & 0xc0) == 0x80) --end;
+            display.resize(end);
+        }
+        const auto previousLength = (std::min)(_lineLength, limit);
+        const auto padding = previousLength > display.size() ? previousLength - display.size() : 0;
+        std::cout << '\r' << display << std::string(padding, ' ') << std::flush;
+        _lineLength = display.size();
     }
     void Clear()
     {
@@ -101,7 +113,8 @@ private:
     void ClearLine()
     {
         if (_lineLength == 0) return;
-        std::cout << '\r' << std::string(_lineLength, ' ') << '\r' << std::flush;
+        std::cout << '\r' << std::string((std::min)(_lineLength, PlatformUtils::ConsoleWidth() - 1), ' ')
+            << '\r' << std::flush;
         _lineLength = 0;
     }
     std::shared_ptr<spdlog::sinks::sink> _sink;
@@ -384,8 +397,11 @@ RunLogging::PhaseProgress::PhaseProgress(std::string label, std::optional<std::s
     _worker = std::jthread([this, interactive](std::stop_token stop) {
         std::unique_lock lock(_mutex);
         unsigned ticks = 0;
-        while (!_wake.wait_for(lock, stop, std::chrono::seconds(1), [] { return false; })) {
+        while (!stop.stop_requested()) {
+            _wake.wait_for(lock, stop, std::chrono::seconds(1),
+                [this, interactive] { return interactive && _detailChanged; });
             if (stop.stop_requested()) break;
+            _detailChanged = false;
             if (interactive) {
                 ShowProgress(Message());
             }
@@ -399,6 +415,20 @@ RunLogging::PhaseProgress::PhaseProgress(std::string label, std::optional<std::s
 RunLogging::PhaseProgress::~PhaseProgress()
 {
     Stop();
+}
+
+void RunLogging::PhaseProgress::SetDetail(std::string detail)
+{
+    {
+        std::lock_guard lock(_detailMutex);
+        if (_detail == detail) return;
+        _detail = std::move(detail);
+    }
+    {
+        std::lock_guard lock(_mutex);
+        _detailChanged = true;
+    }
+    _wake.notify_all();
 }
 
 void RunLogging::PhaseProgress::Finish(bool success)
@@ -432,6 +462,10 @@ std::string RunLogging::PhaseProgress::Message() const
     else message += " (total unknown)";
     if (!_secondaryUnit.empty()) {
         message += ", " + std::to_string(_secondary.load(std::memory_order_relaxed)) + " " + _secondaryUnit;
+    }
+    {
+        std::lock_guard lock(_detailMutex);
+        if (!_detail.empty()) message += " | " + _detail;
     }
     const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - _started).count();

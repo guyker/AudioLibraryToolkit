@@ -428,6 +428,26 @@ class ConversionTests(unittest.TestCase):
             self.assertEqual(entries[0]["status"], "Preserved")
         self.assertFalse(list(self.destination().glob("*.flac-metadata*")))
 
+    def test_mp3_benign_alias_warnings_are_file_only_at_info(self):
+        self.tag_issue_source(self.plain, [b"TITLE=Fixture", b"DESCRIPTION=Note", b"YEAR=2020"])
+        result = self.convert("--log-level", "info", config=self.sidecar_config(ConvertToMp3="disabled"))
+        detail = "Container tag-key alias changed; values are unchanged."
+        self.assertNotIn(detail, result.stdout)
+        self.assertIn(detail, self.session_log(result))
+        resources = self.audit(self.destination())["files"][0]["resources"]
+        for key in ("comment", "date"):
+            self.assertTrue(any(item["name"] == key and item["status"] == "Normalized" and
+                                detail in item["detail"] for item in resources), key)
+        for protocol in ("out_time_us=", "progress=end", "total_size="):
+            self.assertNotIn(protocol, result.stdout + self.session_log(result))
+        self.assertRegex(result.stdout, r"Conversion overall: 1/1 files \(100%\), .* \[done\]")
+        config = self.sidecar_config(ConvertToMp3="disabled")
+        settings = json.loads(config.read_text(encoding="utf-8"))
+        settings["LogLevel"] = 6
+        config.write_text(json.dumps(settings), encoding="utf-8")
+        result = self.convert("--overwrite", config=config)
+        self.assertNotIn(detail, result.stdout + self.session_log(result))
+
     def test_mp3_taglib_preserves_repeated_comment_aliases_and_text_values(self):
         fields = ["TITLE=Fixture", "COMMENT=Note", "COMMENT=Note", "DESCRIPTION=Other note",
                   "ENCODEDBY=Encoder One", "ENCODEDBY=Encoder Two",
@@ -1996,6 +2016,10 @@ class ConversionTests(unittest.TestCase):
         result = self.legacy(libraries)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assert_summary(result, "Completed", 2, "audio files", copied=1)
+        self.assertEqual(result.stdout.count("Conversion overall: 0/3 files"), 1)
+        self.assertRegex(result.stdout, r"Conversion overall: 3/3 files \(100%\), .* \[done\]")
+        self.assertNotIn("\x1b", result.stdout)
+        self.assertNotIn("Conversion progress:", result.stdout)
         target = self.output / "converted-mp3" / "Library \u97f3" / self.mp3().name
         self.assertTrue(target.exists())
         self.assertEqual(Path(str(target) + ".flac-metadata").read_bytes(), self.prefix)
@@ -2719,6 +2743,8 @@ class ConversionTests(unittest.TestCase):
         result = self.legacy(libraries)
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assert_summary(result, "Partially completed", 1, "audio files", copied=1, failed=1)
+        self.assertRegex(result.stdout, r"Conversion overall: 2/3 files \(66%\).* \[stopped\]")
+        self.assertNotRegex(result.stdout, r"Conversion overall:.* \[done\]")
         first_output = self.output / "converted-mp3" / "First"
         self.assertTrue((first_output / self.mp3().name).exists())
         self.assertEqual((first_output / "cover.png").read_bytes(), self.image)

@@ -13,6 +13,12 @@ progress control sequences. Scan folder discovery and track collection report co
 elapsed time and (for track collection) an ETA on one updating line, with periodic snapshots when redirected; scan
 metadata progress spans all batches of a library on one updating line. Intermediate metadata batches do not
 print completion lines; only the final metadata batch logs completion, separate from catalog installation.
+Conversion uses the same updating-line mechanism for overall installed-file progress across libraries and the
+current track's encoding percentage/verification stage (F-001/F-002). Track detail changes wake the interactive
+display immediately instead of waiting for its one-second timer; redirected snapshots keep their five-second
+cadence. Long names are clipped safely to the terminal
+width instead of wrapping, and errors clear the transient line before printing. Redirected conversion output uses
+five-second snapshots and a final `[done]`/`[stopped]` record, not a line for every track or percentage change.
 Before any menu action prepares work, it logs all active source library paths. CLI commands log the input folder,
 explicitly labeled as catalog JSON for duplicates/database import. Conversion and scan library transitions and
 repair preparation identify the current source folder, including before long preprocessing begins. Every invocation
@@ -34,6 +40,9 @@ threshold; warnings are not echoed to the console when their file logging is dis
 Conversion audit and scan-report JSON remain the authoritative structured records; session logs supplement them. TagLib and FFmpeg diagnostics are
 logged with the file path when known. FFmpeg warnings without file context remain explicitly unattributed rather than
 being assigned to a track.
+Preservation warnings for unchanged tag-key aliases and already-selected tag fixes are also file-only, at warning
+level; they remain available with `--log-level info`. They are not echoed when file logging is disabled. Other
+actionable preservation warnings and errors remain visible, and the audit retains all resource classifications.
 
 Inactive application-owned logs older than 30 days are removed; the logger also prunes oldest inactive logs when their combined size exceeds
 1 GiB. Active requests are not pruned. If a session log cannot be created, the request continues with console logging
@@ -65,6 +74,8 @@ and reports the failure.
       and disabling file logging does not turn warnings into console output.
 - [ ] Scan warnings/errors remain in `scan-report.json`; unscoped FFmpeg entries remain unattributed and are not lost from the session log.
 - [ ] Redirected scan output contains no terminal control sequences.
+- [ ] Conversion shares one overall total across selected libraries and shows current-track encoding progress
+      without per-track log spam; narrow-console redraws do not wrap and errors remain readable.
 - [ ] Multi-batch metadata scans update one shared line, without per-batch completion lines or cursor-up sequences;
       errors remain readable and only the final metadata batch reports metadata completion.
 - [ ] Log-file creation failure is explicit and does not prevent the requested operation.

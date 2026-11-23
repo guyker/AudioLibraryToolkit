@@ -9,6 +9,7 @@
 #include "ConversionOptions.h"
 
 namespace fs = std::filesystem;
+namespace RunLogging { class PhaseProgress; }
 
 struct ScanInfo {
     long folders_count;
@@ -86,7 +87,8 @@ public:
     // Reports blocked plans with console summaries and file-only paths; returns whether execution is blocked.
     static bool ReportDestinationConflicts(const FolderConversionPlan& plan);
     // Optional counters accumulate across plans, only after successful installation.
-    static int ExecuteConversion(const FolderConversionPlan& plan, ConversionProgress* progress = nullptr);
+    static int ExecuteConversion(const FolderConversionPlan& plan, ConversionProgress* progress = nullptr,
+        RunLogging::PhaseProgress* overallProgress = nullptr);
     
     static int ConverAudioFolder(const std::filesystem::path& directory, const ScanInfo scanInfo, bool bAsync);
     //static int ConverAudioFolder(const std::filesystem::path& directory, const ScanInfo scanInfo, bool bAsync = false);

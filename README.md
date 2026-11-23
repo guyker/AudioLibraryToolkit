@@ -223,8 +223,9 @@ variable or pass `-DFFmpeg_ROOT=<path>` for a matching shared FFmpeg SDK contain
 directories; by default CMake checks
 `external\ffmpeg\ffmpeg-master-latest-win64-gpl-shared\`. The SDK must include the five FFmpeg import
 libraries and runtime DLLs used by the application.
-For conversion, `ffmpeg.exe` must also be on `PATH` or selected by the `FLACSettings.ffmpeg_exe_name`
-configuration setting; installing the application does not install the FFmpeg executable.
+For conversion, FFmpeg 6.0+ must also be on `PATH` or selected by the `FLACSettings.ffmpeg_exe_name`
+configuration setting; installing the application does not install the FFmpeg executable. Conversion progress
+uses the audio-encoder statistics options (`-stats_enc_post` and `-stats_enc_post_fmt`) available in these versions.
 
 On Linux, the supported CI reference is Ubuntu 24.04 x86-64 with GCC 13. Install FFmpeg runtime tools and
 development packages for libavformat, libavcodec, libavfilter, libavutil and libswresample, plus pkg-config.
@@ -424,6 +425,10 @@ Before installation, conversions compare observed tags (including native FLAC co
 attached picture payloads/descriptors, chapters and opaque FLAC metadata. Required metadata archives are
 verified byte-for-byte against the original. Companion files are compared byte-for-byte before installation.
 Each installed audio file logs a compact summary and resource differences, without dumping tag values.
+During conversion, one updating line shows overall installed-file progress across the selected libraries and
+the current track's encoding percentage, then verification/installation stages. Long filenames are clipped
+instead of wrapping; redirected output uses periodic snapshots. Unchanged tag-key aliases and selected tag fixes
+are kept in the session log and audit rather than repeated as console warnings.
 `conversion-audit.json` in the library output contains per-file installation states, resource classifications,
 counts and the actual output location. Unattempted files are listed explicitly. For FLAC, unchanged file copies
 include unsupported audio; `skippedUnchangedDirectories` lists folders omitted because they contain audio but nothing

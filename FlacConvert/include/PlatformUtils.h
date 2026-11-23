@@ -58,6 +58,8 @@ namespace PlatformUtils {
 	void OpenDirectory(const std::filesystem::path& path);
 
 	bool IsStdoutInteractive();
+	// Visible console columns, or 80 when the terminal cannot report its width.
+	std::size_t ConsoleWidth();
 	bool IsStdinInteractive();
 	bool ReadUtf8Line(std::istream& input, std::string& line);
 	// True when stdout is an interactive terminal that accepts ANSI/VT control sequences (independent of NO_COLOR).
