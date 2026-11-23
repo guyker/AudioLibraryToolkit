@@ -3,7 +3,8 @@ id: K-036
 kind: decision
 title: "Skip unchanged FLAC audio folders and list them in the audit"
 area: [FlacConvert]
-status: active
+status: superseded
+superseded_by: K-066
 created: 2026-11-11
 reviewed: 2026-11-23
 cites:

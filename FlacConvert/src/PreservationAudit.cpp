@@ -2,6 +2,7 @@
 
 #include "CommonUtils.h"
 #include "FFmpegWrapper.h"
+#include "Mp3TagMetadata.h"
 
 #include <algorithm>
 #include <array>
@@ -751,7 +752,7 @@ bool isAudioDerivedTag(const std::string& key)
 
 void compareTags(PreservationAudit::Result& result, const Media& source, const Media& output,
     const NativeMetadata* sourceNative, const NativeMetadata* outputNative,
-    bool outputIsMp3, bool verifiedArchive)
+    bool verifiedArchive)
 {
     TagMap sourceTags = source.tags;
     TagMap outputTags = output.tags;
@@ -810,25 +811,10 @@ void compareTags(PreservationAudit::Result& result, const Media& source, const M
         const auto& sourceValues = sourceFound == sourceTags.end() ? empty : sourceFound->second;
         const auto& outputValues = outputFound == outputTags.end() ? empty : outputFound->second;
         const bool equal = sourceValues == outputValues;
-        const bool repeated = sourceValues.size() > 1 || outputValues.size() > 1;
-
         if (isGeneratedTag(key) || isGeneratedMp4Tag(source, key, sourceValues)) {
             if (!equal) {
                 addEntry(result, PreservationAudit::Status::Normalized, "tags", key,
                     "Generated encoder/vendor or MP4 container/stream metadata differs; informational only.");
-            }
-            continue;
-        }
-
-        if (equal && outputIsMp3 && repeated) {
-            if (verifiedArchive) {
-                addEntry(result, PreservationAudit::Status::SidecarOnly, "tags", key,
-                    "FFmpeg's MP3 dictionary cannot prove repeated ID3 frame multiplicity; "
-                    "the original occurrences are retained in the verified archive.");
-            }
-            else {
-                addEntry(result, PreservationAudit::Status::NotVerified, "tags", key,
-                    "FFmpeg's MP3 dictionary cannot prove repeated ID3 frame multiplicity.", true);
             }
             continue;
         }
@@ -1130,8 +1116,24 @@ Result Compare(const std::filesystem::path& source,
             addFatalNotVerified(result, "media", "temporary output", error);
             return result;
         }
-        if (outputMedia.audioCodec == AV_CODEC_ID_MP3)
+        if (outputMedia.audioCodec == AV_CODEC_ID_MP3) {
+            Mp3TagMetadata::TagMap id3Tags;
+            if (!Mp3TagMetadata::Read(temporaryOutput, id3Tags, error)) {
+                addFatalNotVerified(result, "media-metadata", "TagLib ID3", error);
+                return result;
+            }
+            outputMedia.tags.clear();
+            for (const auto& [key, values] : id3Tags) {
+                for (const auto& value : values) {
+                    addTag(outputMedia.tags, key, value);
+                }
+            }
+            for (auto& [key, values] : outputMedia.tags) {
+                (void)key;
+                std::sort(values.begin(), values.end());
+            }
             readMp3PictureDescriptors(temporaryOutput, outputMedia.pictures);
+        }
 
         NativeMetadata sourceNativeStorage;
         NativeMetadata outputNativeStorage;
@@ -1168,7 +1170,7 @@ Result Compare(const std::filesystem::path& source,
                 "only observed fields, chapters and attached pictures are compared.");
         }
         compareTags(result, sourceMedia, outputMedia, sourceNative, outputNative,
-            outputMedia.audioCodec == AV_CODEC_ID_MP3, hasVerifiedFlacArchive);
+            hasVerifiedFlacArchive);
         comparePictures(result, sourceMedia.pictures, outputMedia.pictures, hasVerifiedFlacArchive);
         compareChapters(result, sourceMedia.chapters, outputMedia.chapters, hasVerifiedFlacArchive);
         if (sourceNative != nullptr) {

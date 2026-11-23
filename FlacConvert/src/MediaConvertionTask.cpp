@@ -30,6 +30,8 @@
 #include "PlatformUtils.h"
 #include "FlacMetadata.h"
 #include "MediaTrack.h"
+#include "Mp3TagMetadata.h"
+#include "RunLogging.h"
 
 namespace fs = std::filesystem;
 
@@ -44,13 +46,13 @@ void logFFmpegOutput(std::string& pending, std::string_view chunk, const fs::pat
         pending.erase(0, newline + 1);
         if (!line.empty() && line.back() == '\r') line.pop_back();
         if (!line.empty()) {
-            spdlog::warn("FFmpeg [{}]: {}", CommonUtils::path_to_utf8(source), line);
+            RunLogging::RecordWarning(fmt::format("FFmpeg [{}]: {}", CommonUtils::path_to_utf8(source), line));
         }
     }
     constexpr std::size_t maxPendingBytes = 8192;
     while (pending.size() >= maxPendingBytes) {
-        spdlog::warn("FFmpeg [{}]: {}", CommonUtils::path_to_utf8(source),
-            pending.substr(0, maxPendingBytes));
+        RunLogging::RecordWarning(fmt::format("FFmpeg [{}]: {}", CommonUtils::path_to_utf8(source),
+            pending.substr(0, maxPendingBytes)));
         pending.erase(0, maxPendingBytes);
     }
 }
@@ -59,7 +61,7 @@ void flushFFmpegOutput(std::string& pending, const fs::path& source)
 {
     if (!pending.empty() && pending.back() == '\r') pending.pop_back();
     if (!pending.empty()) {
-        spdlog::warn("FFmpeg [{}]: {}", CommonUtils::path_to_utf8(source), pending);
+        RunLogging::RecordWarning(fmt::format("FFmpeg [{}]: {}", CommonUtils::path_to_utf8(source), pending));
     }
 }
 
@@ -628,6 +630,19 @@ int MediaConvertionTask::ConvertFile()
     }
 
     _failureType = "PRESERVATION";
+    if (_options.target == AudioTarget::Mp3) {
+        std::string tagError;
+        if (!Mp3TagMetadata::WriteFromFlac(_sourcePath, _targetTMPPath, tagError)) {
+            spdlog::error("Cannot write MP3 metadata for '{}': {}",
+                CommonUtils::path_to_utf8(_sourcePath), tagError);
+            removeTemporary(_targetTMPPath);
+            if (_preserveOriginalMetadata) {
+                removeTemporary(sidecarPath(_targetTMPPath, _options.sidecarFormat));
+            }
+            _status = -1;
+            return _status;
+        }
+    }
     const bool verifiedArchive = _preserveOriginalMetadata &&
         FlacMetadata::Verify(_sourcePath, sidecarPath(_targetTMPPath, _options.sidecarFormat), _options.sidecarFormat);
     if (_preserveOriginalMetadata && !verifiedArchive) {

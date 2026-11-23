@@ -16,6 +16,11 @@ AAC `.m4a` sources are exempt only from the bit-depth check because AAC does not
 depth; they still require a verified sample rate of at least 44.1 kHz and produce a warning that lossy-to-FLAC
 conversion cannot restore lost quality.
 Without `--overwrite`, existing targets are never replaced. Exit code 0 only if every planned item was preserved.
+If planned destinations already exist, the console identifies the output folder and conflict count, explains that
+it may contain previous run results, and suggests a different output root or explicit overwrite. Duplicate output
+paths from different source items are reported separately and cannot be fixed by overwrite. Full conflict paths
+are in the session log, not listed on the console (F-010). Unrelated files or an empty existing output folder alone
+do not block conversion.
 The console reports conversion start, coarse progress and completion, along with meaningful warnings/errors. Before
 the preview, preparation reports per-library `Conversion discovery` progress (entries visited and convertible audio
 found, total unknown) and `Conversion planning` progress (destinations checked of the known total, with ETA), updated
@@ -35,7 +40,7 @@ check (F-003).
 ## Design and knowledge
 - DESIGN: `FlacConvert/DESIGN.md` → Key flows / Conversion; Contracts and invariants
 - K-041 install after success, K-048 codec-aware AAC quality gate, K-056 FFmpeg argument vector, K-038 sidecar policy,
-  K-032 configured vs canonical paths, K-065 operation-based output layout, K-036 complete folders, K-058 source link rejection
+  K-032 configured vs canonical paths, K-065 operation-based output layout, K-066 complete folders, K-058 source link rejection
 
 ## Acceptance checks
 - [ ] Source tree byte-identical before and after (hash all files).
@@ -44,6 +49,10 @@ check (F-003).
 - [ ] A 24-bit/96 kHz source converts; an 8-bit or 22.05 kHz source is rejected with a non-zero exit.
 - [ ] AAC `.m4a` at 44.1 kHz converts with a lossy-quality warning; AAC below 44.1 kHz is rejected.
 - [ ] Re-running without `--overwrite` on an existing output fails without changing it.
+- [ ] Large existing-destination and duplicate-path lists produce only console summaries; every conflicting path
+      is retained in the session log when error-level logging is enabled, even with `--log-level info`.
+- [ ] If detailed file logging is disabled or unavailable, conflicts still block execution and the console says
+      that full paths are unavailable instead of claiming they were logged.
 - [ ] Non-ASCII and >260-character paths convert on Windows.
 - [ ] A near-limit Windows output directory succeeds when marker and temporary filenames would exceed `MAX_PATH`.
 - [ ] Menu conversion accepts extended-prefix output paths with an FFmpeg launcher shim (see DESIGN's output anchoring).
@@ -55,6 +64,8 @@ check (F-003).
 - [ ] Console output stays concise while the session log retains detailed per-file and preservation diagnostics (F-010).
 - [ ] A written folder retains unsupported audio, extensionless files and audio-free/empty subfolders byte-for-byte.
 - [ ] A folder with audio but no conversions is absent from output and listed once (topmost) with its counts.
+- [ ] The preview shows skipped-folder counts without individual paths; those paths remain available in the
+      debug-level session log, including when the preview is cancelled.
 - [ ] Libraries without conversions write only the report (listing `"."`) without launching the encoder.
 - [ ] Copy failure retains the failure marker/report and reports unattempted copies as not installed.
 - [ ] Any source file or directory symlink/reparse point fails during preparation before output is written.

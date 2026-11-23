@@ -7,6 +7,7 @@
 #include <utility>
 #include <spdlog/spdlog.h>
 #include "PlatformUtils.h"
+#include "RunLogging.h"
 #include <cmath>
 
 namespace FFmpeg {
@@ -134,7 +135,7 @@ namespace FFmpeg {
                 spdlog::error("FFmpeg [{}]: {}: {}", context, component, message);
             }
             else {
-                spdlog::warn("FFmpeg [{}]: {}: {}", context, component, message);
+                RunLogging::RecordWarning(::fmt::format("FFmpeg [{}]: {}: {}", context, component, message));
             }
             activeLogCapture->Add({
                 activeLogCapture->_filePath,
@@ -156,7 +157,7 @@ namespace FFmpeg {
                 spdlog::error("FFmpeg [unattributed]: {}: {}", component, message);
             }
             else {
-                spdlog::warn("FFmpeg [unattributed]: {}: {}", component, message);
+                RunLogging::RecordWarning(::fmt::format("FFmpeg [unattributed]: {}: {}", component, message));
             }
             runLogCapture->Add(severity, component, std::move(message));
         }
@@ -164,7 +165,7 @@ namespace FFmpeg {
             spdlog::error("FFmpeg [{}]: {}", component, message);
         }
         else {
-            spdlog::warn("FFmpeg [{}]: {}", component, message);
+            RunLogging::RecordWarning(::fmt::format("FFmpeg [{}]: {}", component, message));
         }
     }
 

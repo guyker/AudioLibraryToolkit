@@ -68,6 +68,8 @@ public:
     static int PrepareConversion(
         const fs::path& input, const fs::path& output, bool overwrite,
         ConversionOptions options, FolderConversionPlan& plan);
+    // Reports blocked plans with console summaries and file-only paths; returns whether execution is blocked.
+    static bool ReportDestinationConflicts(const FolderConversionPlan& plan);
     // Optional counters accumulate across plans, only after successful installation.
     static int ExecuteConversion(const FolderConversionPlan& plan, ConversionProgress* progress = nullptr);
     

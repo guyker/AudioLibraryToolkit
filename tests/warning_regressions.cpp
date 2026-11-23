@@ -28,13 +28,7 @@ static std::string render_progress(std::size_t total, std::size_t count, int wid
     progress->count = count;
     progress->bar_size = width;
     progress->subProgressInfoPtr = std::move(subProgress);
-    std::ostringstream output;
-    struct RestoreOutput {
-        std::streambuf* original;
-        ~RestoreOutput() { std::cout.rdbuf(original); }
-    } restore{ std::cout.rdbuf(output.rdbuf()) };
-    CommonUtils::render_progress_bar(progress, CommonUtils::ProgressBarType::Progress, false);
-    return output.str();
+    return CommonUtils::format_progress_bar(*progress, CommonUtils::ProgressBarType::Progress);
 }
 
 static void check_log_callback_context() {
@@ -166,17 +160,19 @@ int main(int argc, char** argv) {
         auto subProgress = std::make_shared<CommonUtils::ProgressBarInfo>();
         subProgress->size = largeTotal;
         subProgress->count = largeTotal / 2;
-        require(render_progress(10, 5, 20, subProgress).find("Current Batch:      [==========          ] 50%")
+        require(render_progress(10, 5, 20, subProgress).find("Batch " + std::to_string(largeTotal / 2) + "/" + std::to_string(largeTotal))
             != std::string::npos, "Large sub-progress count narrowed");
         subProgress->size = 0;
         subProgress->count = 0;
-        require(render_progress(10, 5, 20, subProgress).find("Current Batch:      [                    ] 0%")
+        require(render_progress(10, 5, 20, subProgress).find("Batch 0/0")
             != std::string::npos, "Empty sub-progress failed");
         for (int frame = 0; frame < 8; ++frame) {
             const auto text = render_progress(10, 5, 20, subProgress);
             require(std::ranges::all_of(text, [](char c) { return static_cast<unsigned char>(c) < 0x80; }),
                 "Progress output contains non-ASCII characters");
             require(text.find('\x1b') == std::string::npos, "Progress emitted VT sequences without terminal control");
+            require(text.find('\n') == std::string::npos && text.find('\r') == std::string::npos,
+                "Scan metadata progress spans multiple lines");
         }
         check_log_callback_context();
         check_unscoped_log_callback_context();

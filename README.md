@@ -303,9 +303,14 @@ The executable supports explicit commands. Run `AudioLibraryToolkit --help` or a
 input, output, configuration, and example information.
 Each invocation writes a session log under `%LOCALAPPDATA%\AudioLibraryToolkit\logs` on Windows or the platform
 state directory elsewhere. Console output stays concise; `--log-level info|debug|trace` controls detail in the log
-file, not console warnings/errors. The configured `LogLevel` is the default file-log threshold. Structured conversion
+file, not console errors or application warnings. The configured `LogLevel` is the default file-log threshold. Structured conversion
 audits and scan reports remain separate outputs. Logs can contain library paths and diagnostic metadata; inactive
 session logs older than 30 days or beyond the 1 GiB retention limit are removed.
+FFmpeg warnings, such as estimated MP3 duration, are file-only; errors and progress remain visible. Scan warnings
+also remain in `scan-report.json`, and file-only messages respect the configured log threshold.
+Destination conflicts show only summaries and resolution guidance on the console; full paths are written to the
+session log when error-level file logging is enabled. No conversion or repair starts while destination conflicts
+remain unresolved.
 
 ```text
 AudioLibraryToolkit convert "D:\Music" --output-dir "E:\Converted"
@@ -463,7 +468,9 @@ refer to the original FLAC. It cannot restore audio lost through MP3 encoding. K
 no metadata restore command is currently provided. Ogg FLAC and headerless FLAC fail explicitly.
 
 Non-audio companion files (artwork, booklets, cue sheets, etc.) are copied unchanged with relative paths
-preserved. Copied cue sheets/playlists are not rewritten and may still name the original FLAC files.
+preserved. Folders whose audio contains no FLAC (for example MP3-only albums) are omitted entirely, including
+their artwork and booklets, and listed in `conversion-audit.json` under `skippedUnchangedDirectories`.
+Copied cue sheets/playlists are not rewritten and may still name the original FLAC files.
 Metadata preservation, copying, encoding or output-verification failures fail the command and are logged.
 Existing MP3, sidecar or companion destinations require `--overwrite`. Installation protects existing
 files until conversion succeeds and restores the previous sidecar if MP3 installation fails; a folder

@@ -1814,14 +1814,34 @@ bool WritePreviewReports(const std::vector<Plan>& plans)
     return directory.Restore();
 }
 
+bool ReportDestinationConflicts(const Plan& plan)
+{
+    if (plan.conflicts.empty()) return false;
+    spdlog::error("Repair output folder '{}' has {} existing destination conflict(s). "
+        "Choose a different OutDirectory/--output-dir, or explicitly enable overwrite if replacement is intended.",
+        utf8(plan.output), plan.conflicts.size());
+    std::string details = "Repair destination conflicts under '" + utf8(plan.output) + "':";
+    for (const auto& conflict : plan.conflicts) {
+        details += "\n    Existing: " + utf8(conflict);
+    }
+    if (RunLogging::RecordError(details)) {
+        spdlog::error("Full conflict paths are in the session log: {}",
+            utf8(*RunLogging::CurrentLogPath()));
+    } else {
+        spdlog::error("Detailed conflict paths are unavailable: enable file logging (LogLevel 0-4) "
+            "and ensure the session log can be created.");
+    }
+    return true;
+}
+
 int Execute(Plan& plan, std::size_t* repaired, std::size_t* copied)
 {
     if (plan.dryRun) {
         spdlog::error("A dry-run plan cannot be executed.");
         return -1;
     }
-    if (!plan.conflicts.empty()) {
-        spdlog::error("Repair plan has {} destination conflicts.", plan.conflicts.size());
+    if (ReportDestinationConflicts(plan)) {
+        spdlog::error("No repair was started; source files and existing outputs are unchanged.");
         return -1;
     }
     if (repaired) *repaired = 0;

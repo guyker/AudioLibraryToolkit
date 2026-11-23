@@ -1432,15 +1432,18 @@ void ShowConversionPreview(const FolderConversionPlan& plan)
     if (plan.options.target == AudioTarget::Flac) {
         std::cout << "  Source directories written: " << plan.directories.size()
             << "; unchanged folders skipped (audio, no conversions): " << plan.skippedDirectories.size() << '\n';
-        for (const auto& skipped : plan.skippedDirectories) {
-            std::cout << "    Skipped: " << pathToUtf8(skipped.source) << " (" << skipped.files << " files)\n";
+    }
+    else {
+        std::cout << "  Folders skipped (audio, no FLAC to convert): " << plan.skippedDirectories.size() << '\n';
+    }
+    for (const auto& skipped : plan.skippedDirectories) {
+        spdlog::debug("Skipped unchanged folder: '{}' ({} files).",
+            pathToUtf8(skipped.source), skipped.files);
+    }
+    if (plan.overwrite) {
+        for (const auto& target : plan.existingTargets) {
+            spdlog::debug("Existing destination selected for overwrite: '{}'.", pathToUtf8(target));
         }
-    }
-    for (const auto& target : plan.existingTargets) {
-        std::cout << "    Existing: " << pathToUtf8(target) << '\n';
-    }
-    for (const auto& target : plan.collisions) {
-        std::cout << "    COLLISION: " << pathToUtf8(target) << '\n';
     }
 }
 }
@@ -1508,11 +1511,12 @@ int ConvertConfiguredLibraries(const std::vector<MediaDirectoryElement>& mediaDi
             return 1;
         }
         ShowConversionPreview(plan);
-        blocked = blocked || !plan.collisions.empty() || (!overwrite && !plan.existingTargets.empty());
+        blocked = FolderConvert::ReportDestinationConflicts(plan) || blocked;
         plans.push_back(std::move(plan));
     }
     if (blocked) {
-        spdlog::error("Conversion destination conflicts; no conversion was started.");
+        spdlog::error("No conversion was started; resolve the destination conflicts in all active libraries. "
+            "Source files and existing outputs are unchanged.");
         return 1;
     }
     if (mp3) {
@@ -1649,11 +1653,10 @@ int RepairConfiguredLibraries(const std::vector<MediaDirectoryElement>& librarie
                 }) << '\n'
             << "  Overwrite: " << (overwrite ? "enabled" : "disabled") << '\n'
             << "  Remove redundant MP3 ID3v1: " << (removeId3v1 ? "enabled" : "disabled") << '\n'
-            << "  Parallel workers: " << plan.workers << '\n';
+            << "  Parallel workers: " << plan.workers << '\n'
+            << "  Existing destination conflicts: " << plan.conflicts.size() << '\n';
         PrintRepairFindingCounts(plan);
-        for (const auto& conflict : plan.conflicts) {
-            std::cout << "    COLLISION: " << pathToUtf8(conflict) << '\n';
-        }
+        AudioRepair::ReportDestinationConflicts(plan);
         plans.push_back(std::move(plan));
     }
 
@@ -2025,7 +2028,7 @@ int ScanFolderAndCreateJSON(std::vector<MediaDirectoryElement> mediaDirectoryLis
             const auto writeBatch = [&](const MediaAlbumListPtr& albumListPtr) {
                 spdlog::debug("Received batch with {} albums", albumListPtr->size());
                 if (bIncludeMetadata) {
-                    spdlog::info("Reading metadata for {} album(s).", albumListPtr->size());
+                    spdlog::debug("Reading metadata for {} album(s).", albumListPtr->size());
                     // Discovery has counted every album before the first batch, so progress spans all batches.
                     const auto totalAlbums = (std::max)(static_cast<std::size_t>(scanReport.discovery.albums),
                         processedAlbums + albumListPtr->size());
@@ -3045,6 +3048,7 @@ constexpr std::array<MenuEntry, 7> MenuEntries{ {
         "      Output: OutDirectory/converted-mp3/<mediaName>/ with relative paths preserved:\n"
         "              MP3 (LAME VBR quality 0 by default), .mp3.flac-metadata sidecars\n"
         "              (or .json; per MetadataSidecars), and unchanged non-audio companion files.\n"
+        "              Folders with audio but no FLAC are skipped and listed in the audit.\n"
         "      Changes: sources unchanged; existing destinations fail unless overwrite is enabled.\n"
         "               Supported tags/pictures/chapters go into ID3v2.4; original metadata\n"
         "               is retained in sidecars. MP3 audio is lossy. Multichannel audio\n"

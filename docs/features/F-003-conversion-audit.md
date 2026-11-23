@@ -9,6 +9,9 @@ copies are verified byte-for-byte, including unsupported audio retained by FLAC 
 `skippedUnchangedDirectories` (topmost folders with audio but no conversions, with file/audio counts); `"."`
 denotes the library root. While running, a
 `.conversion-in-progress` marker exists; it is removed on success.
+For FLAC-to-MP3 conversion, TagLib writes mapped FLAC comments to ID3v2.4 and the audit reads the resulting ID3
+properties directly through TagLib, including repeated values; unsupported FLAC metadata still requires a verified
+sidecar.
 On failure the report is still written and, if this run created the library folder, the folder is renamed
 `ERROR_<AUDIO|PRESERVATION|COPY|IO>_<name>` or `INCOMPLETE_<name>`. If the rename is not possible (for example,
 because the prefixed name exceeds the Windows component-length limit), the report and marker remain at the original
@@ -23,7 +26,7 @@ session log rather than repeated as a console warning; the audit still records a
 - DESIGN: `FlacConvert/DESIGN.md` → Files and schemas (`conversion-audit.json`); Output-directory anchoring; Contracts
   (ownership, reserved names)
 - K-029 preservation audit, K-030 failure marking and ownership, K-024 sequential stop-on-error,
-  K-036 complete folders and skipped unchanged folders
+  K-066 complete folders and skipped unchanged folders, K-067 direct TagLib verification of MP3 tags
 
 ## Acceptance checks
 - [ ] Successful run: report `status: completed`, `errorType: ""`, counts equal plan, no marker.
@@ -40,6 +43,7 @@ session log rather than repeated as a console warning; the audit still records a
 - [ ] A copied-file failure does not report unattempted copies as installed.
 - [ ] The `preservation-audit` CTest target (`tests/preservation_audit.cpp`) passes.
 - [ ] Expected generated-field differences remain present in the audit even when they are not console warnings.
+- [ ] Repeated FLAC date comments with sidecars disabled are written to ID3v2.4 and verified by the audit.
 
 ## Known limitations
 - `schemaVersion` 1; no reader in this repository consumes the report.

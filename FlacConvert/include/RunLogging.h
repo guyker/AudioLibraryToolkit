@@ -17,7 +17,9 @@ namespace RunLogging
     bool Start(const std::string& operation,
         const std::optional<std::filesystem::path>& logDirectory = std::nullopt);
     void SetFileLevel(spdlog::level::level_enum level);
-    void RecordError(const std::string& message);
+    // File-only diagnostics; returns false when logging at the requested level is unavailable or disabled.
+    bool RecordError(const std::string& message);
+    bool RecordWarning(const std::string& message);
     // Transient console-only progress; ordinary log messages end the active line first.
     void ShowProgress(const std::string& message);
     void ClearProgress();

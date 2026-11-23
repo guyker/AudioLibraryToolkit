@@ -45,6 +45,15 @@ std::optional<fs::path> runLogPath;
 fs::path activeMarkerPath;
 std::chrono::steady_clock::time_point runStartedAt;
 
+bool recordFileDiagnostic(spdlog::level::level_enum level, const std::string& message)
+{
+    if (!fileSink || !fileSink->should_log(level)) return false;
+    spdlog::logger logger("afc-file", fileSink);
+    logger.log(level, "{}", message);
+    logger.flush();
+    return true;
+}
+
 class ProgressConsoleSink final : public spdlog::sinks::sink
 {
 public:
@@ -336,13 +345,14 @@ void RunLogging::SetFileLevel(spdlog::level::level_enum level)
     if (fileSink) fileSink->set_level(level);
 }
 
-void RunLogging::RecordError(const std::string& message)
+bool RunLogging::RecordError(const std::string& message)
 {
-    if (fileSink) {
-        spdlog::logger logger("afc-file", fileSink);
-        logger.error("{}", message);
-        logger.flush();
-    }
+    return recordFileDiagnostic(spdlog::level::err, message);
+}
+
+bool RunLogging::RecordWarning(const std::string& message)
+{
+    return recordFileDiagnostic(spdlog::level::warn, message);
 }
 
 void RunLogging::ShowProgress(const std::string& message)

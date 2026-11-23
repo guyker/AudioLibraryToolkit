@@ -68,6 +68,7 @@ struct Plan
 int Prepare(const std::filesystem::path& input, const std::filesystem::path& output,
     bool overwrite, const std::set<std::string>& rules, Plan& plan,
     std::size_t workers = 4, bool dryRun = false);
+bool ReportDestinationConflicts(const Plan& plan);
 int Execute(Plan& plan, std::size_t* repaired = nullptr, std::size_t* copied = nullptr);
 int PrintDryRunReport(const Plan& plan);
 bool WritePreviewReports(const std::vector<Plan>& plans);

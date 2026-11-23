@@ -36,6 +36,9 @@ risks. Cancellation
 keeps the preview without creating repair output. Existing
 destinations are rejected unless `--overwrite` is specified. The CLI returns non-zero for manual-review findings or
 operation failures.
+Menu and CLI previews summarize existing destination conflicts without printing individual paths. Full file and
+directory conflict paths are reserved for error-level session logging (F-010); sources and existing outputs are
+unchanged when these conflicts block repair.
 `--dry-run` prints the full JSON findings and planned actions without writing repair output; normal session logging
 still applies. Inspection and staging use four workers by default; CLI `--jobs <1-16>` changes the limit.
 Before the preview, progress identifies the source folder and the discovery, inspection and planning phases.
@@ -76,6 +79,8 @@ of terminal control sequences. Phase boundaries are retained in the session log 
 - [ ] Preview and post-repair reports show the same findings by issue (ordered by severity, then album and track) and by album (only albums with findings), mark whole-album versus partial findings and tracks with several issues, and state separate risks for leaving or fixing each issue; JSON distinguishes planned rules from successfully applied rules.
 - [ ] Any source file/directory symlink or reparse point fails preparation; nested output links are rejected before writes.
 - [ ] Existing output is rejected by default; `--overwrite` allows eligible destinations to be replaced.
+- [ ] Large destination conflict sets show only console counts/output locations and guidance; all conflict
+      paths are retained in the session log when error-level file logging is enabled.
 - [ ] Preparation displays progress before confirmation without writing repair output; cancellation keeps sources unchanged.
 - [ ] Installation progress advances only after verification/installation and stops short of 100% on failure.
 

@@ -11,6 +11,7 @@
 #include <spdlog/spdlog.h>
 #include <system_error>
 #include "PlatformUtils.h"
+#include "RunLogging.h"
 
 
 namespace CommonUtils {
@@ -142,120 +143,47 @@ namespace CommonUtils {
 	}
 
     void show_progress_bar(std::shared_ptr<ProgressBarInfo> progressInfoPtr, ProgressBarType progressType) {
+        const bool complete = progressType == ProgressBarType::Complete &&
+            progressInfoPtr->size > 0 && progressInfoPtr->count >= progressInfoPtr->size;
+        if (complete) {
+            RunLogging::ClearProgress();
+            spdlog::info("{}", format_progress_bar(*progressInfoPtr, ProgressBarType::Complete));
+            return;
+        }
         if (!PlatformUtils::IsStdoutInteractive()) {
             if (progressType == ProgressBarType::Complete) {
-                spdlog::debug("Progress completed: {} ({}/{}).",
+                spdlog::debug("Metadata batch processed: {} ({}/{}).",
                     progressInfoPtr->name, progressInfoPtr->count, progressInfoPtr->size);
             }
             return;
         }
-        render_progress_bar(std::move(progressInfoPtr), progressType, PlatformUtils::EnableVirtualTerminal());
+        RunLogging::ShowProgress(format_progress_bar(*progressInfoPtr, ProgressBarType::Progress));
     }
 
     // Console output stays 7-bit ASCII so it renders with any console font, code page or log viewer.
-    void render_progress_bar(std::shared_ptr<ProgressBarInfo> progressInfoPtr, ProgressBarType progressType,
-        bool useTerminalControl) {
+    std::string format_progress_bar(const ProgressBarInfo& progressInfo, ProgressBarType progressType) {
         static constexpr std::string_view spinner = "|/-\\";
-        static constexpr std::string_view doneMarker = "[done]";
         static std::size_t spinner_index = 0;
-        static std::size_t lastLineLength = 0;
-
-        const int bar_width = progressInfoPtr->bar_size; // Width of the progress bar (characters)
-        const int sub_bar_width_total = progressInfoPtr->bar_size; // Width of the progress bar (characters)
-
-        static std::chrono::steady_clock::time_point lastTime{ std::chrono::steady_clock::now() };
-        auto currentTime = std::chrono::steady_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastTime).count();
-
-
-		auto count = progressInfoPtr->count;
-		auto size = progressInfoPtr->size;
-        auto av_duration = avarage_duration(count, size);
-
-
-        auto normalized_count = std::min<size_t>(count, size);
+        const int bar_width = progressInfo.bar_size;
+        const auto count = progressInfo.count;
+        const auto size = progressInfo.size;
+        const auto normalized_count = (std::min)(count, size);
         const int i = progress_filled(size, normalized_count, bar_width);
         const int percent = progress_filled(
             static_cast<std::size_t>((std::max)(bar_width, 0)), static_cast<std::size_t>(i), 100);
-        auto bar = get_raw_progress_bar(size, normalized_count, 20);
-        std::string avarageDuration = (size <= count) ? "" :
-            " (" + CommonUtils::GetDurationinString(static_cast<long long>(av_duration * (size - count))) + ")";
-            //std::to_string(count) + "/" + std::to_string(size) + ")";
-
-
-        bool bSubProgress = progressInfoPtr->subProgressInfoPtr != nullptr;
-        if (useTerminalControl) {
-            std::cout << "\33[2K\r";  // Clear entire line and move cursor to start
-            if (bSubProgress) {
-                std::cout << "\33[A\33[2K\r";  // Move up 1 line, clear it, and return to start
-            }
+        const auto bar = get_raw_progress_bar(size, normalized_count, bar_width);
+        if (progressType == ProgressBarType::Complete) {
+            return std::format("[done] Scan metadata: [{}] {}% {}/{}.",
+                bar, percent, normalized_count, size);
         }
-        else if (lastLineLength > 0) {
-            std::cout << '\r' << std::string(lastLineLength, ' ') << '\r';
+        auto message = std::format("Scan metadata: {} [{}] {}% {}/{}",
+            spinner[spinner_index], bar, percent, normalized_count, size);
+        spinner_index = (spinner_index + 1) % spinner.size();
+        if (progressInfo.subProgressInfoPtr) {
+            const auto& batch = *progressInfo.subProgressInfoPtr;
+            message += std::format(" | Batch {}/{}", (std::min)(batch.count, batch.size), batch.size);
         }
-        lastLineLength = 0;
-
-		std::string subProgressStr = "";
-        if (bSubProgress)
-        {
-            size_t sub_currentCount = 0;
-            size_t sub_totalCount = 0;
-            if (progressInfoPtr->subProgressInfoPtr != nullptr)
-            {
-                sub_currentCount = progressInfoPtr->subProgressInfoPtr->count;
-                sub_totalCount = progressInfoPtr->subProgressInfoPtr->size;
-            }
-            auto sub_normalized_total_count = std::min<size_t>(sub_currentCount, sub_totalCount);
-
-            const int i2 = progress_filled(sub_totalCount, sub_normalized_total_count, sub_bar_width_total);
-
-            const int sub_percent_total = progress_filled(
-                static_cast<std::size_t>((std::max)(sub_bar_width_total, 0)), static_cast<std::size_t>(i2), 100);
-            auto sub_bar_total = get_raw_progress_bar(sub_totalCount, sub_normalized_total_count, progressInfoPtr->subProgressInfoPtr->bar_size);
-            std::string sub_avarageDurationTotal = (sub_totalCount <= sub_currentCount) ? "" :
-                " (" + CommonUtils::GetDurationinString(static_cast<long long>(av_duration * (sub_totalCount - sub_currentCount))) + ")";
-                //+" - " + std::to_string(sub_currentCount) + "/" + std::to_string(sub_totalCount) + ")";
-
-            subProgressStr = std::format("Current Batch:      [{}] {}% {}/{}{} \"{}\"",
-                sub_bar_total, sub_percent_total,
-				sub_currentCount, sub_totalCount,
-                sub_avarageDurationTotal, progressInfoPtr->name);
-        }
-	
-        // Print bar, percentage, and spinner
-        if (progressType == ProgressBarType::Complete)
-        {
-            // Logged text also reaches session log files, so it carries no terminal control sequences.
-            std::cout << std::flush;
-            spdlog::info("{} Progress: [{}] {}% {}/{} - {}", doneMarker, bar, percent, normalized_count, size,
-                progressInfoPtr->name);
-        }
-        else
-        {
-            std::string progressTotalStr = std::format("Overall Progress: {} [{}] {}% {}/{}{}",
-                spinner[spinner_index],
-                bar, percent,
-                progressInfoPtr->count,
-                progressInfoPtr->size,
-                avarageDuration);
-
-            if (!bSubProgress) {
-                std::cout << progressTotalStr;
-                lastLineLength = progressTotalStr.size();
-            }
-            else if (useTerminalControl) {
-                std::cout << progressTotalStr << '\n' << subProgressStr;
-            }
-            else {
-                // Without cursor movement both bars share one rewritable line.
-                const auto line = progressTotalStr + " | " + subProgressStr;
-                std::cout << line;
-                lastLineLength = line.size();
-            }
-            std::cout << std::flush;
-
-            spinner_index = (spinner_index + 1) % spinner.size();
-        }
+        return message;
     }
 
     // Deletes all regular files in the same directory as 'filePath'

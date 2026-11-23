@@ -24,6 +24,9 @@ batches, and installed batches. Discovery counts can be partial if enumeration f
 at scan scope and intentionally remain unattributed to a track.
 Those warnings/errors are also written to the per-request session log, explicitly marked as unattributed; file-scoped
 TagLib/FFmpeg diagnostics include their source path. TagLib's verbose debug messages are kept in the detailed log.
+FFmpeg warnings (including estimated MP3 duration) are written only to the session log at warning level, not to the
+console; errors remain visible. The warnings retain their source/stage and severity in the structured report,
+including for parallel reads. Progress and scan completion remain visible.
 Redirected scan output contains no animated terminal sequences, and `scan-report.json` remains the structured
 diagnostic record (F-010).
 FFmpeg format and stream tags are included with separate source scopes; older incremental records are reread to

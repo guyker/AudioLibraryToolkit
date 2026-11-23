@@ -408,7 +408,7 @@ int FolderConvert::PrepareConversion(
     std::vector<fs::directory_entry> audio;
     std::vector<fs::directory_entry> companions;
     const bool completeTree = options.target == AudioTarget::Flac;
-    // FLAC subtree classification; relative source directories, with the library root as the empty path.
+    // Subtree classification; relative source directories, with the library root as the empty path.
     struct SubtreeCounts { std::size_t files{ 0 }, audioFiles{ 0 }, conversions{ 0 }; };
     std::vector<fs::path> directories;
     std::map<fs::path, SubtreeCounts> subtrees;
@@ -446,8 +446,8 @@ int FolderConvert::PrepareConversion(
                     }
                 }
                 if (entry.is_directory()) {
+                    const auto relative = entry.path().lexically_relative(inputRoot);
                     if (completeTree) {
-                        const auto relative = entry.path().lexically_relative(inputRoot);
                         const auto canonicalDirectory = fs::weakly_canonical(entry.path(), ec);
                         const auto expectedDirectory = input / relative;
                         if (ec ||
@@ -457,8 +457,8 @@ int FolderConvert::PrepareConversion(
                                 CommonUtils::path_to_utf8(entry.path()));
                             return -1;
                         }
-                        directories.push_back(relative);
                     }
+                    directories.push_back(relative);
                     continue;
                 }
                 if (!entry.is_regular_file()) {
@@ -473,11 +473,12 @@ int FolderConvert::PrepareConversion(
                 if (MediaTrack::IsFileConvertable(entry.path())) {
                     if (!completeTree && extension != u8".flac") {
                         plan.skippedAudio.push_back(entry.path());
+                        count(entry.path(), true, false);
                     }
                     else {
                         audio.push_back(entry);
                         discovery.AdvanceSecondary();
-                        if (completeTree) count(entry.path(), true, true);
+                        count(entry.path(), true, true);
                     }
                 }
                 else {
@@ -487,8 +488,8 @@ int FolderConvert::PrepareConversion(
                     }
                     else {
                         companions.push_back(entry);
-                        if (completeTree) count(entry.path(), unsupportedAudio, false);
                     }
+                    count(entry.path(), unsupportedAudio, false);
                 }
             }
             discovery.Finish();
@@ -502,10 +503,10 @@ int FolderConvert::PrepareConversion(
         spdlog::warn("No convertible audio files found under '{}'.", CommonUtils::path_to_utf8(inputRoot));
         return 0;
     }
-    if (completeTree) {
-        // Omit the topmost subtrees that contain audio but nothing to convert, so every written
-        // folder is complete. Folders without audio stay with their written parent. A library
-        // without conversions writes only its report.
+    {
+        // Omit the topmost subtrees that contain audio but nothing to convert, so no album folder
+        // without conversions appears in the output. Folders without audio stay with their written
+        // parent. A FLAC library without conversions writes only its report.
         std::set<fs::path> skippedRoots;
         const auto isSkipped = [&](fs::path relative) {
             for (;; relative = relative.parent_path()) {
@@ -530,9 +531,11 @@ int FolderConvert::PrepareConversion(
                 }
             }
         }
-        plan.directories.push_back(outputRoot);
-        for (const auto& directory : directories) {
-            if (!isSkipped(directory)) plan.directories.push_back(outputRoot / directory);
+        if (completeTree) {
+            plan.directories.push_back(outputRoot);
+            for (const auto& directory : directories) {
+                if (!isSkipped(directory)) plan.directories.push_back(outputRoot / directory);
+            }
         }
         std::erase_if(companions, [&](const fs::directory_entry& entry) {
             return isSkipped(entry.path().lexically_relative(inputRoot).parent_path());
@@ -644,11 +647,44 @@ int FolderConvert::PrepareConversion(
     return 0;
 }
 
+bool FolderConvert::ReportDestinationConflicts(const FolderConversionPlan& plan)
+{
+    const bool existingBlocked = !plan.overwrite && !plan.existingTargets.empty();
+    if (!existingBlocked && plan.collisions.empty()) return false;
+    if (existingBlocked) {
+        spdlog::error("Output folder '{}' already contains {} planned destination(s), possibly from a previous run. "
+            "Existing files will not be overwritten. Choose a different OutDirectory/--output-dir, "
+            "or use convert --overwrite only if replacement is intended.",
+            CommonUtils::path_to_utf8(plan.output), plan.existingTargets.size());
+    }
+    if (!plan.collisions.empty()) {
+        spdlog::error("{} duplicate destination(s) under '{}': multiple source items map to the same output path. "
+            "Rename the conflicting source files or folders; overwrite cannot resolve these conflicts.",
+            plan.collisions.size(), CommonUtils::path_to_utf8(plan.output));
+    }
+    std::string details = "Conversion destination conflicts under '" + CommonUtils::path_to_utf8(plan.output) + "':";
+    if (existingBlocked) {
+        for (const auto& target : plan.existingTargets) {
+            details += "\n    Existing: " + CommonUtils::path_to_utf8(target);
+        }
+    }
+    for (const auto& target : plan.collisions) {
+        details += "\n    COLLISION: " + CommonUtils::path_to_utf8(target);
+    }
+    if (RunLogging::RecordError(details)) {
+        spdlog::error("Full conflict paths are in the session log: {}",
+            CommonUtils::path_to_utf8(*RunLogging::CurrentLogPath()));
+    } else {
+        spdlog::error("Detailed conflict paths are unavailable: enable file logging (LogLevel 0-4) "
+            "and ensure the session log can be created.");
+    }
+    return true;
+}
+
 int FolderConvert::ExecuteConversion(const FolderConversionPlan& plan, ConversionProgress* progress)
 {
-    if (!plan.collisions.empty() || (!plan.overwrite && !plan.existingTargets.empty())) {
-        spdlog::error("Conversion plan has {} duplicate destinations and {} existing destinations; overwrite is {}.",
-            plan.collisions.size(), plan.existingTargets.size(), plan.overwrite ? "enabled" : "disabled");
+    if (ReportDestinationConflicts(plan)) {
+        spdlog::error("No conversion was started; source files and existing outputs are unchanged.");
         return -1;
     }
     if (progress) progress->actualOutput = plan.output;

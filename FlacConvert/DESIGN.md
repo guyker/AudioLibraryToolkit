@@ -27,6 +27,7 @@ It runs either as explicit CLI commands or, with no arguments, as a legacy inter
 | Conversion options | `include/ConversionOptions.h` | `AudioTarget` (Flac/Mp3), MP3 quality, downmix flag |
 | Folder conversion | `src/FolderConvert.cpp`, `include/FolderConvert.h` | `FolderConvert::PrepareConversion` (plan) and `FolderConvert::ExecuteConversion` (run, audit report, markers) |
 | File conversion | `src/MediaConvertionTask.cpp`, `include/MediaConvertionTask.h` | `MediaConvertionTask`: quality gate, FFmpeg child process, output verification, sidecar, audit, installation |
+| MP3 tags | `src/Mp3TagMetadata.cpp`, `include/Mp3TagMetadata.h` | TagLib maps source FLAC comments into ID3v2.4 and reads MP3 ID3 properties for preservation auditing |
 | Metadata repair | `src/AudioRepair.cpp`, `include/AudioRepair.h`, `src/RepairRules.cpp`, `include/RepairRules.h` | `RepairRules::Analyze` detects FLAC/MP3 metadata defects and plans byte-range edits; `AudioRepair::Prepare` plans repairs; `AudioRepair::Execute` stages, verifies and installs repaired copies and `repair-report.json` |
 | Metadata archive | `src/FlacMetadata.cpp`, `include/FlacMetadata.h` | `FlacMetadata::Save` / `FlacMetadata::Verify` byte-exact archive as binary `.flac-metadata` or `.flac-metadata.json` (readable scan-schema metadata + Base64 archive; only the archive is verified); scan optionally writes binary metadata-only archives for native FLAC |
 | Preservation audit | `src/PreservationAudit.cpp`, `include/PreservationAudit.h` | `PreservationAudit::Compare` (tags, pictures, chapters, opaque blocks), `PreservationAudit::VerifyCopy` |
@@ -55,7 +56,9 @@ flowchart LR
         EC --> MCT[MediaConvertionTask]
         MCT -->|spawn| FF[ffmpeg executable]
         MCT --> FM[FlacMetadata sidecar]
-        MCT --> PA[PreservationAudit]
+        MCT -->|MP3 tag write| MT[Mp3TagMetadata / TagLib]
+        MT -->|direct ID3 read| PA[PreservationAudit]
+        MCT -->|other targets| PA
     end
     RWA --> PC
     SRC[(Source library)] --> PC
@@ -92,16 +95,27 @@ All commands accept `--config <file>` and `--log-level info\|debug\|trace`. Exit
 ### Run logging
 
 `RunWithArguments` creates one uniquely named session log for the process request, shared by CLI commands and the
-interactive menu. The console sink is fixed at `info`: conversion progress/completion and meaningful warnings/errors
-remain visible, while per-file successes and expected generated-field normalization are debug-only. The file sink
+interactive menu. The console sink is fixed at `info`: conversion progress/completion, application warnings and errors
+remain visible, while per-file successes and expected generated-field normalization are debug-only. FFmpeg warnings
+are file-only via `RunLogging::RecordWarning`; linked-FFmpeg errors still reach the console with their known context.
+The file sink
 uses config `LogLevel` (0–6) or the CLI `--log-level` override. FFmpeg child-process output is captured without a
-shell and logged with the source path; linked-FFmpeg diagnostics are also logged with their known path/stage while
+shell and logged only to the file with the source path; failed child processes still report their exit error on the
+console. Linked-FFmpeg diagnostics are also logged with their known path/stage while
 remaining in their existing structured scan records. Unscoped scan diagnostics are logged as unattributed and stay
 unattributed in `scan-report.json`. TagLib debug output is routed through the file logger with thread-local file
 context. Redirected output suppresses animated progress sequences. Logs older than 30 days and oldest inactive logs
 above 1 GiB are pruned; active logs are protected. If log-file creation fails, an explicit console error is emitted
 and the request proceeds using console logging only. The session log supplements, and does not replace,
 `conversion-audit.json` or `scan-report.json`.
+Warning routing does not change diagnostic severity or structured scan capture, including unattributed warnings
+and diagnostics from worker threads. File-only warnings respect the file threshold; disabling it does not enable
+a per-warning console fallback.
+Conversion and repair destination conflicts produce per-library console summaries: output folder, counts,
+why execution is blocked and how to resolve it. Full conflicting paths are written only to the session log at
+error level via `RunLogging::RecordError`, including when the file threshold is `info`. The console identifies that
+log, or explicitly notes that detailed logging is unavailable/disabled. Conversion previews keep skipped-folder
+counts on the console and put individual skipped paths at debug level in the session log.
 Menu actions log every active source library before preparation, and CLI commands log their source directory
 (identified as catalog JSON for duplicate detection and database import). Conversion and scan transitions identify
 the current source library. Startup logs the absolute configuration path and notes that the file can be edited, including for
@@ -111,7 +125,9 @@ Long phases use `RunLogging::PhaseProgress` (repair phases, conversion discovery
 track collection): it logs the
 phase start, redraws one line every second when interactive, logs a snapshot every five seconds when redirected, and
 logs a final `[done]`/`[stopped]` line with counts, elapsed time and, when the total is known, an ETA. Scan metadata
-progress spans every batch of a library rather than restarting per batch.
+progress spans every batch of a library rather than restarting per batch. Metadata batches redraw the shared
+console progress line, without cursor-up sequences or per-batch completion logs; only the final metadata batch
+logs completion. Batch-read details are debug-only, and catalog installation retains its separate result summary.
 
 ## Key flows
 
@@ -120,18 +136,22 @@ progress spans every batch of a library rather than restarting per batch.
 1. **Plan** – `FolderConvert::PrepareConversion` resolves input/output, rejects source/output overlap and reserved
    state names, enumerates source entries once, classifies convertible audio (`MediaTrack::IsFileConvertable`), maps files to
    `<output>/<relative path>` with a unique temporary (`.afc-convert-<pid>-<time>-<n><ext>`), and records existing
-   targets and case-insensitive collisions, including file/directory collisions. FLAC counts files, audio and
-   conversions per source subtree. The topmost subtrees with audio but no conversions are skipped and recorded in
-   `FolderConversionPlan::skippedDirectories`; a library without conversions skips its root (`"."`) and writes only
-   the report. Every other directory is retained and every other regular file is copied, including unsupported
-   audio beside conversions and folders without audio (K-036). Directory links and non-regular entries fail FLAC
-   planning anywhere, including inside skipped subtrees, rather than disappearing from output. MP3 mode retains its
-   non-audio companion policy, skips non-FLAC audio and does nothing without convertible FLAC. Nothing is written.
+   targets and case-insensitive collisions, including file/directory collisions. Both targets count files, audio
+   and conversions (FLAC: every convertible file; MP3: `.flac` only) per source subtree. The topmost subtrees with
+   audio but no conversions are skipped with all their files and recorded in
+   `FolderConversionPlan::skippedDirectories`; a FLAC library without conversions skips its root (`"."`) and writes
+   only the report. Every other FLAC directory is retained and every other regular file is copied, including
+   unsupported audio beside conversions and folders without audio (K-066). Directory links and non-regular entries
+   fail FLAC planning anywhere, including inside skipped subtrees, rather than disappearing from output. MP3 mode
+   copies only non-audio companions outside skipped subtrees, skips non-FLAC audio and does nothing without
+   convertible FLAC. Nothing is written.
    Progress is reported per library: `Conversion discovery` (entries visited and convertible audio found; total
    unknown) and `Conversion planning` (destinations checked out of the known total, with ETA); an early planning
    failure logs the phase as `[stopped]`.
 2. **Preview** (menu only) – `ConvertConfiguredLibraries` plans *all* active libraries, checks cross-library overlap,
-   prints `ShowConversionPreview`, and requires `RUN` (`ConfirmPreview`). Any conflict blocks the whole run (K-049).
+   prints `ShowConversionPreview`, and requires `RUN` (`ConfirmPreview`). Duplicate destinations or existing targets
+   without overwrite block the whole run (K-049); `FolderConvert::ReportDestinationConflicts` provides the same
+   concise diagnostics for the menu and CLI without starting conversion or changing existing outputs.
 3. **Execute** – `FolderConvert::ExecuteConversion` creates the library folder (ownership = created by this run),
    creates the `.conversion-in-progress` marker directory, then processes audio files sequentially:
    `MediaConvertionTask::Run` (convert + verify + audit) then `MediaConvertionTask::PostRun` (install). For FLAC,
@@ -156,9 +176,13 @@ Per file, `MediaConvertionTask::ConvertFile`:
    temporary when the run's `ConversionOptions::sidecarFormat` is not `None` (K-038); with format `None` it
    only prepares a clean input when appended tags must be removed;
 4. runs `ffmpeg` via `runFFmpeg` with `conversionArguments` (K-056, K-017);
-5. verifies output codec, rate, depth/channels and duration (±0.15 s);
-6. verifies the archive again (when written) and runs `PreservationAudit::Compare` (K-029); without an archive,
-   differences that would otherwise be `SidecarOnly` are fatal (fail-closed).
+5. for MP3 output, `Mp3TagMetadata::WriteFromFlac` maps source FLAC comments into ID3v2.4 using TagLib while
+   preserving FFmpeg-generated artwork and chapters;
+6. verifies output codec, rate, depth/channels and duration (±0.15 s);
+7. verifies the archive again (when written) and runs `PreservationAudit::Compare` (K-029); for MP3, the audit
+   reads ID3 properties directly through `Mp3TagMetadata::Read`, so repeated mapped values can be verified without
+   a sidecar. Without an archive, metadata not represented in verifiable output (for example, FLAC application
+   blocks) remains fatal (fail-closed).
    For MP4-family sources, container descriptors (`major_brand`, `minor_version`, `compatible_brands`) and
    FFmpeg's default stream tags (`handler_name=SoundHandler`, `language=und`, `vendor_id=0x0000`) are treated as
    generated metadata rather than user-tag losses.
@@ -535,7 +559,7 @@ fail configuration loading.
 |---|---|---|
 | Converted audio | `<root>/normalized-flac\|converted-mp3/<name>/<relative path>.flac\|.mp3` | `MediaConvertionTask` |
 | Metadata sidecar | `<audio file>.flac-metadata` (binary) or `<audio file>.flac-metadata.json` (MP3 and native-FLAC sources, per `MetadataSidecars`) | `FlacMetadata::Save` |
-| Unchanged file copies | Same relative path; non-converted regular files outside skipped subtrees for FLAC, non-audio companions for MP3 | `FolderConvert::ExecuteConversion` |
+| Unchanged file copies | Same relative path; non-converted regular files (FLAC) or non-audio companions (MP3), outside skipped subtrees | `FolderConvert::ExecuteConversion` |
 | Audit report | `<library output>/conversion-audit.json` | `writeAudit` in `FolderConvert.cpp` |
 | Session log | `%LOCALAPPDATA%\AudioLibraryToolkit\logs\afc-<timestamp>_<pid>_<sequence>.log` (Windows); XDG/HOME state directory elsewhere | `RunLogging::Start` / `RunLogging::Finish` |
 | In-progress marker | `<library output>/.conversion-in-progress/` (directory) | `FolderConvert::ExecuteConversion` |
@@ -559,8 +583,8 @@ directory, `"."` for root), `files`, `audioFiles`}, `skippedAudio[]`,
 `resources[]` {`status`, `resource`, `name`, `detail`, `fatal`}}. Resource statuses are
 `PreservationAudit::Status`: `Preserved`, `Normalized`, `SidecarOnly`, `MissingOrChanged`, `NotVerified`, `SourceOnly`.
 `companion`/`*Companions` denote unchanged file copies and include unsupported audio for FLAC; MP3 still skips
-other audio. Directory fields are additive version-1 fields and are empty/zero for MP3. Skipped folders are
-planning results; they are listed even when the run later fails.
+other audio. `plannedDirectories` is zero for MP3; `skippedUnchangedDirectories` applies to both targets. Skipped
+folders are planning results; they are listed even when the run later fails.
 
 **Album JSON v2:** array of `{ "Album Path", "Library Root", "Folder", "Tracks": [MediaRecord] }`. Each `MediaRecord` separates
 filesystem identity, available technical properties, normalized tag arrays, raw scoped tags, picture descriptors,
