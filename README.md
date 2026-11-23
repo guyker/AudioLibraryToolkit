@@ -210,7 +210,13 @@ In Visual Studio, open the repository folder (File > Open > Folder) and choose a
 reads `CMakePresets.json` directly, so no solution or project files are kept.
 
 Initialize submodules (`git submodule update --init --recursive`) and install CMake 3.28+, Ninja, Python 3
-and a C++20 toolchain. CMake fetches the pinned TagLib revision for metadata catalog reads.
+and a C++20 toolchain. CMake fetches the pinned TagLib revision for audio metadata. Each build checks GitHub
+for a newer stable TagLib release and reports one if available; the pin is never changed automatically. If the
+check cannot reach GitHub, it reports that the check was unavailable and the build continues. The check reports
+its own status, not the result of the entire build: immediately after the build, check `echo %ERRORLEVEL%` in
+Command Prompt or `$LASTEXITCODE` in PowerShell; zero means success.
+Each build also reports the versions of the selected external dependencies, including the FFmpeg headers and build
+tool, TagLib, CLI11, spdlog, fmt, SQLite, RapidJSON, utfcpp and optional ZLIB.
 
 On Windows, use an x64 Visual Studio Developer PowerShell/Command Prompt. Set the `FFmpeg_ROOT` environment
 variable or pass `-DFFmpeg_ROOT=<path>` for a matching shared FFmpeg SDK containing `include`, `lib` and `bin`

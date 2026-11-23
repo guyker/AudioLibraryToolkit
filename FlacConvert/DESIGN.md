@@ -643,7 +643,9 @@ Windows uses MSVC and a matching shared FFmpeg SDK selected by `FFmpeg_ROOT` (de
 `external/ffmpeg/ffmpeg-master-latest-win64-gpl-shared/`); CMake stages the SDK runtime DLLs beside the executable
 (K-062). Linux uses pkg-config imported targets for the system FFmpeg development packages. Both platforms use the
 tracked SQLite amalgamation and initialized CLI11/spdlog submodules. TagLib is fetched by CMake at a pinned
-revision; ZLIB is optional in that dependency, so compressed ID3 frame support depends on build-time ZLIB
+revision. Each build checks GitHub for a newer stable release, reports it without changing the pin, and continues
+if the check is unavailable. Builds also report selected external dependency versions, distinguishing FFmpeg
+headers from the configured executable. ZLIB is optional in that dependency, so compressed ID3 frame support depends on build-time ZLIB
 availability. Runtime conversion still requires the `ffmpeg` executable with `libmp3lame` for MP3.
 
 `cmake --install` stages the executable; Linux links system FFmpeg libraries, while Windows installs the matched

@@ -1,5 +1,12 @@
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+add_test(NAME taglib-update-check
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/taglib_update_check.py"
+        "${CMAKE_COMMAND}" "${PROJECT_SOURCE_DIR}/cmake/CheckTagLibUpdate.cmake")
+add_test(NAME dependency-version-report
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/dependency_versions.py"
+        "${CMAKE_COMMAND}" "${PROJECT_SOURCE_DIR}/cmake/PrintDependencyVersions.cmake")
+
 add_executable(preservation_audit_test preservation_audit.cpp)
 target_link_libraries(preservation_audit_test PRIVATE FlacConvertCore)
 add_executable(warning_regressions_test warning_regressions.cpp)

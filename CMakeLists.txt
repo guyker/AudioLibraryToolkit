@@ -45,7 +45,7 @@ set(BUILD_BINDINGS OFF)
 set(BUILD_EXAMPLES OFF)
 FetchContent_Declare(taglib
     GIT_REPOSITORY https://github.com/taglib/taglib.git
-    GIT_TAG 7d86716194777e0294453bfdc9dd170bd033e1f4
+    GIT_TAG deadc2990767dfbda0701e0ab35fdeea653db08f
     GIT_SUBMODULES_RECURSE TRUE)
 FetchContent_MakeAvailable(taglib)
 set(BUILD_TESTING "${_afc_build_testing}")
@@ -84,6 +84,35 @@ else()
 endif()
 
 add_subdirectory(FlacConvert)
+
+find_package(Git QUIET)
+if(WIN32)
+    set(_afc_ffmpeg_include_dir "${_ffmpeg_include_dir}")
+else()
+    find_path(_afc_ffmpeg_include_dir NAMES libavutil/version.h
+        HINTS ${FFmpeg_INCLUDE_DIRS} NO_CACHE)
+endif()
+get_directory_property(_afc_utfcpp_found DIRECTORY "${taglib_SOURCE_DIR}" DEFINITION utf8cpp_FOUND)
+get_directory_property(_afc_utfcpp_version DIRECTORY "${taglib_SOURCE_DIR}" DEFINITION utf8cpp_VERSION)
+
+add_custom_target(check_taglib_updates ALL
+    COMMAND "${CMAKE_COMMAND}"
+        "-DREPORT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+        "-DREPORT_TAGLIB_SOURCE_DIR=${taglib_SOURCE_DIR}"
+        "-DREPORT_TAGLIB_BINARY_DIR=${taglib_BINARY_DIR}"
+        "-DREPORT_FFMPEG_INCLUDE_DIR=${_afc_ffmpeg_include_dir}"
+        "-DREPORT_FFMPEG_EXECUTABLE=${FFMPEG_EXECUTABLE}"
+        "-DREPORT_GIT_EXECUTABLE=${GIT_EXECUTABLE}"
+        "-DREPORT_UTFCPP_FOUND=${_afc_utfcpp_found}"
+        "-DREPORT_UTFCPP_VERSION=${_afc_utfcpp_version}"
+        "-DREPORT_ZLIB_INCLUDE_DIR=${ZLIB_INCLUDE_DIR}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/PrintDependencyVersions.cmake"
+    COMMAND "${CMAKE_COMMAND}"
+        "-DTAGLIB_SOURCE_DIR=${taglib_SOURCE_DIR}"
+        "-DTAGLIB_UPDATE_TMP_DIR=${CMAKE_BINARY_DIR}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckTagLibUpdate.cmake"
+    VERBATIM)
+add_dependencies(FlacConvertCore check_taglib_updates)
 
 install(TARGETS AudioLibraryToolkit
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
