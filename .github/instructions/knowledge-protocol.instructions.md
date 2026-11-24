@@ -4,12 +4,17 @@ applyTo: "**"
 
 # Knowledge protocol
 
-The repository keeps durable knowledge in `docs/knowledge/`: one Markdown file per entry, indexed in
-`docs/knowledge/index.md`. Tooling is the globally installed Project Memory skill; do not copy its script into this
-repository. In PowerShell, invoke it using the command name and arguments, for example:
+Each module owns its durable knowledge: toolkit entries in root `docs/knowledge/`, desktop entries in
+`AudioLibraryToolkit.Desktop/docs/knowledge/`. Each has a separate index and config. Desktop commands must pass
+`-Root` explicitly because Git's default root selects the toolkit knowledge base. Keep backend guarantees in toolkit
+entries and frontend behavior in desktop entries; do not duplicate the public protocol or cite private backend
+implementation as a desktop contract. Historical migrated records are preserved separately from active entries.
+Tooling is the globally installed Project Memory skill; do not copy its script into this repository.
+In PowerShell, invoke it using the command name and arguments, for example:
 
 ```powershell
 & "$HOME\.copilot\skills\project-memory\scripts\kb.ps1" discover
+& "$HOME\.copilot\skills\project-memory\scripts\kb.ps1" discover -Root "$PWD\AudioLibraryToolkit.Desktop"
 ```
 
 ## Read before
@@ -63,5 +68,5 @@ change warrants durable design documentation.
 - An entry contradicts the code or `DESIGN.md`: say so; the code is current behaviour, `DESIGN.md` wins on intended
   behaviour; supersede the stale entry once confirmed.
 - `kb.ps1` unavailable: read `docs/knowledge/index.md` and the entry files directly, and write entries by hand from
-  `docs/knowledge/README.md`.
+  the owning module's `docs/knowledge/README.md`.
 - Generated documentation (wikis, `llms.txt`, exports) is derived and never outranks `DESIGN.md` or an entry.

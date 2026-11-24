@@ -11,7 +11,7 @@ where possible. Session logs and reports can contain paths and metadata, so revi
 
 ## Build and test
 
-See the [build instructions](README.md#build) for prerequisites, FFmpeg dependencies and platform-specific setup.
+See the [build instructions](AudioLibraryToolkit/README.md#build) for prerequisites, FFmpeg dependencies and platform-specific setup.
 The application uses CMake and Ninja; on Windows, use an x64 Visual Studio developer environment:
 
 ```text

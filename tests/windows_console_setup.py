@@ -160,7 +160,7 @@ def main(interrupted=False, progress=False):
                 send("output \u00e9\r")
                 wait_for("Input library directory:")
                 send(".\\" * 130 + "input \u97f3\U0001f3b5\\\r")
-                wait_for("Enter option")
+                wait_for("Enter one of the listed numbers")
                 send("0\r")
             assert kernel.WaitForSingleObject(process.process, 15000) == 0, "Application did not exit"
             exit_code = wintypes.DWORD()

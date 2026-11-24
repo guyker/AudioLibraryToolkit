@@ -363,28 +363,51 @@ int FolderConvert::ConvertAudioFolderToOutput(
     }
     if (!plan.tagIssueFiles.empty()) {
         const auto counts = CountTagIssues(plan);
-        Mp3TagIssues::Resolutions resolutions;
+        Mp3TagIssues::Resolutions resolutions = options.tagIssues;
+        bool unresolved = false;
         for (const auto kind : Mp3TagIssues::AllKinds) {
             const auto count = counts[static_cast<std::size_t>(kind)];
             if (count == 0) continue;
-            if (autoResolveTagIssues) {
-                resolutions.Set(kind, Mp3TagIssues::Action::Apply);
+            auto action = resolutions.Get(kind);
+            if (action == Mp3TagIssues::Action::Unresolved && autoResolveTagIssues) {
+                action = Mp3TagIssues::Choices(kind).front().action;
+                resolutions.Set(kind, action);
                 spdlog::info("Tag issues: {} ({} file(s)): {} [auto].", Mp3TagIssues::Name(kind), count,
-                    Mp3TagIssues::ActionLabel(kind, Mp3TagIssues::Action::Apply));
+                    Mp3TagIssues::ActionLabel(kind, action));
             }
-            else {
+            else if (action == Mp3TagIssues::Action::Unresolved) {
+                unresolved = true;
                 spdlog::error("Tag issues: {} ({} file(s)). {}", Mp3TagIssues::Name(kind), count,
                     Mp3TagIssues::Explanation(kind));
             }
+            else if (action == Mp3TagIssues::Action::Stop) {
+                spdlog::error("Tag issue resolution requested a stop. No conversion was started.");
+                return -1;
+            }
+            else {
+                bool allowed = false;
+                for (const auto& choice : Mp3TagIssues::Choices(kind)) {
+                    if (choice.action == action) {
+                        allowed = true;
+                        break;
+                    }
+                }
+                if (!allowed) {
+                    spdlog::error("Unsupported tag issue resolution for {}.", Mp3TagIssues::Name(kind));
+                    return -1;
+                }
+                spdlog::info("Tag issues: {} ({} file(s)): {} [selected].", Mp3TagIssues::Name(kind), count,
+                    Mp3TagIssues::ActionLabel(kind, action));
+            }
         }
-        if (!autoResolveTagIssues) {
+        if (unresolved) {
             std::string details = "Files with tag issues under '" + CommonUtils::path_to_utf8(plan.input) + "':";
             for (const auto& file : plan.tagIssueFiles) {
                 details += "\n    " + CommonUtils::path_to_utf8(file.source.lexically_relative(plan.input));
             }
             RunLogging::RecordError(details);
-            spdlog::error("No conversion was started. Choose resolutions in the interactive menu, "
-                "or set TagIssueResolution to \"auto\" in the configuration to apply the recommended ones.");
+            spdlog::error("No conversion was started. Resolve each detected issue or set "
+                "TagIssueResolution to \"auto\" in the configuration.");
             return -1;
         }
         ApplyTagIssueResolutions(plan, resolutions);

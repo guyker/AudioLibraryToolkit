@@ -1,0 +1,6 @@
+{
+  "idPrefix": "UI-K-",
+  "idWidth": 3,
+  "scope": ["apps", "packages"],
+  "areas": ["Desktop", "Worker Client"]
+}

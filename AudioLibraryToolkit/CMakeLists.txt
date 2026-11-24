@@ -68,7 +68,10 @@ target_link_libraries(AudioLibraryToolkitCore
     PRIVATE
         rapidjson_headers)
 
-add_executable(AudioLibraryToolkit src/app/AudioLibraryToolkitMain.cpp)
+add_executable(AudioLibraryToolkit
+    src/app/AudioLibraryToolkitMain.cpp
+    src/app/ApplicationServices.cpp
+    src/app/WorkerProtocol.cpp)
 target_link_libraries(AudioLibraryToolkit PRIVATE AudioLibraryToolkitCore)
 # Stage the first-run configuration template beside the built executable.
 add_custom_command(TARGET AudioLibraryToolkit POST_BUILD

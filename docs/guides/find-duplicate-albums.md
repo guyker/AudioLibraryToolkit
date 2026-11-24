@@ -5,9 +5,9 @@ shows the evidence, so you can review differences without automatically deleting
 
 ## 1. Build and configure
 
-[Build and install](../../README.md#build) the application. On the first operational run in an interactive terminal,
+[Build and install](../../AudioLibraryToolkit/README.md#build) the application. On the first operational run in an interactive terminal,
 setup asks for an output directory and an existing music library; see
-[configuration and first run](../../README.md#configuration-and-first-run) for details.
+[configuration and first run](../../AudioLibraryToolkit/README.md#configuration-and-first-run) for details.
 
 The examples below use Windows paths. Replace them with your own paths (or Linux paths), and keep output outside the
 source music library.

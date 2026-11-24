@@ -4,3 +4,9 @@ external/ffmpeg/
 external/obj/
 /out/
 /CMakeUserPresets.json
+/AudioLibraryToolkit.Desktop/node_modules/
+/AudioLibraryToolkit.Desktop/**/node_modules/
+/AudioLibraryToolkit.Desktop/apps/desktop/build/
+/AudioLibraryToolkit.Desktop/apps/desktop/release/
+/AudioLibraryToolkit.Desktop/packages/worker-client/dist/
+/tools/**/__pycache__/

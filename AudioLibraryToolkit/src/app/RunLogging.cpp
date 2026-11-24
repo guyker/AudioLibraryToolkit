@@ -57,7 +57,13 @@ bool recordFileDiagnostic(spdlog::level::level_enum level, const std::string& me
 class ProgressConsoleSink final : public spdlog::sinks::sink
 {
 public:
-    ProgressConsoleSink() : _sink(std::make_shared<spdlog::sinks::stdout_color_sink_mt>())
+    explicit ProgressConsoleSink(bool toStderr)
+        : _sink(toStderr
+            ? std::static_pointer_cast<spdlog::sinks::sink>(
+                std::make_shared<spdlog::sinks::stderr_color_sink_mt>())
+            : std::static_pointer_cast<spdlog::sinks::sink>(
+                std::make_shared<spdlog::sinks::stdout_color_sink_mt>())),
+        _output(toStderr ? std::cerr : std::cout)
     {
         _sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%t] [%^%l%$] %v");
     }
@@ -100,7 +106,7 @@ public:
         }
         const auto previousLength = (std::min)(_lineLength, limit);
         const auto padding = previousLength > display.size() ? previousLength - display.size() : 0;
-        std::cout << '\r' << display << std::string(padding, ' ') << std::flush;
+        _output << '\r' << display << std::string(padding, ' ') << std::flush;
         _lineLength = display.size();
     }
     void Clear()
@@ -113,16 +119,20 @@ private:
     void ClearLine()
     {
         if (_lineLength == 0) return;
-        std::cout << '\r' << std::string((std::min)(_lineLength, PlatformUtils::ConsoleWidth() - 1), ' ')
+        _output << '\r' << std::string((std::min)(_lineLength, PlatformUtils::ConsoleWidth() - 1), ' ')
             << '\r' << std::flush;
         _lineLength = 0;
     }
     std::shared_ptr<spdlog::sinks::sink> _sink;
+    std::ostream& _output;
     std::mutex _mutex;
     std::size_t _lineLength{ 0 };
 };
 
 std::shared_ptr<ProgressConsoleSink> consoleSink;
+bool consoleToStderr{ false };
+std::mutex progressHandlerMutex;
+std::function<void(std::string)> progressEventHandler;
 
 unsigned long currentProcessId()
 {
@@ -208,7 +218,7 @@ spdlog::filename_t toFilename(const fs::path& path)
 
 std::shared_ptr<spdlog::sinks::sink> createConsoleSink()
 {
-    consoleSink = std::make_shared<ProgressConsoleSink>();
+    consoleSink = std::make_shared<ProgressConsoleSink>(consoleToStderr);
     consoleSink->set_level(spdlog::level::info);
     return consoleSink;
 }
@@ -287,6 +297,27 @@ void pruneLogs(const fs::path& directory, const fs::path& currentLog)
         spdlog::warn("Session logs exceed the 1 GiB retention limit; active or inaccessible logs were retained.");
     }
 }
+}
+
+void emitProgressEvent(std::string message)
+{
+    std::function<void(std::string)> handler;
+    {
+        std::lock_guard lock(progressHandlerMutex);
+        handler = progressEventHandler;
+    }
+    if (handler) handler(std::move(message));
+}
+
+void RunLogging::SetConsoleToStderr(bool enabled)
+{
+    consoleToStderr = enabled;
+}
+
+void RunLogging::SetProgressEventHandler(std::function<void(std::string)> handler)
+{
+    std::lock_guard lock(progressHandlerMutex);
+    progressEventHandler = std::move(handler);
 }
 
 bool RunLogging::Start(const std::string& operation,
@@ -393,6 +424,7 @@ RunLogging::PhaseProgress::PhaseProgress(std::string label, std::optional<std::s
     : _label(std::move(label)), _total(total), _unit(std::move(unit)), _secondaryUnit(std::move(secondaryUnit))
 {
     spdlog::info("{}", Message());
+    emitProgressEvent(Message());
     const bool interactive = PlatformUtils::IsStdoutInteractive();
     _worker = std::jthread([this, interactive](std::stop_token stop) {
         std::unique_lock lock(_mutex);
@@ -402,6 +434,7 @@ RunLogging::PhaseProgress::PhaseProgress(std::string label, std::optional<std::s
                 [this, interactive] { return interactive && _detailChanged; });
             if (stop.stop_requested()) break;
             _detailChanged = false;
+            emitProgressEvent(Message());
             if (interactive) {
                 ShowProgress(Message());
             }

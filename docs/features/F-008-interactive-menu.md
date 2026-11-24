@@ -28,7 +28,7 @@ with its path before a scan starts. The completion summary counts installed
 JSON batch files (fragmented albums can produce more than one file per album).
 An exception is a scan preview preflight or discovery failure: it attempts to write a diagnostic report to a safe
 system temporary directory and logs its location; it does not install a catalog.
-The menu uses the same [operation-based output layout](../../README.md#output-layout) as CLI commands.
+The menu uses the same [operation-based output layout](../../AudioLibraryToolkit/README.md#output-layout) as CLI commands.
 Options 3 and 4 read option 2's `catalog-json` output; a previous per-library scan directory is used with a warning
 only when the new catalog directory is absent.
 
@@ -39,7 +39,7 @@ only when the new catalog directory is absent.
 ## Design and knowledge
 - DESIGN: `AudioLibraryToolkit/DESIGN.md` → Entry points; Key flows
 - K-024 confirmed progress and partial completion, K-065 operation-specific output and retained MP3 defaults,
-  K-049 `RUN` after reusable previews and scan failure diagnostics, compact menu and contextual help
+  K-072 preserved option numbering after removing the unused option
 
 ## Acceptance checks
 - [ ] Canceling at the confirmation writes no operation output. Option 7 retains its temporary HTML preview;

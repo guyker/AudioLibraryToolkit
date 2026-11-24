@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <set>
 #include <string>
+#include <vector>
 #include "ConversionOptions.h"
 
 enum class CommandAction
@@ -12,7 +13,8 @@ enum class CommandAction
     Repair,
     Scan,
     Duplicates,
-    DatabaseImport
+    DatabaseImport,
+    InitializeConfig
 };
 
 struct CommandLineOptions
@@ -24,9 +26,11 @@ struct CommandLineOptions
     std::string logLevel;
     std::string reportPath;
     std::set<std::string> repairRules;
+    std::vector<std::string> duplicateQuarantinePaths;
     std::size_t repairJobs{ 4 };
     bool repairDryRun{ false };
     bool repairRemoveId3v1{ false };
+    bool preview{ false };
     bool outputDirectorySpecified{ false };
     bool configPathSpecified{ false };
     bool overwrite{ false };

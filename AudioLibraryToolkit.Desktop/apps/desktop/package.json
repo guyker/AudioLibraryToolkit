@@ -1,0 +1,62 @@
+{
+  "name": "@audio-library/desktop",
+  "version": "0.1.0",
+  "description": "Independent Electron desktop client for AudioLibraryToolkit",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/guyker/AudioLibraryToolkit.git"
+  },
+  "private": true,
+  "type": "module",
+  "main": "desktop/main.mjs",
+  "scripts": {
+    "dev": "concurrently -k -s first \"vite --host 127.0.0.1 --port 5173\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "package:dir": "electron-builder --dir",
+    "package:win": "electron-builder --win nsis",
+    "package:linux": "electron-builder --linux AppImage"
+  },
+  "dependencies": {
+    "@audio-library/worker-client": "0.1.0",
+    "@fontsource/ibm-plex-mono": "^5.2.6",
+    "@fontsource/ibm-plex-sans": "^5.2.6",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.4.1",
+    "concurrently": "^9.1.2",
+    "electron": "45.4.1",
+    "electron-builder": "26.18.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "org.audiolibrarytoolkit.desktop",
+    "productName": "AudioLibraryToolkit",
+    "files": [
+      "desktop/**/*",
+      "build/renderer/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../../packages/worker-client/dist",
+        "to": "worker-client"
+      }
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "AudioVideo"
+    }
+  }
+}

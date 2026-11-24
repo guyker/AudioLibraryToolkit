@@ -1,0 +1,31 @@
+name: Desktop build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: AudioLibraryToolkit.Desktop
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: AudioLibraryToolkit.Desktop/package-lock.json
+      - run: npm ci
+        working-directory: AudioLibraryToolkit.Desktop
+      - run: npm test
+        working-directory: AudioLibraryToolkit.Desktop
+      - run: npm run build
+        working-directory: AudioLibraryToolkit.Desktop
+      - run: npm run package:dir --workspace @audio-library/desktop
+        working-directory: AudioLibraryToolkit.Desktop

@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -16,6 +17,8 @@ namespace RunLogging
 {
     bool Start(const std::string& operation,
         const std::optional<std::filesystem::path>& logDirectory = std::nullopt);
+    void SetConsoleToStderr(bool enabled);
+    void SetProgressEventHandler(std::function<void(std::string)> handler);
     void SetFileLevel(spdlog::level::level_enum level);
     // File-only diagnostics; returns false when logging at the requested level is unavailable or disabled.
     bool RecordError(const std::string& message);

@@ -21,6 +21,7 @@
 
 
 #include <cassert>
+#include <cerrno>
 #include <exception>
 
 #include <sstream>
@@ -44,9 +45,11 @@ extern "C" {
 }
 
 #include "AlbumCollection.h"
+#include "ApplicationServices.h"
 #include "BoundedTaskRunner.h"
 #include "CommandLine.h"
 #include "FolderConvert.h"
+#include "WorkerProtocol.h"
 #include "AudioRepair.h"
 #include "RepairRules.h"
 #include "FlacMetadata.h"
@@ -89,6 +92,41 @@ enum class ConvertActionEnum {
 
 namespace
 {
+#ifdef _WIN32
+HANDLE workerJobHandle{ nullptr };
+#endif
+
+bool prepareWorkerProcessGroup(std::string& error)
+{
+#ifdef _WIN32
+    workerJobHandle = CreateJobObjectW(nullptr, nullptr);
+    if (workerJobHandle == nullptr) {
+        error = "Cannot create worker process job: " +
+            std::system_category().message(static_cast<int>(GetLastError()));
+        return false;
+    }
+
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!SetInformationJobObject(workerJobHandle, JobObjectExtendedLimitInformation,
+            &limits, sizeof(limits)) ||
+        !AssignProcessToJobObject(workerJobHandle, GetCurrentProcess())) {
+        const auto failure = GetLastError();
+        CloseHandle(workerJobHandle);
+        workerJobHandle = nullptr;
+        error = "Cannot enable worker process containment: " +
+            std::system_category().message(static_cast<int>(failure));
+        return false;
+    }
+#else
+    if (getpgrp() != getpid() && setpgid(0, 0) != 0) {
+        error = "Cannot create worker process group: " + std::system_category().message(errno);
+        return false;
+    }
+#endif
+    return true;
+}
+
 std::string pathToUtf8(const fs::path& path)
 {
     return CommonUtils::path_to_utf8(path);
@@ -2544,7 +2582,7 @@ bool writeDuplicateReport(const fs::path& reportPath, const char* status,
 
 int ScanFolderProcessJSONAndFindDuplicates(const std::vector<fs::path>& jsonFiles, bool openDuplicateFolders,
     ManualOperationSummary* summary = nullptr, const DuplicateReview::Options* review = nullptr,
-    const fs::path& reportPath = {})
+    const fs::path& reportPath = {}, const std::vector<fs::path>* quarantinePaths = nullptr)
 {
 	AlbumCollection albumCollection;
 	std::shared_ptr<DirectoryContentEntryList> albumListPtr = std::make_shared<DirectoryContentEntryList>();
@@ -2682,6 +2720,54 @@ int ScanFolderProcessJSONAndFindDuplicates(const std::vector<fs::path>& jsonFile
 
     spdlog::info("Finding duplicated albums...");
     const auto matches = DuplicateMatcher::FindDuplicates(albums, identityKeys, matchOptions);
+    std::vector<std::vector<std::size_t>> selectedAlbumsByGroup(matches.groups.size());
+    if (quarantinePaths) {
+        if (!review) {
+            spdlog::error("Duplicate quarantine decisions require a review context.");
+            return 1;
+        }
+        std::set<std::string> selectedKeys;
+        for (const auto& requestedPath : *quarantinePaths) {
+            std::error_code ec;
+            const auto canonical = fs::canonical(requestedPath, ec);
+            if (ec) {
+                spdlog::error("Cannot resolve selected duplicate album '{}': {}",
+                    pathToUtf8(requestedPath), ec.message());
+                return 1;
+            }
+            const auto key = duplicateIdentityKey(canonical);
+            if (!selectedKeys.insert(key).second) {
+                spdlog::error("Duplicate quarantine selection contains the same album more than once: '{}'.",
+                    pathToUtf8(requestedPath));
+                return 1;
+            }
+            std::vector<std::pair<std::size_t, std::size_t>> candidates;
+            for (std::size_t groupIndex = 0; groupIndex < matches.groups.size(); ++groupIndex) {
+                for (const auto albumIndex : matches.groups[groupIndex].albums) {
+                    if (identityKeys[albumIndex] == key) {
+                        candidates.emplace_back(groupIndex, albumIndex);
+                    }
+                }
+            }
+            if (candidates.size() != 1) {
+                spdlog::error("Selected album is not in exactly one current duplicate group: '{}'.",
+                    pathToUtf8(requestedPath));
+                return 1;
+            }
+            selectedAlbumsByGroup[candidates.front().first].push_back(candidates.front().second);
+        }
+        for (auto first = selectedKeys.begin(); first != selectedKeys.end(); ++first) {
+            for (auto second = std::next(first); second != selectedKeys.end(); ++second) {
+                const auto firstPath = CommonUtils::path_from_utf8(*first);
+                const auto secondPath = CommonUtils::path_from_utf8(*second);
+                if (DuplicateReview::IsSameOrChildPath(firstPath, secondPath) ||
+                    DuplicateReview::IsSameOrChildPath(secondPath, firstPath)) {
+                    spdlog::error("Duplicate quarantine selections cannot contain nested album folders.");
+                    return 1;
+                }
+            }
+        }
+    }
     const auto& stats = matches.statistics;
     for (const auto& alias : matches.aliases) {
         if (alias.contentDiffers) {
@@ -2798,7 +2884,8 @@ int ScanFolderProcessJSONAndFindDuplicates(const std::vector<fs::path>& jsonFile
         std::vector<bool> movedAlbums(albums.size(), false);
         std::size_t pairNumber = 0;
         const bool useColor = PlatformUtils::EnableConsoleColors();
-        for (const auto& group : matches.groups) {
+        for (std::size_t groupIndex = 0; groupIndex < matches.groups.size(); ++groupIndex) {
+            const auto& group = matches.groups[groupIndex];
             try {
                 std::vector<std::size_t> remaining;
                 std::map<std::size_t, std::size_t> positionByAlbum;
@@ -2903,8 +2990,78 @@ int ScanFolderProcessJSONAndFindDuplicates(const std::vector<fs::path>& jsonFile
                     spdlog::warn("Duplicate group has no direct match among its remaining albums; review skipped.");
                     continue;
                 }
-                const auto decision = DuplicateReview::ReviewGroup(paths, directMatches,
-                    review->libraryRoots, review->outputRoot, openDuplicateFolders, std::cin, std::cout);
+                DuplicateReview::GroupResult decision;
+                if (quarantinePaths) {
+                    std::vector<std::size_t> selectedPositions;
+                    for (const auto album : selectedAlbumsByGroup[groupIndex]) {
+                        const auto found = positionByAlbum.find(album);
+                        if (found == positionByAlbum.end()) {
+                            spdlog::error("Selected duplicate album was already moved by another review group.");
+                            return 1;
+                        }
+                        selectedPositions.push_back(found->second);
+                    }
+                    std::vector<bool> simulatedMoved(paths.size(), false);
+                    for (const auto source : selectedPositions) {
+                        const auto remainingCount = paths.size() -
+                            static_cast<std::size_t>(std::ranges::count(simulatedMoved, true));
+                        if (remainingCount <= 1 || simulatedMoved[source]) {
+                            spdlog::error("Duplicate quarantine selection must leave at least one album in each group.");
+                            return 1;
+                        }
+                        if (remainingCount > 2) {
+                            std::size_t firstRemaining = paths.size();
+                            for (std::size_t index = 0; index < paths.size(); ++index) {
+                                if (index != source && !simulatedMoved[index]) {
+                                    firstRemaining = index;
+                                    break;
+                                }
+                            }
+                            std::vector<bool> reachable(paths.size(), false);
+                            std::vector<std::size_t> pending{ firstRemaining };
+                            reachable[firstRemaining] = true;
+                            while (!pending.empty()) {
+                                const auto current = pending.back();
+                                pending.pop_back();
+                                for (const auto& [first, second] : directMatches) {
+                                    const auto next = first == current ? second :
+                                        second == current ? first : paths.size();
+                                    if (next < paths.size() && next != source && !simulatedMoved[next] &&
+                                        !reachable[next]) {
+                                        reachable[next] = true;
+                                        pending.push_back(next);
+                                    }
+                                }
+                            }
+                            const auto connectedCount =
+                                static_cast<std::size_t>(std::ranges::count(reachable, true));
+                            if (connectedCount != remainingCount - 1) {
+                                spdlog::error("Selected album would disconnect the remaining direct-match group.");
+                                return 1;
+                            }
+                        }
+                        simulatedMoved[source] = true;
+                    }
+                    std::ostringstream scripted;
+                    for (const auto selected : selectedPositions) {
+                        scripted << selected + 1 << "\nMOVE\n";
+                    }
+                    scripted << '\n';
+                    std::istringstream scriptedInput(scripted.str());
+                    std::ostringstream scriptedOutput;
+                    decision = DuplicateReview::ReviewGroup(paths, directMatches,
+                        review->libraryRoots, review->outputRoot, false, scriptedInput, scriptedOutput);
+                    std::cout << scriptedOutput.str();
+                    if (decision.action != DuplicateReview::Action::Continue ||
+                        decision.movedAlbums.size() != selectedPositions.size()) {
+                        spdlog::error("Duplicate review did not apply every selected quarantine decision.");
+                        return 1;
+                    }
+                }
+                else {
+                    decision = DuplicateReview::ReviewGroup(paths, directMatches,
+                        review->libraryRoots, review->outputRoot, openDuplicateFolders, std::cin, std::cout);
+                }
                 for (std::size_t i = 0; i < decision.movedAlbums.size(); ++i) {
                     const auto& movedKey = albumKeys[remaining[decision.movedAlbums[i]]];
                     for (std::size_t album = 0; album < albumKeys.size(); ++album) {
@@ -3079,6 +3236,57 @@ int ImportJsonDirectoryToDatabase(const fs::path& jsonDirectory, const fs::path&
     const fs::path databasePath = library.getMediaDBPath(outputRoot);
     spdlog::info("Importing {} JSON file(s) into '{}'.", jsonFiles.size(), pathToUtf8(databasePath));
     return albumCollection.ExportToDatabase(albums, databasePath) ? 0 : 1;
+}
+
+int ApplicationServiceOperations::Scan(const fs::path& input, const fs::path& outputRoot,
+    bool archiveFlacMetadata, bool fullRescan)
+{
+    fs::path scanRoot = absoluteDisplayPath(input);
+    if (scanRoot.filename().empty() && scanRoot.has_relative_path()) {
+        scanRoot = scanRoot.parent_path();
+    }
+    MediaDirectoryElement library{};
+    library.mediaPath = pathToUtf8(scanRoot);
+    library.mediaName = directoryNameUtf8(scanRoot);
+    return ScanFolderAndCreateJSON(
+        { library }, true, outputRoot, archiveFlacMetadata, false, nullptr, fullRescan);
+}
+
+int ApplicationServiceOperations::FindDuplicates(const fs::path& jsonDirectory, bool openFolders,
+    const fs::path& reportPath, const std::vector<fs::path>& quarantinePaths,
+    const fs::path& outputRoot)
+{
+    if (!quarantinePaths.empty()) {
+        const auto settings = AppSettingsJson::AppSetting();
+        if (!settings) return 1;
+        DuplicateReview::Options review{ outputRoot, {} };
+        for (const auto& library : settings->MediaDirectoryList) {
+            if (library.isActive && !library.mediaPath.empty()) {
+                review.libraryRoots.push_back(pathFromUtf8(library.mediaPath));
+            }
+        }
+        if (review.libraryRoots.empty()) {
+            spdlog::error("Duplicate quarantine requires at least one active source library in the configuration.");
+            return 1;
+        }
+        std::cout << "Quarantining selected duplicate albums using verified copies; "
+            "catalog JSON and databases will not be updated.\n";
+        return ScanFolderProcessJSONAndFindDuplicates(
+            findJsonFiles(jsonDirectory), false, nullptr, &review, reportPath, &quarantinePaths);
+    }
+    return ScanFolderProcessJSONAndFindDuplicates(
+        findJsonFiles(jsonDirectory), openFolders, nullptr, nullptr, reportPath);
+}
+
+int ApplicationServiceOperations::ImportDatabase(const fs::path& jsonDirectory,
+    const fs::path& outputRoot)
+{
+    return ImportJsonDirectoryToDatabase(jsonDirectory, outputRoot);
+}
+
+void ApplicationServiceOperations::PrintRepairFindings(const AudioRepair::Plan& plan)
+{
+    PrintRepairFindingCounts(plan);
 }
 
 namespace
@@ -3396,152 +3604,55 @@ int RunWithArgumentsImpl(const std::vector<const char*>& arguments)
     if (parseResult != 1) {
         return parseResult;
     }
+    return ApplicationServices::Run(options);
+}
 
-    try {
-        std::optional<fs::path> explicitConfigPath;
-        if (options.configPathSpecified) {
-            explicitConfigPath = pathFromUtf8(options.configPath);
-        }
-        std::string configurationError;
-        const auto settings = AppSettingsJson::LoadForCommandLine(explicitConfigPath, configurationError);
-        if (!settings) {
-            std::cerr << "Configuration error: " << configurationError << '\n';
-            RunLogging::RecordError("Configuration error: " + configurationError);
-            return 1;
-        }
-
-        if (options.action != CommandAction::Duplicates && !options.outputDirectorySpecified &&
-            (settings->OutDirectory.empty() || std::ranges::all_of(settings->OutDirectory,
-                [](unsigned char ch) { return std::isspace(ch) != 0; }))) {
-            const std::string error = "Set OutDirectory in the configuration file or pass --output-dir.";
-            std::cerr << "Configuration error: " << error << '\n';
-            RunLogging::RecordError("Configuration error: " + error);
-            return 1;
-        }
-
-        auto fileLogLevel = static_cast<spdlog::level::level_enum>(settings->LogLevel);
-        if (options.logLevel == "info") fileLogLevel = spdlog::level::info;
-        else if (options.logLevel == "debug") fileLogLevel = spdlog::level::debug;
-        else if (options.logLevel == "trace") fileLogLevel = spdlog::level::trace;
-        RunLogging::SetFileLevel(fileLogLevel);
-        FFmpeg::initialize_ffmpeg_logging();
-
-        const fs::path inputPath = pathFromUtf8(options.inputPath);
-        const fs::path outputDirectory = options.outputDirectorySpecified
-            ? pathFromUtf8(options.outputDirectory)
-            : pathFromUtf8(settings->OutDirectory);
-
-        const bool catalogInput = options.action == CommandAction::Duplicates ||
-            options.action == CommandAction::DatabaseImport;
-        spdlog::info("Source folder{}: '{}'.", catalogInput ? " (catalog JSON)" : "",
-            pathToUtf8(absoluteDisplayPath(inputPath)));
-
-        switch (options.action) {
-        case CommandAction::Convert: {
-            std::error_code ec;
-            const auto absoluteInput = fs::absolute(inputPath, ec).lexically_normal();
-            const auto name = absoluteInput.filename().empty()
-                ? absoluteInput.parent_path().filename() : absoluteInput.filename();
-            if (ec || name.empty() || name == "." || name == "..") {
-                spdlog::error("Conversion input must have a library folder name.");
-                return 1;
-            }
-            std::string sidecarError;
-            const auto sidecarFormat = settings->MetadataSidecars.Resolve(
-                options.conversion.target, options.noMetadataSidecar, sidecarError);
-            if (!sidecarFormat) {
-                std::cerr << "Configuration error: " << sidecarError << '\n';
-                RunLogging::RecordError("Configuration error: " + sidecarError);
-                return 1;
-            }
-            options.conversion.sidecarFormat = *sidecarFormat;
-            return FolderConvert::ConvertAudioFolderToOutput(
-                inputPath, OutputLayout::Conversion(outputDirectory, options.conversion.target, name),
-                options.overwrite, options.conversion, settings->TagIssueResolution == "auto") == 0 ? 0 : 1;
-        }
-
-        case CommandAction::Repair: {
-            std::error_code ec;
-            const auto absoluteInput = fs::absolute(inputPath, ec).lexically_normal();
-            const auto name = absoluteInput.filename().empty()
-                ? absoluteInput.parent_path().filename() : absoluteInput.filename();
-            if (ec || name.empty() || name == "." || name == "..") {
-                spdlog::error("Repair input must have a library folder name.");
-                return 1;
-            }
-            AudioRepair::Plan plan;
-            auto rules = options.repairRules.empty() ? RepairRules::DefaultRules() : options.repairRules;
-            if (options.repairRemoveId3v1) rules.insert("mp3.redundant-id3v1");
-            if (AudioRepair::Prepare(inputPath, OutputLayout::Repair(outputDirectory, name),
-                    options.overwrite, rules, plan, options.repairJobs, options.repairDryRun) != 0) {
-                return 1;
-            }
-            if (options.repairDryRun) {
-                return AudioRepair::PrintDryRunReport(plan);
-            }
-            std::cout << "Repair preview: " << pathToUtf8(plan.input) << '\n'
-                << "  Output: " << pathToUtf8(plan.output) << '\n'
-                << "  FLAC/MP3 files inspected: " << plan.inspectedFiles << '\n'
-                << "  Files to repair: " << std::count_if(plan.files.begin(), plan.files.end(),
-                    [](const AudioRepair::PlannedFile& file) { return file.repair; }) << '\n'
-                << "  Unresolved findings: " << std::count_if(plan.findings.begin(), plan.findings.end(),
-                    [](const AudioRepair::Finding& finding) {
-                        return finding.status == "manual-review" || finding.status == "unreadable";
-                    }) << '\n'
-                << "  Existing destination conflicts: " << plan.conflicts.size() << '\n';
-            PrintRepairFindingCounts(plan);
-            const int result = AudioRepair::Execute(plan);
-            return result == 0 ? 0 : 1;
-        }
-
-        case CommandAction::Scan: {
-            if (options.scanTierSpecified) {
-                settings->ScanTier = options.scanTier;
-            }
-            const bool archiveFlacMetadata = options.archiveFlacMetadata ||
-                (!options.noArchiveFlacMetadata && settings->ScanFlacMetadataArchives);
-            // Scan through the given path, as the menu does; canonicalizing would expand 8.3 names and turn
-            // mapped drives into UNC paths in the catalog.
-            fs::path scanRoot = absoluteDisplayPath(inputPath);
-            if (scanRoot.filename().empty() && scanRoot.has_relative_path()) {
-                scanRoot = scanRoot.parent_path();
-            }
-            MediaDirectoryElement library{};
-            library.mediaPath = pathToUtf8(scanRoot);
-            library.mediaName = directoryNameUtf8(scanRoot);
-            return ScanFolderAndCreateJSON(
-                { library }, true, outputDirectory, archiveFlacMetadata,
-                false, nullptr, options.fullRescan);
-        }
-
-        case CommandAction::Duplicates:
-            if (!fs::is_directory(inputPath)) {
-                spdlog::error("JSON input path is not a directory: {}", pathToUtf8(inputPath));
-                return 1;
-            }
-            return ScanFolderProcessJSONAndFindDuplicates(
-                findJsonFiles(inputPath), options.openDuplicateFolders, nullptr, nullptr,
-                options.reportPath.empty() ? fs::path{} : pathFromUtf8(options.reportPath));
-
-        case CommandAction::DatabaseImport:
-            if (!fs::is_directory(inputPath)) {
-                spdlog::error("JSON input path is not a directory: {}", pathToUtf8(inputPath));
-                return 1;
-            }
-            return ImportJsonDirectoryToDatabase(inputPath, outputDirectory);
-
-        default:
-            return 2;
-        }
+namespace
+{
+const char* workerOperationName(CommandAction action)
+{
+    switch (action) {
+    case CommandAction::Convert: return "convert";
+    case CommandAction::Repair: return "repair";
+    case CommandAction::Scan: return "scan";
+    case CommandAction::Duplicates: return "duplicates";
+    case CommandAction::DatabaseImport: return "db import";
+    default: return "unknown";
     }
-    catch (const fs::filesystem_error& error) {
-        spdlog::error("Filesystem error: {}", error.what());
-        return 1;
+}
+
+int runWorkerOperation(const CommandLineOptions& options, std::string& output)
+{
+    std::vector<std::string> logArguments{ "AudioLibraryToolkit", workerOperationName(options.action) };
+    if (options.configPathSpecified) {
+        logArguments.emplace_back("--config");
+        logArguments.push_back(options.configPath);
+    }
+    std::vector<const char*> logArgumentPointers;
+    logArgumentPointers.reserve(logArguments.size());
+    for (const auto& argument : logArguments) {
+        logArgumentPointers.push_back(argument.c_str());
+    }
+
+    RunLogging::Start(std::string("worker ") + workerOperationName(options.action));
+    logConfigurationPath(logArgumentPointers);
+    std::ostringstream captured;
+    auto* previous = std::cout.rdbuf(captured.rdbuf());
+    int result = 1;
+    try {
+        result = ApplicationServices::Run(options);
     }
     catch (const std::exception& error) {
-        spdlog::error("Command failed: {}", error.what());
-        return 1;
+        std::cout.rdbuf(previous);
+        spdlog::error("Worker command failed: {}", error.what());
+        RunLogging::Finish(result);
+        throw;
     }
+    std::cout.rdbuf(previous);
+    output = captured.str();
+    RunLogging::Finish(result);
+    return result;
+}
 }
 
 int RunWithArguments(const std::vector<const char*>& arguments)
@@ -3550,6 +3661,18 @@ int RunWithArguments(const std::vector<const char*>& arguments)
     if (GetConsoleCP() != CP_UTF8) SetConsoleCP(CP_UTF8);
     if (GetConsoleOutputCP() != CP_UTF8) SetConsoleOutputCP(CP_UTF8);
 #endif
+    if (arguments.size() == 2 && arguments[1] != nullptr &&
+        std::string_view(arguments[1]) == "--worker") {
+        std::string processGroupError;
+        if (!prepareWorkerProcessGroup(processGroupError)) {
+            std::cerr << processGroupError << '\n';
+            return 1;
+        }
+        RunLogging::SetConsoleToStderr(true);
+        std::ostream protocolOutput(std::cout.rdbuf());
+        return WorkerProtocol::Run(std::cin, protocolOutput, runWorkerOperation);
+    }
+
     const std::string operation = arguments.size() == 1
         ? "interactive menu" : (arguments[1] == nullptr ? "command line" : arguments[1]);
     RunLogging::Start(operation);

@@ -18,7 +18,7 @@ Existing files are not overwritten by setup. Defaults contain neither an output 
 requires an output root and an active library. CLI commands use their positional input and need either `OutDirectory`
 or `--output-dir`, except `duplicates`, which does not need an output root.
 `OutDirectory` and `--output-dir` are base roots; operations append the categories in the
-[output layout](../../README.md#output-layout). No configuration keys are added for the layout.
+[output layout](../../AudioLibraryToolkit/README.md#output-layout). No configuration keys are added for the layout.
 Invalid `LogLevel` (outside 0–6), `AlbumsSplitThreshold <= 0`, or a negative/non-integer
 `MetadataScanMaxThreads` fails. `MetadataScanMaxThreads` defaults to `0`, which uses hardware concurrency (fallback 4);
 a positive value caps concurrent metadata workers per album. `LogLevel` sets the detailed session-file threshold for

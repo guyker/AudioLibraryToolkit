@@ -3,7 +3,8 @@ id: K-055
 kind: decision
 title: "Keep duplicate review groups directly connected when moving albums"
 area: [AudioLibraryToolkit]
-status: active
+status: superseded
+superseded_by: K-074
 created: 2026-11-19
 reviewed: 2026-11-24
 cites:

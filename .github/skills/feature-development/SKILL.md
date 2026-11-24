@@ -54,7 +54,7 @@ acceptance checks.
 - [ ] Assess whether the change materially affects behaviour, design, contracts, configuration, schemas or risks.
       Update `AudioLibraryToolkit/DESIGN.md` and the affected F-entry only when their current content needs to change; create
       a new indexed F-entry for an important new feature, not for routine edits.
-- [ ] `README.md` updated when a material CLI, menu or configuration change makes it inaccurate
+- [ ] `AudioLibraryToolkit/README.md` updated when a material CLI, menu or configuration change makes it inaccurate
 - [ ] `kb.ps1 affected`: review each entry (`reviewed` / `cite` / supersede); record new decisions per the protocol
 - [ ] Follow the **doc-sync** procedure, even if the skill is not auto-discovered. Use
       `python tools\doc_impact.py --details` when candidate documents need identifying.

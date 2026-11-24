@@ -20,6 +20,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          sparse-checkout: |
+            /*
+            !/AudioLibraryToolkit.Desktop/
+          sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Install build and FFmpeg dependencies
         run: |
@@ -50,6 +54,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          sparse-checkout: |
+            /*
+            !/AudioLibraryToolkit.Desktop/
+          sparse-checkout-cone-mode: false
           persist-credentials: false
       - uses: ilammy/msvc-dev-cmd@v1
         with:

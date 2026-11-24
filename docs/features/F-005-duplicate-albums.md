@@ -66,17 +66,24 @@ Library roots, nested/aliased pairs, album links and linked contents, and source
 Catalog JSON and databases are not changed by a move: rerun option 2 afterward. Option 4 reimports current albums
 but retains database albums absent from the import; it does not automatically purge moved albums.
 
+Worker clients (F-012) can also provide album paths explicitly selected from a duplicate report. The backend
+recomputes current groups, requires each selected album to belong to exactly one current group, rejects nested
+selections, and preserves the one-album-kept and direct-match-connectivity checks before delegating the verified move
+to `DuplicateReview::ReviewGroup`. Unselected albums are not moved. This path requires active source library roots
+and an output root; catalog JSON and databases are not rewritten.
+
 ## Entry points
 - `AudioLibraryToolkit duplicates <json dir> [--open] [--report <file>]` → `app/AudioLibraryToolkitMain.cpp#RunWithArguments`
 - Menu option 3 → `app/AudioLibraryToolkitMain.cpp#ScanFolderProcessJSONAndFindDuplicates`
+- Worker-selected quarantine → `app/WorkerProtocol.cpp#WorkerProtocol::Run` → `app/AudioLibraryToolkitMain.cpp#ScanFolderProcessJSONAndFindDuplicates`
 - `duplicates/DuplicateMatcher.cpp#DuplicateMatcher::FindDuplicates`
 - `duplicates/DuplicateComparison.cpp#DuplicateComparison::DescribeAlbum`, `duplicates/DuplicateComparison.cpp#DuplicateComparison::DescribePair`
 - `duplicates/DuplicateReview.cpp#DuplicateReview::ReviewGroup`
 
 ## Design and knowledge
 - DESIGN: `AudioLibraryToolkit/DESIGN.md` → Duplicates
-- Knowledge: K-052 (explicit confirmation for each quarantined album); K-055 (preserve direct-match connectivity);
-  K-065 (operation layout and legacy catalog compatibility)
+- Knowledge: K-052 (menu confirmation for each quarantined album); K-074 (explicit client selections and
+  direct-match connectivity); K-065 (operation layout and legacy catalog compatibility)
 - Related config: `MinMatchingTracksForDuplicate`, `SizeMatchPercentageThreshold`, `DuplicateDurationToleranceSeconds`,
   `DuplicateFuzzyNames`, `DuplicateStripEditionText`, `DuplicatePartialMatches`, `DuplicatePartialMinCoverage`; `ExtraAudioQualityMetrics`
   currently warns and is ignored.
@@ -116,10 +123,13 @@ but retains database albums absent from the import; it does not automatically pu
 - [ ] Moving an album skips later pairs involving it or its descendants without probing nonexistent paths.
 - [ ] Repeated names use separate destinations under `quarantine`; previous `deleted` output and the kept album remain unchanged.
 - [ ] A `quarantine` output alias into any active library is refused without writing into that library.
+- [x] Worker quarantine moves only explicitly selected album paths, recomputes current groups, and preserves verified
+      copy-before-removal and direct-match-connectivity checks.
 
 ## Known limitations
-- Menu results are logged only; use the CLI `--report` for a JSON report.
+- Menu results are logged only; CLI and worker clients can write a JSON report.
 - Stored FLAC MD5s are trusted as recorded; they are not re-verified by decoding. No acoustic fingerprinting.
 - Requires the source folders recorded in JSON to still exist.
-- Menu moves require enough free output space for a complete album copy; originals are removed only after verification.
+- Quarantine moves require enough free output space for a complete album copy; originals are removed only after
+  verification.
 - No automatic restore or catalog rewrite is performed; inspect `move.json` after interruption. Do not edit folders during a move.

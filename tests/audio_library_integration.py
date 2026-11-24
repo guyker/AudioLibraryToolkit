@@ -491,6 +491,71 @@ class ConversionTests(unittest.TestCase):
         self.assertIn(self.name, self.session_log(result))
         self.assertFalse(self.destination().exists())
 
+    def test_worker_applies_explicit_tag_issue_resolution(self):
+        self.tag_issue_source(self.plain, [b"TITLE=Fixture", b"GENRE=17"])
+        config = self.sidecar_config(ConvertToMp3="disabled")
+        request = {
+            "protocolVersion": 1,
+            "requestId": "explicit-tag-resolution",
+            "type": "run",
+            "operation": "convert",
+            "parameters": {
+                "inputPath": str(self.source),
+                "outputDirectory": str(self.output),
+                "configPath": str(config),
+                "target": "mp3",
+                "tagIssueResolutions": {"numericGenre": "alternative"},
+            },
+        }
+        env = os.environ.copy()
+        env["LOCALAPPDATA"] = str(self.work / "local-app-data")
+        result = subprocess.run(
+            [str(ARGS.converter), "--worker"],
+            input=json.dumps(request, ensure_ascii=False) + "\n",
+            capture_output=True, text=True, encoding="utf-8", env=env, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        events = [json.loads(line) for line in result.stdout.splitlines()]
+        completed = next(event for event in events
+                         if event.get("requestId") == request["requestId"] and
+                         event["type"] == "completed")
+        self.assertEqual(completed["status"], "succeeded", (completed, result.stderr))
+        frames = id3_frames(self.mp3().read_bytes())
+        self.assertIn((b"TCON", b"\x03" + b"17"), frames)
+        report = self.audit(self.destination())
+        self.assertEqual(report["tagIssueResolutions"],
+                         {"numericGenre": "Keep the numbers as written"})
+
+    def test_worker_conversion_preview_does_not_write_outputs(self):
+        config = self.sidecar_config(ConvertToMp3="disabled")
+        request = {
+            "protocolVersion": 1,
+            "requestId": "conversion-preview",
+            "type": "preview",
+            "operation": "convert",
+            "parameters": {
+                "inputPath": str(self.source),
+                "outputDirectory": str(self.output),
+                "configPath": str(config),
+                "target": "mp3",
+            },
+        }
+        env = os.environ.copy()
+        env["LOCALAPPDATA"] = str(self.work / "local-app-data")
+        result = subprocess.run(
+            [str(ARGS.converter), "--worker"],
+            input=json.dumps(request, ensure_ascii=False) + "\n",
+            capture_output=True, text=True, encoding="utf-8", env=env, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        events = [json.loads(line) for line in result.stdout.splitlines()]
+        completed = next(event for event in events
+                         if event.get("requestId") == request["requestId"] and
+                         event["type"] == "completed")
+        self.assertEqual(completed["status"], "succeeded", (completed, result.stderr))
+        output = next(event["text"] for event in events if event["type"] == "output")
+        self.assertIn("Conversion preview:", output)
+        self.assertIn("Audio conversions: 1", output)
+        self.assertFalse(self.output.exists())
+
     def test_cli_auto_applies_recommended_tag_issue_resolutions(self):
         self.tag_issue_source(self.fixture.read_bytes(), [
             b"TITLE=Fixture", b"COMPOSER=", b"GENRE=17", b"ARTIST=One\x00Two",
@@ -2424,6 +2489,71 @@ class ConversionTests(unittest.TestCase):
         with closing(sqlite3.connect(database)) as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM files").fetchone()[0], 2)
         self.assertEqual({path: path.read_bytes() for path in self.source.rglob("*") if path.is_file()}, original)
+
+    def test_worker_quarantines_only_explicitly_selected_duplicate_album(self):
+        worker_source = self.work / "source-library"
+        worker_source.mkdir()
+        albums = [worker_source / "first", worker_source / "second"]
+        worker_output = self.work / "worker-output"
+        for album in albums:
+            album.mkdir()
+            (album / "track.flac").write_bytes(self.fixture.read_bytes())
+        settings = json.loads(self.config.read_text(encoding="utf-8"))
+        settings["OutDirectory"] = str(worker_output)
+        settings["MediaDirectoryList"] = [
+            {"isActive": True, "mediaPath": str(worker_source), "mediaName": "source-library"}]
+        config = self.work / "duplicate-review-config.json"
+        config.write_text(json.dumps(settings), encoding="utf-8")
+        scanned = run(ARGS.converter, "scan", worker_source, "--output-dir", worker_output, "--config", config)
+        self.assertEqual(scanned.returncode, 0, scanned.stdout + scanned.stderr)
+        catalog = worker_output / "catalog-json" / "source-library"
+        report_path = self.work / "duplicate-review.json"
+        environment = os.environ.copy()
+        environment["LOCALAPPDATA"] = str(self.work / "local-app-data")
+
+        def worker_request(request_id, parameters):
+            request = {
+                "protocolVersion": 1,
+                "requestId": request_id,
+                "type": "run",
+                "operation": "duplicates",
+                "parameters": parameters,
+            }
+            return subprocess.run(
+                [str(ARGS.converter), "--worker"],
+                input=json.dumps(request, ensure_ascii=False) + "\n",
+                capture_output=True, text=True, encoding="utf-8", env=environment, timeout=120)
+
+        report_result = worker_request("duplicate-report", {
+            "jsonDirectory": str(catalog),
+            "reportPath": str(report_path),
+            "configPath": str(config),
+        })
+        self.assertEqual(report_result.returncode, 0, report_result.stdout + report_result.stderr)
+        report_events = [json.loads(line) for line in report_result.stdout.splitlines()]
+        report_completed = next(event for event in report_events if event.get("requestId") == "duplicate-report"
+                                and event["type"] == "completed")
+        self.assertEqual(report_completed["status"], "succeeded",
+                         (report_events, report_result.stdout, report_result.stderr))
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(report["groups"]), 1)
+        selected_album = report["groups"][0]["albums"][0]
+
+        quarantine_result = worker_request("duplicate-quarantine", {
+            "jsonDirectory": str(catalog),
+            "outputDirectory": str(worker_output),
+            "configPath": str(config),
+            "duplicateQuarantinePaths": [selected_album],
+        })
+        self.assertEqual(quarantine_result.returncode, 0, quarantine_result.stdout + quarantine_result.stderr)
+        quarantine_events = [json.loads(line) for line in quarantine_result.stdout.splitlines()]
+        quarantine_completed = next(event for event in quarantine_events
+                                    if event.get("requestId") == "duplicate-quarantine" and
+                                    event["type"] == "completed")
+        self.assertEqual(quarantine_completed["status"], "succeeded", quarantine_events)
+        self.assertFalse(Path(selected_album).exists())
+        self.assertTrue(any((worker_output / "quarantine").rglob("move.json")))
+        self.assertTrue(next(album for album in albums if album.exists()).is_dir())
 
     def test_scan_ffmpeg_warnings_are_file_only_and_preserved_in_report(self):
         self.track.unlink()

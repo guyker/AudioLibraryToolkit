@@ -96,6 +96,9 @@ add_test(NAME app-settings-config
 add_test(NAME config-startup
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/config_startup.py"
         "$<TARGET_FILE:AudioLibraryToolkit>")
+add_test(NAME worker-protocol
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/worker_protocol.py"
+        "$<TARGET_FILE:AudioLibraryToolkit>")
 if(WIN32)
     add_test(NAME config-windows-console
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/windows_console_setup.py"

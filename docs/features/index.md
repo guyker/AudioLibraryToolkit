@@ -35,6 +35,7 @@ diff and this index. The reports do not write entries or retain a change history
 | [F-009](F-009-menu-option-5.md) | Menu option 5 | removed |
 | [F-010](F-010-session-logging.md) | Per-request session logging | active |
 | [F-011](F-011-metadata-repair.md) | Repair recognized FLAC/MP3 metadata defects | active |
+| [F-012](F-012-worker-interface.md) | Headless worker interface | experimental |
 
 ## Template
 

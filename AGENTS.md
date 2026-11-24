@@ -6,7 +6,9 @@
 
 AudioLibraryToolkit is a C++ audio conversion and library-management utility. The application sources are under
 `AudioLibraryToolkit/`; conversions run through the FFmpeg executable, and metadata and audio analysis also use FFmpeg
-libraries. See `README.md` for the feature overview.
+libraries. See `AudioLibraryToolkit/README.md` for the toolkit feature overview.
+`AudioLibraryToolkit.Desktop/` is an optional, independently built client with its own `AGENTS.md` and documentation.
+Dependency direction is strictly client to the toolkit's public worker protocol, never toolkit to client.
 
 The core C++ sources must remain portable across Windows, Linux and macOS. CMake is the only build definition; Visual
 Studio is used through its CMake "Open Folder" support, not a hand-maintained solution. Isolate
@@ -16,10 +18,11 @@ platform-specific code behind narrow platform abstractions or conditional implem
 
 | Folder / file | What it is | Read first |
 |---|---|---|
-| `CMakeLists.txt`, `CMakePresets.json` | Shared Windows/Linux build | `README.md`, then platform CMake files |
+| `CMakeLists.txt`, `CMakePresets.json` | Headless Windows/Linux build | `AudioLibraryToolkit/README.md`, then platform CMake files |
 | `AudioLibraryToolkit/` | The application: components, flows, contracts, schemas | `AudioLibraryToolkit/DESIGN.md` |
 | `AudioLibraryToolkit/src/`, `AudioLibraryToolkit/include/` | Implementation and headers grouped by responsibility (`app`, `catalog`, `common`, `conversion`, `duplicates`, `media`, `metadata`, `platform`, `repair`); vendored RapidJSON stays under `include/rapidjson/` | `AudioLibraryToolkit/DESIGN.md` component map, then the file |
-| `docs/features/` | User-visible features (F-xxx): behaviour, entry points, acceptance checks | `docs/features/index.md` |
+| `docs/features/` | Toolkit features (F-xxx): behaviour, entry points, acceptance checks | `docs/features/index.md` |
+| `AudioLibraryToolkit.Desktop/` | Independent desktop workspace, build, docs and knowledge | `AudioLibraryToolkit.Desktop/AGENTS.md` |
 | `tests/` | Native regression and Python integration tests, registered with CTest | `tests/CMakeLists.txt` |
 | `external/` | Third-party source/SDK dependencies | `CMakeLists.txt` and `cmake/platform/` for expected paths |
 
@@ -64,7 +67,10 @@ generated fixtures. See `.github/instructions/audio-cpp.instructions.md` for aud
 | Issues and change history | Work items, commits, pull requests | Closed, not edited |
 
 Use the globally installed Project Memory skill and its `kb.ps1` script; do not copy the skill or script into this
-repository. Start with `docs/knowledge/index.md`.
+repository. Toolkit knowledge starts at `docs/knowledge/index.md`. Desktop knowledge starts at
+`AudioLibraryToolkit.Desktop/docs/knowledge/index.md`; use its explicit module root, not Git's default root.
+Desktop-only changes must not create toolkit knowledge entries. Repository navigation/automation may know both modules;
+toolkit code, build and product documentation must not depend on desktop files or implementation details.
 
 Read applicable scoped instructions and owning design documents before edits. Follow
 `.github/instructions/knowledge-protocol.instructions.md` for knowledge lookup, recording and post-change maintenance.

@@ -14,14 +14,16 @@ tracked in `docs/features/`. Code is cited as `path#Symbol`.
 - finds probable duplicate albums from those batches;
 - imports the batches into a per-library SQLite database.
 
-It runs either as explicit CLI commands or, with no arguments, as a legacy interactive menu.
+It runs as explicit CLI commands, a versioned headless worker, or, with no arguments, a legacy interactive menu.
 
 ## Component map
 
 | Component | Files | Responsibility |
 |---|---|---|
-| Entry and orchestration | `src/app/AudioLibraryToolkitMain.cpp` | `wmain`/`main` → `RunWithArguments`; CLI dispatch; `RunLegacyMenu` (menu, previews, `RUN` confirmation, `ManualOperationSummary`); scan, duplicate and DB-import flows |
+| Entry and orchestration | `src/app/AudioLibraryToolkitMain.cpp` | `wmain`/`main` → `RunWithArguments`; `RunLegacyMenu` (menu, previews, `RUN` confirmation, `ManualOperationSummary`); scan, duplicate and DB-import flows |
 | CLI parsing | `src/app/CommandLine.cpp`, `include/app/CommandLine.h` | `ParseCommandLine` (CLI11) → `CommandLineOptions` |
+| Application services | `src/app/ApplicationServices.cpp`, `include/app/ApplicationServices.h` | `ApplicationServices::Run` owns the shared non-interactive operation dispatch for CLI and worker requests; it delegates to conversion/repair components and narrow scan/catalog adapters |
+| Worker protocol | `src/app/WorkerProtocol.cpp`, `include/app/WorkerProtocol.h` | `--worker` JSON Lines request validation and typed `CommandLineOptions` mapping; worker requests call the shared application-service dispatcher, not the CLI parser |
 | Run logging | `src/app/RunLogging.cpp`, `include/app/RunLogging.h` | One console/file logger per process request, file-level override, active markers and retention |
 | Configuration | `src/app/AppSettings.cpp`, `include/app/AppSettings.h` | `AppSettingsJson` load/save, defaults, process-wide instance; `MediaDirectoryElement` output naming |
 | Conversion options | `include/conversion/ConversionOptions.h` | `AudioTarget` (Flac/Mp3), MP3 quality, downmix flag |
@@ -39,7 +41,7 @@ It runs either as explicit CLI commands or, with no arguments, as a legacy inter
 | Album collection | `src/catalog/AlbumCollection.cpp`, `include/catalog/AlbumCollection.h` | Discovery (`AlbumCollection::LoadAlbumsCo`), metadata import/cache reuse, JSON save/load, `AlbumCollection::ExportToDatabase` |
 | Duplicate matching | `src/duplicates/DuplicateMatcher.cpp`, `include/duplicates/DuplicateMatcher.h` | `DuplicateMatcher::FindDuplicates`: aliases, candidate indexes, pair evaluation, confidence and grouping |
 | Duplicate comparison output | `src/duplicates/DuplicateComparison.cpp`, `include/duplicates/DuplicateComparison.h` | Pure descriptions of current album snapshots and scan-time pair evidence; stable group-local album numbers |
-| Duplicate review | `src/duplicates/DuplicateReview.cpp`, `include/duplicates/DuplicateReview.h` | Per-group menu choices; explicitly confirmed, verified whole-folder moves to `OutDirectory/quarantine` |
+| Duplicate review | `src/duplicates/DuplicateReview.cpp`, `include/duplicates/DuplicateReview.h` | Per-group menu choices and worker-validated explicit album selections; verified whole-folder moves to `OutDirectory/quarantine` |
 | Output layout | `include/common/OutputLayout.h` | Shared operation/library path mapping for menu and CLI output |
 | Platform adapters | `src/platform/PlatformUtils.cpp`, `include/platform/PlatformUtils.h` | Per-user config location, UTF-16/UTF-8, `PlatformUtils::WindowsLongPath`, `PlatformUtils::OpenDirectory` |
 | Utilities | `src/common/CommonUtils.cpp`, `include/common/CommonUtils.h`, `include/common/BoundedTaskRunner.h`, `src/common/JsonUtils.cpp`, `include/common/JsonUtils.h` | UTF-8 path helpers, coroutine `Generator`, bounded task runner, JSON helpers |
@@ -50,8 +52,10 @@ It runs either as explicit CLI commands or, with no arguments, as a legacy inter
 ```mermaid
 flowchart LR
     CLI[CLI command] --> RWA[RunWithArguments]
-    Menu[Legacy menu] --> RWA
-    RWA --> CFG[AppSettingsJson]
+    RWA -->|no arguments| Menu[RunLegacyMenu]
+    Worker[WorkerProtocol] --> AS[ApplicationServices::Run]
+    RWA -->|subcommand| AS
+    AS --> CFG[AppSettingsJson]
     subgraph Convert
         PC[PrepareConversion] --> EC[ExecuteConversion]
         EC --> MCT[MediaConversionTask]
@@ -61,13 +65,13 @@ flowchart LR
         MT -->|direct ID3 read| PA[PreservationAudit]
         MCT -->|other targets| PA
     end
-    RWA --> PC
+    AS --> PC
     SRC[(Source library)] --> PC
     EC --> OUT[(OutDirectory/normalized-flac or converted-mp3/name)]
-    RWA --> AR[AudioRepair::Prepare / Execute]
+    AS --> AR[AudioRepair::Prepare / Execute]
     SRC --> AR
     AR --> FIXED[(OutDirectory/repaired-metadata/name)]
-    RWA --> SCAN[ScanFolderAndCreateJSON]
+    AS --> SCAN[ScanFolderAndCreateJSON]
     SRC --> SCAN
     SCAN -->|read-only metadata| TAGLIB[TagLib]
     TAGLIB --> RECORD[MediaRecord]
@@ -76,6 +80,9 @@ flowchart LR
     SCAN --> MANIFEST[(scan-manifest.json + optional native FLAC metadata archives)]
     JSON --> DUP[ScanFolderProcessJSONAndFindDuplicates]
     DUP --> REP[Console report / open folders]
+    DUP -->|worker report and selected quarantine paths| QR[Recompute groups and validate selection]
+    QR --> Q[DuplicateReview::ReviewGroup]
+    Q -->|verified copy then remove| QUAR[(OutDirectory/quarantine)]
     JSON --> DB[ExportJSONToDB / ImportJsonDirectoryToDatabase]
     DB --> SQL[(OutDirectory/catalog-sqlite/name/catalog-v2.sqlite)]
 ```
@@ -84,14 +91,33 @@ flowchart LR
 
 | Mode | Entry | Notes |
 |---|---|---|
-| `convert <input> [--to flac\|mp3] [--mp3-quality 0-9] [--downmix-to-stereo] [--overwrite] [--no-metadata-sidecar] [--output-dir]` | `RunWithArguments` → `FolderConvert::ConvertAudioFolderToOutput` | Output `<root>/<normalized-flac\|converted-mp3>/<input folder name>` (K-065); `--no-metadata-sidecar` is valid only for an `optional` sidecar policy (K-038) |
-| `scan <library> [--output-dir] [--full-rescan] [--tier catalog\|integrity\|analysis] [--archive-flac-metadata\|--no-archive-flac-metadata]` | `ScanFolderAndCreateJSON` | One library; name = folder name; archive flags override configuration |
-| `duplicates <json dir> [--open] [--report <file>]` | `ScanFolderProcessJSONAndFindDuplicates` | Opens folders only with `--open`; `--report` writes a new JSON report |
-| `db import <json dir> [--output-dir]` | `ImportJsonDirectoryToDatabase` | `<output root>/catalog-sqlite/<JSON folder name>/catalog-v2.sqlite`; output root is `--output-dir`, else `OutDirectory` |
-| `repair <input> [--output-dir] [--overwrite] [--rules <ids>]` | `AudioRepair::Prepare` → `AudioRepair::Execute` | `<output root>/repaired-metadata/<input folder name>`; output root is `--output-dir`, else `OutDirectory` |
+| `convert <input> [--to flac\|mp3] [--mp3-quality 0-9] [--downmix-to-stereo] [--overwrite] [--no-metadata-sidecar] [--output-dir]` | `RunWithArguments` → `ApplicationServices::Run` → `FolderConvert::ConvertAudioFolderToOutput` | Output `<root>/<normalized-flac\|converted-mp3>/<input folder name>` (K-065); `--no-metadata-sidecar` is valid only for an `optional` sidecar policy (K-038) |
+| `scan <library> [--output-dir] [--full-rescan] [--tier catalog\|integrity\|analysis] [--archive-flac-metadata\|--no-archive-flac-metadata]` | `ApplicationServices::Run` → `ScanFolderAndCreateJSON` | One library; name = folder name; archive flags override configuration |
+| `duplicates <json dir> [--open] [--report <file>]` | `ApplicationServices::Run` → `ScanFolderProcessJSONAndFindDuplicates` | Opens folders only with `--open`; `--report` writes a new JSON report |
+| `db import <json dir> [--output-dir]` | `ApplicationServices::Run` → `ImportJsonDirectoryToDatabase` | `<output root>/catalog-sqlite/<JSON folder name>/catalog-v2.sqlite`; output root is `--output-dir`, else `OutDirectory` |
+| `repair <input> [--output-dir] [--overwrite] [--rules <ids>]` | `ApplicationServices::Run` → `AudioRepair::Prepare` → `AudioRepair::Execute` | `<output root>/repaired-metadata/<input folder name>`; output root is `--output-dir`, else `OutDirectory` |
 | No arguments | `RunLegacyMenu` | Options 1 FLAC, 2 scan, 3 duplicates, 4 DB import, 6 MP3, 7 repair; option 5 is unassigned; library options use active `MediaDirectoryList` entries |
+| `--worker` | `WorkerProtocol::Run` → `ApplicationServices::Run` | Version-1 JSON Lines process boundary for external clients; typed worker requests and CLI commands share operation dispatch |
 
 All commands accept `--config <file>` and `--log-level info\|debug\|trace`. Exit code is 0 on success, non-zero on any failure.
+
+### Headless worker boundary
+
+External clients launch the executable with `--worker`; protocol v1 is documented in
+`docs/api/worker-protocol-v1.md`. JSON Lines on stdout carry
+the ready handshake, progress, captured command output, and completion/error events; logging remains on stderr and in
+the per-user session log. The worker validates typed operation requests and maps them to `CommandLineOptions`; CLI
+and worker requests share `ApplicationServices::Run`. Worker preview requests for conversion and repair prepare
+textual summaries without writing; execution re-prepares the operation before writing rather than trusting a stale
+plan. The worker can create a new default configuration from supplied paths and accepts explicit duplicate quarantine
+selections; current matches and move safety are revalidated by the backend. Unspecified MP3 tag choices retain the
+configured `TagIssueResolution` policy. Quarantine requires active source library roots in `MediaDirectoryList` and
+does not update catalog JSON or databases.
+
+All worker operations are application capabilities independent of any client implementation. The native build,
+tests and installation require no client source, graphical environment or JavaScript runtime. The toolkit does not
+discover or load frontend modules. `AudioLibraryToolkitCore` is an internal static build target, not an installed
+public SDK; the executable's versioned process protocol is the supported integration boundary.
 
 ### Run logging
 
@@ -162,7 +188,7 @@ and actionable preservation warnings and errors remain visible.
    failure logs the phase as `[stopped]`.
 2. **Preview** (menu only) – `ConvertConfiguredLibraries` plans *all* active libraries, checks cross-library overlap,
    prints `ShowConversionPreview`, and requires `RUN` (`ConfirmPreview`). Duplicate destinations or existing targets
-   without overwrite block the whole run (K-049); `FolderConvert::ReportDestinationConflicts` provides the same
+   without overwrite block the whole run; `FolderConvert::ReportDestinationConflicts` provides the same
    concise diagnostics for the menu and CLI without starting conversion or changing existing outputs.
 3. **Execute** – `FolderConvert::ExecuteConversion` creates the library folder (ownership = created by this run),
    creates the `.conversion-in-progress` marker directory, then processes audio files sequentially:
@@ -361,7 +387,7 @@ An inaccessible discovered directory, an output write/close error, or an accepte
 without usable sample-rate/channel data fails the scan before installation, preserving the prior generated JSON
 (K-035). TagLib reads use a read-only stream. The menu preview discovers albums without reading track metadata and
 reuses the discovered batches. A scan preview preflight or discovery failure may write a diagnostic report in a safe
-system temporary directory before confirmation, but never installs a catalog (K-049). `ScanTier` selects `catalog` (default), `integrity`, or `analysis`; CLI `scan --tier`
+system temporary directory before confirmation, but never installs a catalog. `ScanTier` selects `catalog` (default), `integrity`, or `analysis`; CLI `scan --tier`
 overrides the config. Integrity and analysis tiers decode the audio once, report decode/sample/hash results, and
 analysis adds per-channel signal statistics and zero-padded-hi-res findings. Decode failures are retained in the
 record without discarding successfully read tags. Each scan writes `scan-report.json` beside the generated batches with run status, duration, structured diagnostics,
@@ -658,6 +684,9 @@ as usable audio metadata.
 - `AppSettingsJson::AppSetting` is a lazily created process-wide instance read from worker threads; initialise it
   before starting tasks.
 - No daemon or background process outlives the command; a crash leaves the marker and temporaries for inspection.
+- Worker mode reserves stdout for protocol events and redirects application console logs to stderr. On Windows the
+  worker uses a Job Object with kill-on-close; on POSIX it runs in a process group so client cancellation can terminate
+  the worker and its FFmpeg descendants. Completed verified outputs are not rolled back.
 
 ## Error handling
 
@@ -718,5 +747,5 @@ prompt, and `ShowConversionPreview`.
 
 ## Knowledge links
 
-Conversion safety: K-041, K-048, K-056, K-029, K-030, K-032, K-038. Formats: K-016, K-017. Output layout and compatibility: K-065. Manual menu: K-024, K-049. Catalog/DB: K-051, K-042, K-040, K-050. Platform/build: K-006, K-061, K-069, K-062, K-033.
+Conversion safety: K-041, K-048, K-056, K-029, K-030, K-032, K-038. Formats: K-016, K-017. Output layout and compatibility: K-065. Manual menu: K-024, K-072. Catalog/DB: K-051, K-042, K-040, K-050. Platform/build: K-006, K-061, K-069, K-062, K-033.
 Only live entries are listed; superseded history is in `docs/knowledge/index.md` under "Closed".
