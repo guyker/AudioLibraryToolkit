@@ -2,13 +2,13 @@
 id: K-015
 kind: decision
 title: "Preserve original FLAC metadata alongside MP3 output"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: superseded
 superseded_by: K-037
 created: 2026-10-10
 reviewed: 2026-11-10
 cites:
-  - path: FlacConvert/src/FlacMetadata.cpp
+  - path: AudioLibraryToolkit/src/metadata/FlacMetadata.cpp
     symbol: "FlacMetadata::Save"
 ---
 

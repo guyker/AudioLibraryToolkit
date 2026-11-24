@@ -2,13 +2,13 @@
 id: K-042
 kind: trap
 title: "Open the SQLite catalog through the long-path VFS on Windows"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-011]
 created: 2026-11-16
-reviewed: 2026-11-16
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/CatalogDatabase.cpp
+  - path: AudioLibraryToolkit/src/catalog/CatalogDatabase.cpp
     symbol: "CatalogDatabase::Import"
 ---
 

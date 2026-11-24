@@ -2,17 +2,17 @@
 id: K-028
 kind: decision
 title: "Preserve FLAC source metadata alongside CD-profile FLAC output"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: superseded
 superseded_by: K-037
 created: 2026-10-11
 reviewed: 2026-11-10
 cites:
-  - path: FlacConvert/src/MediaConvertionTask.cpp
-    symbol: MediaConvertionTask.ConvertFile
-  - path: FlacConvert/src/FlacMetadata.cpp
+  - path: AudioLibraryToolkit/src/conversion/MediaConversionTask.cpp
+    symbol: MediaConversionTask.ConvertFile
+  - path: AudioLibraryToolkit/src/metadata/FlacMetadata.cpp
     symbol: FlacMetadata.Save
-  - path: FlacConvert/src/FolderConvert.cpp
+  - path: AudioLibraryToolkit/src/conversion/FolderConvert.cpp
     symbol: FolderConvert.PrepareConversion
 ---
 

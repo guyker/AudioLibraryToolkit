@@ -2,7 +2,7 @@
 id: K-006
 kind: preference
 title: "Keep core C++ portable across target platforms"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 created: 2026-10-09
 reviewed: 2026-10-09

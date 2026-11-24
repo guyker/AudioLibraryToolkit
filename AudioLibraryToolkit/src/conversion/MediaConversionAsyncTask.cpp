@@ -1,5 +1,5 @@
 
-#include "MediaConvertionAsyncTask.h"
+#include "MediaConversionAsyncTask.h"
 
 #include <iostream>
 #include <filesystem>
@@ -13,7 +13,7 @@
 #include <spdlog/spdlog.h>
 #include "CommonUtils.h"
 
-int MediaConvertionAsyncTask::Run()
+int MediaConversionAsyncTask::Run()
 {
     if (_status != -1) {
         _asyncResult = std::async(std::launch::async, [&]() { return ConvertFile(); });
@@ -30,7 +30,7 @@ int MediaConvertionAsyncTask::Run()
 }
 
 
-int MediaConvertionAsyncTask::PostRun()
+int MediaConversionAsyncTask::PostRun()
 {
     if (_status != -1) {
         _status = _asyncResult.get();

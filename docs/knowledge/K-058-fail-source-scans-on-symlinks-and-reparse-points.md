@@ -2,17 +2,17 @@
 id: K-058
 kind: decision
 title: "Fail source scans on symlinks and reparse points"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-057]
 created: 2026-11-22
-reviewed: 2026-11-23
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/AlbumCollection.cpp
+  - path: AudioLibraryToolkit/src/catalog/AlbumCollection.cpp
     symbol: "AlbumCollection::LoadAlbumsCo"
-  - path: FlacConvert/src/FolderConvert.cpp
+  - path: AudioLibraryToolkit/src/conversion/FolderConvert.cpp
     symbol: "FolderConvert::PrepareConversion"
-  - path: FlacConvert/src/AudioRepair.cpp
+  - path: AudioLibraryToolkit/src/repair/AudioRepair.cpp
     symbol: "AudioRepair::Prepare"
 ---
 

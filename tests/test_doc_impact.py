@@ -175,6 +175,64 @@ class DocumentationImpactTests(unittest.TestCase):
         self.assertIn("F-001", output)
         self.assertIn("K-001", output)
 
+    def test_current_paths_and_categorized_citations_map_to_source_and_header(self):
+        source = "AudioLibraryToolkit/src/app/Audio.cpp"
+        header = "AudioLibraryToolkit/include/app/Audio.h"
+        self.write(source, "int Run() { return 4; }\n")
+        self.write(header, "int Run();\n")
+        feature = self.repo / "docs" / "features" / "F-001-convert.md"
+        original = feature.read_text(encoding="utf-8")
+        for citation in (
+            source,
+            header,
+            "src/app/Audio.cpp",
+            "include/app/Audio.h",
+            "app/Audio.cpp",
+            "app/Audio.h",
+            "Audio.cpp",
+            "FlacConvert/src/app/Audio.cpp",
+            "FlacConvert/include/app/Audio.h",
+        ):
+            with self.subTest(citation=citation):
+                feature.write_text(
+                    original.replace("FlacConvert/src/Audio.cpp", citation),
+                    encoding="utf-8",
+                )
+                result = self.report("--details")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                feature_line = next(line for line in result.stdout.splitlines() if line.startswith("- F-001:"))
+                self.assertIn(source, feature_line)
+                self.assertIn(header, feature_line)
+
+    def test_design_path_uses_selected_worktree_and_staged_snapshots(self):
+        self.write("FlacConvert/src/Audio.cpp", "int Run() { return 5; }\n")
+        self.git("add", "FlacConvert/src/Audio.cpp")
+        (self.repo / "FlacConvert").rename(self.repo / "AudioLibraryToolkit")
+
+        worktree = self.report("--details")
+        self.assertEqual(worktree.returncode, 0, worktree.stderr)
+        self.assertIn('Design: "AudioLibraryToolkit/DESIGN.md" is included', worktree.stdout)
+        self.assertNotIn("DESIGN.md: missing", worktree.stdout)
+
+        staged = self.report("--staged", "--details")
+        self.assertEqual(staged.returncode, 0, staged.stderr)
+        self.assertIn('Design: "FlacConvert/DESIGN.md" is not included', staged.stdout)
+        self.assertNotIn("DESIGN.md: missing", staged.stdout)
+
+    def test_new_design_path_is_used_in_staged_and_committed_snapshots(self):
+        base = self.git("rev-parse", "HEAD")
+        self.git("mv", "FlacConvert", "AudioLibraryToolkit")
+        staged = self.report("--staged", "--details")
+        self.assertEqual(staged.returncode, 0, staged.stderr)
+        self.assertIn('Design: "AudioLibraryToolkit/DESIGN.md" is included', staged.stdout)
+        self.assertNotIn("DESIGN.md: missing", staged.stdout)
+
+        self.git("commit", "--quiet", "-m", "Rename application")
+        committed = self.report("--base", base, "--details")
+        self.assertEqual(committed.returncode, 0, committed.stderr)
+        self.assertIn('Design: "AudioLibraryToolkit/DESIGN.md" is included', committed.stdout)
+        self.assertNotIn("DESIGN.md: missing", committed.stdout)
+
     def test_rename_reports_both_old_and_new_paths(self):
         self.git("mv", "FlacConvert/src/Audio.cpp", "FlacConvert/src/Renamed.cpp")
         result = self.report("--staged", "--details")
@@ -224,7 +282,7 @@ class DocumentationImpactTests(unittest.TestCase):
         (self.repo / "FlacConvert" / "DESIGN.md").unlink()
         (self.repo / "docs" / "features" / "index.md").unlink()
         result = self.report("--details")
-        self.assertIn("FlacConvert/DESIGN.md: missing", result.stdout)
+        self.assertIn("AudioLibraryToolkit/DESIGN.md: missing", result.stdout)
         self.assertIn("docs/features/index.md: missing", result.stdout)
 
     def test_invalid_base_fails_explicitly(self):

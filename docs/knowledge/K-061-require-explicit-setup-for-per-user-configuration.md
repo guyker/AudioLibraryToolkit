@@ -2,17 +2,17 @@
 id: K-061
 kind: decision
 title: "Require explicit setup for per-user configuration"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-007, K-060]
 created: 2026-11-22
-reviewed: 2026-11-22
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/AppSettings.cpp
+  - path: AudioLibraryToolkit/src/app/AppSettings.cpp
     symbol: "AppSettingsJson::CreateInitialConfiguration"
-  - path: FlacConvert/src/AppSettings.cpp
+  - path: AudioLibraryToolkit/src/app/AppSettings.cpp
     symbol: "AppSettingsJson::LoadForCommandLine"
-  - path: FlacConvert/src/PlatformUtils.cpp
+  - path: AudioLibraryToolkit/src/platform/PlatformUtils.cpp
     symbol: UserConfigDirectory
 ---
 

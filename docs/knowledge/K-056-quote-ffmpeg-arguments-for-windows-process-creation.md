@@ -2,13 +2,13 @@
 id: K-056
 kind: trap
 title: "Quote FFmpeg arguments for Windows process creation"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-014]
 created: 2026-11-19
-reviewed: 2026-11-23
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/MediaConvertionTask.cpp
+  - path: AudioLibraryToolkit/src/conversion/MediaConversionTask.cpp
     symbol: quoteWindowsArgument
 ---
 

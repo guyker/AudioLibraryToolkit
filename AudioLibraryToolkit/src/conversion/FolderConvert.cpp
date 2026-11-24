@@ -1,6 +1,6 @@
 #include "FolderConvert.h"
-#include "MediaConvertionTask.h"
-#include "MediaConvertionAsyncTask.h"
+#include "MediaConversionTask.h"
+#include "MediaConversionAsyncTask.h"
 #include "FlacMetadata.h"
 #include "PlatformUtils.h"
 #include "PreservationAudit.h"
@@ -141,7 +141,7 @@ bool writeTextOutput(const fs::path& target, std::string_view contents, bool ove
         cleanup();
         return false;
     }
-    return MediaConvertionTask::InstallOutputFile(temporary, target, overwrite);
+    return MediaConversionTask::InstallOutputFile(temporary, target, overwrite);
 }
 
 struct FileAudit {
@@ -974,7 +974,7 @@ int FolderConvert::ExecuteConversion(const FolderConversionPlan& plan, Conversio
                 CommonUtils::path_to_utf8(plan.output), ec.message());
             return finish("IO");
         }
-        auto task = std::make_shared<MediaConvertionTask>(
+        auto task = std::make_shared<MediaConversionTask>(
             conversion.source, anchoredOutputPath(relativeTarget, plan.output),
             anchoredOutputPath(relativeTemporary, plan.output),
             plan.overwrite, plan.options);
@@ -1054,7 +1054,7 @@ int FolderConvert::ExecuteConversion(const FolderConversionPlan& plan, Conversio
             if (ec) spdlog::warn("Cannot remove unverified companion: {}", ec.message());
             return finish("COPY");
         }
-        if (!MediaConvertionTask::InstallOutputFile(
+        if (!MediaConversionTask::InstallOutputFile(
                 anchoredOutputPath(relativeTemporary, plan.output),
                 anchoredOutputPath(relativeTarget, plan.output), plan.overwrite)) {
             spdlog::error("Companion copy remains recoverable at '{}'.",
@@ -1117,7 +1117,7 @@ int FolderConvert::ExecuteConversion(const FolderConversionPlan& plan, Conversio
 
 int FolderConvert::ConverAudioFolder(const std::filesystem::path& directory, const ScanInfo scanInfo, bool bAsync)
 {
-    std::vector<std::shared_ptr<MediaConvertionTask>> tasksVector;
+    std::vector<std::shared_ptr<MediaConversionTask>> tasksVector;
 
     for (const fs::directory_entry& entry : fs::directory_iterator(directory)) {
         if (entry.is_directory()) {
@@ -1146,7 +1146,7 @@ int FolderConvert::ConverAudioFolder(const std::filesystem::path& directory, con
 
                 //     fs::path targetTMPPath = _TMPDirectory += entry.path().stem() += fs::path{ "_TMP" } += fs::path{ _TargetFileType };
 
-                std::shared_ptr<MediaConvertionTask> pTask = bAsync ? std::make_shared<MediaConvertionAsyncTask>(entry.path(), targetPath, targetTMPPath) : std::make_shared<MediaConvertionTask>(entry.path(), targetPath, targetTMPPath);
+                std::shared_ptr<MediaConversionTask> pTask = bAsync ? std::make_shared<MediaConversionAsyncTask>(entry.path(), targetPath, targetTMPPath) : std::make_shared<MediaConversionTask>(entry.path(), targetPath, targetTMPPath);
                 tasksVector.push_back(pTask);
             }
             else
@@ -1221,11 +1221,11 @@ int FolderConvert::ConverAudioFolder(const std::filesystem::path& directory, con
 
 int FolderConvert::ConverAudioFolder2(const std::filesystem::path& directory, const ScanInfo scanInfo, bool bAsync)
 {
-    std::vector<std::shared_ptr<MediaConvertionTask>> tasksVector;
+    std::vector<std::shared_ptr<MediaConversionTask>> tasksVector;
 
-    std::vector<MediaConvertionTask> AlbumConvertTask;
+    std::vector<MediaConversionTask> AlbumConvertTask;
 
-    std::vector<std::shared_ptr<std::vector<MediaConvertionTask>>> tasksVector2;
+    std::vector<std::shared_ptr<std::vector<MediaConversionTask>>> tasksVector2;
 
 
 
@@ -1241,7 +1241,7 @@ int FolderConvert::ConverAudioFolder2(const std::filesystem::path& directory, co
 
         //     fs::path targetTMPPath = _TMPDirectory += entry.path().stem() += fs::path{ "_TMP" } += fs::path{ _TargetFileType };
 
-        std::shared_ptr<MediaConvertionTask> pTask = bAsync ? std::make_shared<MediaConvertionAsyncTask>(mediaFile.path(), targetPath, targetTMPPath) : std::make_shared<MediaConvertionTask>(mediaFile.path(), targetPath, targetTMPPath);
+        std::shared_ptr<MediaConversionTask> pTask = bAsync ? std::make_shared<MediaConversionAsyncTask>(mediaFile.path(), targetPath, targetTMPPath) : std::make_shared<MediaConversionTask>(mediaFile.path(), targetPath, targetTMPPath);
         tasksVector.push_back(pTask);
     }
 

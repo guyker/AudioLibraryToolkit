@@ -1,7 +1,7 @@
 #include "FlacMetadata.h"
 #include "PreservationAudit.h"
 #include "AppSettings.h"
-#include "MediaConvertionTask.h"
+#include "MediaConversionTask.h"
 
 #include <fstream>
 #include <iostream>
@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
                 ConversionOptions options{};
                 options.target = target;
                 options.sidecarFormat = MetadataSidecarFormat::Binary;
-                MediaConvertionTask task(progressSource, destination, temporary, false, options);
+                MediaConversionTask task(progressSource, destination, temporary, false, options);
                 std::vector<double> fractions;
                 std::vector<std::chrono::steady_clock::time_point> measurements;
                 std::vector<std::string> stages;

@@ -2,17 +2,17 @@
 id: K-036
 kind: decision
 title: "Skip unchanged FLAC audio folders and list them in the audit"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: superseded
 superseded_by: K-066
 created: 2026-11-11
 reviewed: 2026-11-23
 cites:
-  - path: FlacConvert/src/FolderConvert.cpp
+  - path: AudioLibraryToolkit/src/conversion/FolderConvert.cpp
     symbol: FolderConvert.PrepareConversion
-  - path: FlacConvert/src/FolderConvert.cpp
+  - path: AudioLibraryToolkit/src/conversion/FolderConvert.cpp
     symbol: writeAudit
-  - path: tests/mp3_conversion.py
+  - path: tests/audio_library_integration.py
     symbol: ConversionTests.test_flac_skips_unchanged_audio_folders_and_keeps_written_folders_complete
 ---
 

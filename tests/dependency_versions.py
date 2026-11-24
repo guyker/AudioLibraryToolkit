@@ -31,7 +31,7 @@ class DependencyVersionTests(unittest.TestCase):
                    "#define FMT_VERSION 110200\n")
         self.write(self.source / "external/sqlite-amalgamation/sqlite3.h",
                    '#define SQLITE_VERSION "3.50.0"\n')
-        self.write(self.source / "FlacConvert/include/rapidjson/rapidjson.h",
+        self.write(self.source / "AudioLibraryToolkit/include/rapidjson/rapidjson.h",
                    "#define RAPIDJSON_MAJOR_VERSION 1\n#define RAPIDJSON_MINOR_VERSION 1\n"
                    "#define RAPIDJSON_PATCH_VERSION 0\n")
         self.write(self.ffmpeg / "libavutil/ffversion.h", '#define FFMPEG_VERSION "sdk-version"\n')

@@ -2,13 +2,13 @@
 id: K-040
 kind: decision
 title: "Key catalog files by library-relative path"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-039]
 created: 2026-11-16
-reviewed: 2026-11-16
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/CatalogDatabase.cpp
+  - path: AudioLibraryToolkit/src/catalog/CatalogDatabase.cpp
     symbol: "CatalogDatabase::Import"
 ---
 

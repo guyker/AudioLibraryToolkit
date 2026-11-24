@@ -2,13 +2,13 @@
 id: K-018
 kind: defect
 title: "Linux compilation is blocked by Windows-only JSON key comparison"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: fixed
 fixed_by: K-033
 created: 2026-10-10
 reviewed: 2026-10-10
 cites:
-  - path: FlacConvert/include/JsonUtils.h
+  - path: AudioLibraryToolkit/include/common/JsonUtils.h
     symbol: "JsonUtils::tryParseMember"
 ---
 

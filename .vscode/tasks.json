@@ -1,0 +1,37 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "CMake configure (Debug)",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--preset", "linux-debug"],
+      "windows": {
+        "args": ["--preset", "windows-debug"]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "CMake build (Debug)",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--build", "--preset", "linux-debug", "--parallel"],
+      "windows": {
+        "args": ["--build", "--preset", "windows-debug", "--parallel"],
+        "problemMatcher": ["$msCompile"]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": ["CMake configure (Debug)"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$gcc"]
+    }
+  ]
+}

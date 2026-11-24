@@ -2,18 +2,18 @@
 id: K-027
 kind: decision
 title: "Confirm every manual operation with RUN after reusable previews"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: superseded
 supersedes: [K-022, K-023]
 superseded_by: K-049
 created: 2026-10-11
 reviewed: 2026-11-16
 cites:
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: ConfirmPreview
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: GetUserAction
-  - path: FlacConvert/src/FolderConvert.cpp
+  - path: AudioLibraryToolkit/src/conversion/FolderConvert.cpp
     symbol: FolderConvert.PrepareConversion
 ---
 

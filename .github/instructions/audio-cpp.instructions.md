@@ -1,5 +1,5 @@
 ---
-applyTo: "FlacConvert/src/**,FlacConvert/include/**"
+applyTo: "AudioLibraryToolkit/src/**,AudioLibraryToolkit/include/**"
 ---
 
 # Audio / C++
@@ -7,7 +7,7 @@ applyTo: "FlacConvert/src/**,FlacConvert/include/**"
 - Keep core C++ sources portable across Windows, Linux and macOS. CMake is the only build definition;
   isolate OS-specific APIs in narrow platform adapters or conditional implementations.
 - Follow existing naming and error-handling conventions; use RAII with matching FFmpeg deleters and explicit
-  ownership. Do not edit vendored `FlacConvert/include/rapidjson/` or `external/` code unless requested.
+  ownership. Do not edit vendored `AudioLibraryToolkit/include/rapidjson/` or `external/` code unless requested.
 - Check FFmpeg return codes; distinguish `EAGAIN`, EOF and failure. For decode/encode/resample changes, drain buffered
   output and verify sample formats (planar/interleaved), channel layouts, time bases and sample counts.
 - FFmpeg log callback context is opaque: do not assume `AVFormatContext`. Keep callbacks and shared log access
@@ -27,6 +27,6 @@ applyTo: "FlacConvert/src/**,FlacConvert/include/**"
 - When changing conversion behaviour, cover short/silent audio, representative formats/channels, Unicode paths,
   corrupt input and destination collisions; verify failure leaves originals intact. Build/exit success alone is not
   evidence of correct audio.
-- Before editing, read the relevant `FlacConvert/DESIGN.md` sections and feature entries. After editing, assess whether
+- Before editing, read the relevant `AudioLibraryToolkit/DESIGN.md` sections and feature entries. After editing, assess whether
   important behaviour, design, contracts, schemas or risks changed and update those documents only when needed. Do not
   create a change log for formatting, renames or behaviour-preserving refactors; follow the knowledge protocol.

@@ -2,16 +2,16 @@
 id: K-048
 kind: decision
 title: "Use codec-aware source quality checks for AAC"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-013]
 created: 2026-11-17
-reviewed: 2026-11-23
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/MediaConvertionTask.cpp
-    symbol: isAtLeastCDQuality
   - test: ConversionTests.test_aac_m4a_at_cd_sample_rate_converts_with_lossy_warning
   - test: ConversionTests.test_aac_m4a_below_cd_sample_rate_is_rejected
+  - path: AudioLibraryToolkit/src/conversion/MediaConversionTask.cpp
+    symbol: isAtLeastCDQuality
 ---
 
 **Fact:** `isAtLeastCDQuality` requires a verified sample rate of at least 44.1 kHz for every source, but skips the

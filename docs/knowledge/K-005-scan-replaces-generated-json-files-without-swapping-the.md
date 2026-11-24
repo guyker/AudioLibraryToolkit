@@ -2,15 +2,15 @@
 id: K-005
 kind: decision
 title: "Scan replaces generated JSON files without swapping the library directory"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: superseded
 superseded_by: K-051
 created: 2026-10-09
 reviewed: 2026-11-16
 cites:
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: installGeneratedFiles
-  - path: FlacConvert/include/AppSettings.h
+  - path: AudioLibraryToolkit/include/app/AppSettings.h
     symbol: "MediaDirectoryElement::getMediaDBPath"
 ---
 

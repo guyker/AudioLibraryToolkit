@@ -2,19 +2,19 @@
 id: K-041
 kind: trap
 title: "Install FFmpeg output only after successful conversion on every platform"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-003]
 created: 2026-11-16
-reviewed: 2026-11-23
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/MediaConvertionTask.cpp
-    symbol: "MediaConvertionTask::InstallTemporaryOutput"
-  - path: FlacConvert/src/MediaConvertionTask.cpp
+  - path: AudioLibraryToolkit/src/conversion/MediaConversionTask.cpp
+    symbol: "MediaConversionTask::InstallTemporaryOutput"
+  - path: AudioLibraryToolkit/src/conversion/MediaConversionTask.cpp
     symbol: installFile
 ---
 
-**Fact:** `MediaConvertionTask::InstallTemporaryOutput` verifies that the verified, audited temporary output is a regular
+**Fact:** `MediaConversionTask::InstallTemporaryOutput` verifies that the verified, audited temporary output is a regular
 file before installing it through `installFile`: `MoveFileExW` on Windows; on POSIX, `rename` when overwriting, or
 hard-link then copy (never replacing an existing target) without overwrite. The source is never removed first.
 

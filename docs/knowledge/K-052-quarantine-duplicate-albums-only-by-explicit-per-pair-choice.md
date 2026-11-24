@@ -2,16 +2,16 @@
 id: K-052
 kind: decision
 title: "Quarantine duplicate albums only by explicit per-pair choice"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 created: 2026-11-18
-reviewed: 2026-11-23
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/DuplicateReview.cpp
+  - path: AudioLibraryToolkit/src/duplicates/DuplicateReview.cpp
     symbol: "DuplicateReview::ReviewPair"
-  - path: FlacConvert/src/DuplicateReview.cpp
+  - path: AudioLibraryToolkit/src/duplicates/DuplicateReview.cpp
     symbol: moveAlbum
-  - path: FlacConvert/src/DuplicateReview.cpp
+  - path: AudioLibraryToolkit/src/duplicates/DuplicateReview.cpp
     symbol: "DuplicateReview::ReviewGroup"
 ---
 

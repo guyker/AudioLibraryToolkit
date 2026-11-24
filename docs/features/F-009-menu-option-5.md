@@ -7,10 +7,10 @@ Option 5 is listed by the legacy menu but has no operation; selecting it prints 
 option 2, then option 4." and the menu asks again.
 
 ## Entry points
-- `FlacConvertMain.cpp#RunLegacyMenu`
+- `app/AudioLibraryToolkitMain.cpp#RunLegacyMenu`
 
 ## Design and knowledge
-- DESIGN: `FlacConvert/DESIGN.md` → Entry points
+- DESIGN: `AudioLibraryToolkit/DESIGN.md` → Entry points
 
 ## Acceptance checks
 - [ ] Selecting 5 performs no file operation and returns to the prompt.

@@ -2,11 +2,11 @@
   "idPrefix": "K-",
   "idWidth": 3,
   "scope": [
-    "FlacConvert",
+    "AudioLibraryToolkit",
     "Repository"
   ],
   "areas": [
-    "FlacConvert",
+    "AudioLibraryToolkit",
     "External Dependencies",
     "Repository"
   ]

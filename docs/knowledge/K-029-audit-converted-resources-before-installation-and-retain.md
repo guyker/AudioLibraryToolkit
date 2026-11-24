@@ -2,16 +2,16 @@
 id: K-029
 kind: decision
 title: "Audit converted resources before installation and retain verified original metadata"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 created: 2026-10-11
-reviewed: 2026-11-23
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/PreservationAudit.cpp
+  - path: AudioLibraryToolkit/src/metadata/PreservationAudit.cpp
     symbol: PreservationAudit.Compare
-  - path: FlacConvert/src/FlacMetadata.cpp
+  - path: AudioLibraryToolkit/src/metadata/FlacMetadata.cpp
     symbol: FlacMetadata.Verify
-  - path: FlacConvert/src/FolderConvert.cpp
+  - path: AudioLibraryToolkit/src/conversion/FolderConvert.cpp
     symbol: FolderConvert.ExecuteConversion
 ---
 

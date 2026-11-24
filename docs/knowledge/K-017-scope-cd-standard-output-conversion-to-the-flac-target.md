@@ -2,13 +2,13 @@
 id: K-017
 kind: decision
 title: "Scope CD-standard output conversion to the FLAC target"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-012]
 created: 2026-10-10
-reviewed: 2026-11-23
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/MediaConvertionTask.cpp
+  - path: AudioLibraryToolkit/src/conversion/MediaConversionTask.cpp
     symbol: conversionArguments
 ---
 

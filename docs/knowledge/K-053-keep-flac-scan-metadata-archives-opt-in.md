@@ -2,12 +2,12 @@
 id: K-053
 kind: decision
 title: "Keep FLAC scan metadata archives opt-in"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 created: 2026-11-19
-reviewed: 2026-11-23
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: ScanFolderAndCreateJSON
 ---
 

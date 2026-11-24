@@ -11,7 +11,7 @@ cites:
     symbol: configurePresets
 ---
 
-**Fact:** The root `CMakeLists.txt`, `FlacConvert/CMakeLists.txt`, `cmake/platform/*.cmake` and `CMakePresets.json` are the
+**Fact:** The root `CMakeLists.txt`, `AudioLibraryToolkit/CMakeLists.txt`, `cmake/platform/*.cmake` and `CMakePresets.json` are the
 only build description for Windows and Linux. The former `MediaBoost.sln`/`FlacConvert.vcxproj` was removed by
 maintainer decision after it stopped linking (MSBuild `LNK1120`: it lacked `CatalogDatabase.cpp`,
 `DecodeAnalyzer.cpp`, `MediaRecordJson.cpp`, `TagLibReader.cpp` and TagLib). Visual Studio users open the

@@ -20,30 +20,30 @@ It runs either as explicit CLI commands or, with no arguments, as a legacy inter
 
 | Component | Files | Responsibility |
 |---|---|---|
-| Entry and orchestration | `src/FlacConvertMain.cpp` | `wmain`/`main` → `RunWithArguments`; CLI dispatch; `RunLegacyMenu` (menu, previews, `RUN` confirmation, `ManualOperationSummary`); scan, duplicate and DB-import flows |
-| CLI parsing | `src/CommandLine.cpp`, `include/CommandLine.h` | `ParseCommandLine` (CLI11) → `CommandLineOptions` |
-| Run logging | `src/RunLogging.cpp`, `include/RunLogging.h` | One console/file logger per process request, file-level override, active markers and retention |
-| Configuration | `src/AppSettings.cpp`, `include/AppSettings.h` | `AppSettingsJson` load/save, defaults, process-wide instance; `MediaDirectoryElement` output naming |
-| Conversion options | `include/ConversionOptions.h` | `AudioTarget` (Flac/Mp3), MP3 quality, downmix flag |
-| Folder conversion | `src/FolderConvert.cpp`, `include/FolderConvert.h` | `FolderConvert::PrepareConversion` (plan) and `FolderConvert::ExecuteConversion` (run, audit report, markers) |
-| File conversion | `src/MediaConvertionTask.cpp`, `include/MediaConvertionTask.h` | `MediaConvertionTask`: quality gate, FFmpeg child process, output verification, sidecar, audit, installation |
-| MP3 tags | `src/Mp3TagMetadata.cpp`, `include/Mp3TagMetadata.h` | TagLib maps source FLAC comments into ID3v2.4 and reads MP3 ID3 properties for preservation auditing |
-| MP3 tag issues | `src/Mp3TagIssues.cpp`, `include/Mp3TagIssues.h` | Detects MP3 tag issues, lists resolution choices (recommended first) and applies the selected resolutions to source comments |
-| Metadata repair | `src/AudioRepair.cpp`, `include/AudioRepair.h`, `src/RepairRules.cpp`, `include/RepairRules.h` | `RepairRules::Analyze` detects FLAC/MP3 metadata defects and plans byte-range edits; `AudioRepair::Prepare` plans repairs; `AudioRepair::Execute` stages, verifies and installs repaired copies and `repair-report.json` |
-| Metadata archive | `src/FlacMetadata.cpp`, `include/FlacMetadata.h` | `FlacMetadata::Save` / `FlacMetadata::Verify` byte-exact archive as binary `.flac-metadata` or `.flac-metadata.json` (readable scan-schema metadata + Base64 archive; only the archive is verified); scan optionally writes binary metadata-only archives for native FLAC |
-| Preservation audit | `src/PreservationAudit.cpp`, `include/PreservationAudit.h` | `PreservationAudit::Compare` (tags, pictures, chapters, opaque blocks), `PreservationAudit::VerifyCopy` |
-| FFmpeg library access | `src/ffmpeg.cpp`, `include/ffmpeg.h`, `include/FFmpegWrapper.h` | `FFmpeg::GetFFprobeMetadataAPI` (conversion/duplicate re-probes) and the process-wide log callback |
-| Catalog metadata | `src/TagLibReader.cpp`, `include/TagLibReader.h`, `include/MediaRecord.h`, `src/MediaRecordJson.cpp` | Read-only TagLib extraction, normalized multi-value tags, source-scoped raw tags, picture descriptors, and schema-v2 JSON |
-| Track/album model | `src/MediaTrack.cpp`, `include/MediaTrack.h`, `include/MediaInformation.h`, `include/MediaAlbum.h` | `MediaTrack` (legacy probe parsing/comparison), `FFprobeOutput`, `MediaAlbum` |
-| Catalog database | `src/CatalogDatabase.cpp`, `include/CatalogDatabase.h` | Schema-v2 SQLite writer, stable library-relative identity, incremental upsert and stale-file cleanup |
-| Album collection | `src/AlbumCollection.cpp`, `include/AlbumCollection.h` | Discovery (`AlbumCollection::LoadAlbumsCo`), metadata import/cache reuse, JSON save/load, `AlbumCollection::ExportToDatabase` |
-| Duplicate matching | `src/DuplicateMatcher.cpp`, `include/DuplicateMatcher.h` | `DuplicateMatcher::FindDuplicates`: aliases, candidate indexes, pair evaluation, confidence and grouping |
-| Duplicate comparison output | `src/DuplicateComparison.cpp`, `include/DuplicateComparison.h` | Pure descriptions of current album snapshots and scan-time pair evidence; stable group-local album numbers |
-| Duplicate review | `src/DuplicateReview.cpp`, `include/DuplicateReview.h` | Per-group menu choices; explicitly confirmed, verified whole-folder moves to `OutDirectory/quarantine` |
-| Output layout | `include/OutputLayout.h` | Shared operation/library path mapping for menu and CLI output |
-| Platform adapters | `src/PlatformUtils.cpp`, `include/PlatformUtils.h` | Per-user config location, UTF-16/UTF-8, `PlatformUtils::WindowsLongPath`, `PlatformUtils::OpenDirectory` |
-| Utilities | `src/CommonUtils.cpp`, `include/CommonUtils.h`, `include/BoundedTaskRunner.h`, `src/JsonUtils.cpp`, `include/JsonUtils.h` | UTF-8 path helpers, coroutine `Generator`, bounded task runner, JSON helpers |
-| Legacy (unused) | `FolderConvert::ConverAudioFolder`, `FolderConvert::ConverAudioFolder2`, `MediaConvertionAsyncTask` | In-place conversion paths with no caller outside themselves; not part of any current flow |
+| Entry and orchestration | `src/app/AudioLibraryToolkitMain.cpp` | `wmain`/`main` → `RunWithArguments`; CLI dispatch; `RunLegacyMenu` (menu, previews, `RUN` confirmation, `ManualOperationSummary`); scan, duplicate and DB-import flows |
+| CLI parsing | `src/app/CommandLine.cpp`, `include/app/CommandLine.h` | `ParseCommandLine` (CLI11) → `CommandLineOptions` |
+| Run logging | `src/app/RunLogging.cpp`, `include/app/RunLogging.h` | One console/file logger per process request, file-level override, active markers and retention |
+| Configuration | `src/app/AppSettings.cpp`, `include/app/AppSettings.h` | `AppSettingsJson` load/save, defaults, process-wide instance; `MediaDirectoryElement` output naming |
+| Conversion options | `include/conversion/ConversionOptions.h` | `AudioTarget` (Flac/Mp3), MP3 quality, downmix flag |
+| Folder conversion | `src/conversion/FolderConvert.cpp`, `include/conversion/FolderConvert.h` | `FolderConvert::PrepareConversion` (plan) and `FolderConvert::ExecuteConversion` (run, audit report, markers) |
+| File conversion | `src/conversion/MediaConversionTask.cpp`, `include/conversion/MediaConversionTask.h` | `MediaConversionTask`: quality gate, FFmpeg child process, output verification, sidecar, audit, installation |
+| MP3 tags | `src/metadata/Mp3TagMetadata.cpp`, `include/metadata/Mp3TagMetadata.h` | TagLib maps source FLAC comments into ID3v2.4 and reads MP3 ID3 properties for preservation auditing |
+| MP3 tag issues | `src/metadata/Mp3TagIssues.cpp`, `include/metadata/Mp3TagIssues.h` | Detects MP3 tag issues, lists resolution choices (recommended first) and applies the selected resolutions to source comments |
+| Metadata repair | `src/repair/AudioRepair.cpp`, `include/repair/AudioRepair.h`, `src/repair/RepairRules.cpp`, `include/repair/RepairRules.h` | `RepairRules::Analyze` detects FLAC/MP3 metadata defects and plans byte-range edits; `AudioRepair::Prepare` plans repairs; `AudioRepair::Execute` stages, verifies and installs repaired copies and `repair-report.json` |
+| Metadata archive | `src/metadata/FlacMetadata.cpp`, `include/metadata/FlacMetadata.h` | `FlacMetadata::Save` / `FlacMetadata::Verify` byte-exact archive as binary `.flac-metadata` or `.flac-metadata.json` (readable scan-schema metadata + Base64 archive; only the archive is verified); scan optionally writes binary metadata-only archives for native FLAC |
+| Preservation audit | `src/metadata/PreservationAudit.cpp`, `include/metadata/PreservationAudit.h` | `PreservationAudit::Compare` (tags, pictures, chapters, opaque blocks), `PreservationAudit::VerifyCopy` |
+| FFmpeg library access | `src/platform/FFmpeg.cpp`, `include/platform/FFmpeg.h`, `include/platform/FFmpegWrapper.h` | `FFmpeg::GetFFprobeMetadataAPI` (conversion/duplicate re-probes) and the process-wide log callback |
+| Catalog metadata | `src/metadata/TagLibReader.cpp`, `include/metadata/TagLibReader.h`, `include/catalog/MediaRecord.h`, `src/catalog/MediaRecordJson.cpp` | Read-only TagLib extraction, normalized multi-value tags, source-scoped raw tags, picture descriptors, and schema-v2 JSON |
+| Track/album model | `src/media/MediaTrack.cpp`, `include/media/MediaTrack.h`, `include/media/MediaInformation.h`, `include/media/MediaAlbum.h` | `MediaTrack` (legacy probe parsing/comparison), `FFprobeOutput`, `MediaAlbum` |
+| Catalog database | `src/catalog/CatalogDatabase.cpp`, `include/catalog/CatalogDatabase.h` | Schema-v2 SQLite writer, stable library-relative identity, incremental upsert and stale-file cleanup |
+| Album collection | `src/catalog/AlbumCollection.cpp`, `include/catalog/AlbumCollection.h` | Discovery (`AlbumCollection::LoadAlbumsCo`), metadata import/cache reuse, JSON save/load, `AlbumCollection::ExportToDatabase` |
+| Duplicate matching | `src/duplicates/DuplicateMatcher.cpp`, `include/duplicates/DuplicateMatcher.h` | `DuplicateMatcher::FindDuplicates`: aliases, candidate indexes, pair evaluation, confidence and grouping |
+| Duplicate comparison output | `src/duplicates/DuplicateComparison.cpp`, `include/duplicates/DuplicateComparison.h` | Pure descriptions of current album snapshots and scan-time pair evidence; stable group-local album numbers |
+| Duplicate review | `src/duplicates/DuplicateReview.cpp`, `include/duplicates/DuplicateReview.h` | Per-group menu choices; explicitly confirmed, verified whole-folder moves to `OutDirectory/quarantine` |
+| Output layout | `include/common/OutputLayout.h` | Shared operation/library path mapping for menu and CLI output |
+| Platform adapters | `src/platform/PlatformUtils.cpp`, `include/platform/PlatformUtils.h` | Per-user config location, UTF-16/UTF-8, `PlatformUtils::WindowsLongPath`, `PlatformUtils::OpenDirectory` |
+| Utilities | `src/common/CommonUtils.cpp`, `include/common/CommonUtils.h`, `include/common/BoundedTaskRunner.h`, `src/common/JsonUtils.cpp`, `include/common/JsonUtils.h` | UTF-8 path helpers, coroutine `Generator`, bounded task runner, JSON helpers |
+| Legacy (unused) | `FolderConvert::ConverAudioFolder`, `FolderConvert::ConverAudioFolder2`, `MediaConversionAsyncTask` | In-place conversion paths with no caller outside themselves; not part of any current flow |
 
 ## Data flow
 
@@ -54,7 +54,7 @@ flowchart LR
     RWA --> CFG[AppSettingsJson]
     subgraph Convert
         PC[PrepareConversion] --> EC[ExecuteConversion]
-        EC --> MCT[MediaConvertionTask]
+        EC --> MCT[MediaConversionTask]
         MCT -->|spawn| FF[ffmpeg executable]
         MCT --> FM[FlacMetadata sidecar]
         MCT -->|MP3 tag write| MT[Mp3TagMetadata / TagLib]
@@ -166,7 +166,7 @@ and actionable preservation warnings and errors remain visible.
    concise diagnostics for the menu and CLI without starting conversion or changing existing outputs.
 3. **Execute** – `FolderConvert::ExecuteConversion` creates the library folder (ownership = created by this run),
    creates the `.conversion-in-progress` marker directory, then processes audio files sequentially:
-   `MediaConvertionTask::Run` (convert + verify + audit) then `MediaConvertionTask::PostRun` (install). For FLAC,
+   `MediaConversionTask::Run` (convert + verify + audit) then `MediaConversionTask::PostRun` (install). For FLAC,
    announce the source track's parent folder when it changes, before conversion, and indicate the transition to
    copying unchanged files. The folder path identifies root-level tracks and disc subfolders without relying on tags.
    Retained FLAC output directories, including empty ones, are created; skipped folders are logged and never created.
@@ -177,7 +177,7 @@ and actionable preservation warnings and errors remain visible.
    removes the marker. On failure the report is written, an owned folder is renamed with an error prefix, and the
    marker is retained (K-030).
 
-Per file, `MediaConvertionTask::ConvertFile`:
+Per file, `MediaConversionTask::ConvertFile`:
 
 1. probes the source (`FFmpeg::GetFFprobeMetadataAPI`) and rejects it below 16-bit / 44.1 kHz or if required
    properties are unverifiable (`isAtLeastCDQuality`, K-048). AAC bypasses only the bit-depth check because its
@@ -198,7 +198,7 @@ Per file, `MediaConvertionTask::ConvertFile`:
    shown only after a real timestamp arrives. Measurements request an immediate interactive redraw, rather than
    waiting for the phase's one-second timer; very short encodes may still finish between FFmpeg's reports.
    Other child output stays in the detailed diagnostic log.
-   `MediaConvertionTask::SetProgressCallback` passes track progress/stages to the shared phase without changing
+   `MediaConversionTask::SetProgressCallback` passes track progress/stages to the shared phase without changing
    process exit checks, verification or installation;
 5. for MP3 output, `Mp3TagMetadata::WriteFromFlac` clears FFmpeg's text properties and writes source FLAC comment
    properties into ID3v2.4 using TagLib, avoiding duplicate alias frames. `DESCRIPTION`/`COMMENT` and
@@ -233,7 +233,7 @@ companions of the topmost folder left without audio. Resolutions apply only to o
 before planning; scan, duplicates and DB import never write sidecars. `conversion-audit.json` is always written and
 records the effective `metadataSidecars` value.
 
-`MediaConvertionTask::InstallTemporaryOutput` installs the sidecar first (backing up an existing one when
+`MediaConversionTask::InstallTemporaryOutput` installs the sidecar first (backing up an existing one when
 overwriting), then the audio; on audio failure it restores or removes the sidecar and leaves the temporary in place
 (K-041).
 
@@ -597,7 +597,7 @@ fail configuration loading.
 
 | Artefact | Location | Writer |
 |---|---|---|
-| Converted audio | `<root>/normalized-flac\|converted-mp3/<name>/<relative path>.flac\|.mp3` | `MediaConvertionTask` |
+| Converted audio | `<root>/normalized-flac\|converted-mp3/<name>/<relative path>.flac\|.mp3` | `MediaConversionTask` |
 | Metadata sidecar | `<audio file>.flac-metadata` (binary) or `<audio file>.flac-metadata.json` (MP3 and native-FLAC sources, per `MetadataSidecars`) | `FlacMetadata::Save` |
 | Unchanged file copies | Same relative path; non-converted regular files (FLAC) or non-audio companions (MP3), outside skipped subtrees | `FolderConvert::ExecuteConversion` |
 | Audit report | `<library output>/conversion-audit.json` | `writeAudit` in `FolderConvert.cpp` |
@@ -664,7 +664,7 @@ as usable audio metadata.
 Functions return `0`/`true` for success and log with spdlog; exceptions are caught at flow boundaries
 (`RunWithArguments`, `RunLegacyMenu`, `FolderConvert::ExecuteConversion`) and turned into failure codes.
 `PreservationAudit` uses an internal `ParseError` exception converted to `NotVerified`/fatal entries. A failed
-conversion records its class in `MediaConvertionTask::GetFailureType`.
+conversion records its class in `MediaConversionTask::GetFailureType`.
 
 ## Platform boundaries
 
@@ -677,8 +677,8 @@ directory handles opened without delete sharing), `quoteWindowsArgument` + `_wsp
 
 ## Build and external dependencies
 
-CMake is the shared project build (`CMakeLists.txt`, `FlacConvert/CMakeLists.txt`), with Ninja presets for native
-Windows and Linux Debug/Release builds (`CMakePresets.json`). `FlacConvertCore` owns the shared implementation and
+CMake is the shared project build (`CMakeLists.txt`, `AudioLibraryToolkit/CMakeLists.txt`), with Ninja presets for native
+Windows and Linux Debug/Release builds (`CMakePresets.json`). `AudioLibraryToolkitCore` owns the shared implementation and
 links the SQLite amalgamation, CLI11, header-only spdlog and FFmpeg; `AudioLibraryToolkit` owns the executable entry point.
 Windows uses MSVC and a matching shared FFmpeg SDK selected by `FFmpeg_ROOT` (default
 `external/ffmpeg/ffmpeg-master-latest-win64-gpl-shared/`); CMake stages the SDK runtime DLLs beside the executable
@@ -693,8 +693,8 @@ availability. Runtime conversion still requires the `ffmpeg` executable with `li
 runtime DLLs. CMake is the only build description; Visual Studio opens the CMake presets directly.
 
 CTest registers the Python integration suite and native preservation/warning regression tests. The native tests link
-`FlacConvertCore` rather than IDE-generated object files; `tests/run_native_regression.py` creates temporary audio
-fixtures using FFmpeg. `tests/mp3_conversion.py` also generates disposable fixtures. See README for presets and
+`AudioLibraryToolkitCore` rather than IDE-generated object files; `tests/run_native_regression.py` creates temporary audio
+fixtures using FFmpeg. `tests/audio_library_integration.py` also generates disposable fixtures. See README for presets and
 prerequisites. CI uses Ubuntu 24.04 and Windows runners for Debug and Release.
 
 ## Extension points
@@ -704,19 +704,19 @@ value silently gets FLAC behaviour unless each site is updated:
 
 | Concern | Site |
 |---|---|
-| CLI choice and option validation | `CommandLine.cpp#ParseCommandLine` |
-| Output tree name (`normalized-flac`/`converted-mp3`) | `OutputLayout.h#OutputLayout::Conversion` |
-| Menu entry, prompts, preview text | `FlacConvertMain.cpp#GetUserAction`, `FlacConvertMain.cpp#ConfigureManualMp3`, `FlacConvertMain.cpp#ShowConversionPreview` |
-| Accepted inputs, target extension, sidecar decision | `FolderConvert.cpp#FolderConvert::PrepareConversion` |
-| Audit `target` value, sidecar verification | `FolderConvert.cpp#writeAudit`, `FolderConvert.cpp#FolderConvert::ExecuteConversion` |
-| Encoder arguments | `MediaConvertionTask.cpp#conversionArguments` |
-| Input gate, sidecar, output verification | `MediaConvertionTask.cpp#MediaConvertionTask::ConvertFile` |
-| Metadata preservation rules | `PreservationAudit.cpp#PreservationAudit::Compare` |
+| CLI choice and option validation | `app/CommandLine.cpp#ParseCommandLine` |
+| Output tree name (`normalized-flac`/`converted-mp3`) | `common/OutputLayout.h#OutputLayout::Conversion` |
+| Menu entry, prompts, preview text | `app/AudioLibraryToolkitMain.cpp#GetUserAction`, `app/AudioLibraryToolkitMain.cpp#ConfigureManualMp3`, `app/AudioLibraryToolkitMain.cpp#ShowConversionPreview` |
+| Accepted inputs, target extension, sidecar decision | `conversion/FolderConvert.cpp#FolderConvert::PrepareConversion` |
+| Audit `target` value, sidecar verification | `conversion/FolderConvert.cpp#writeAudit`, `conversion/FolderConvert.cpp#FolderConvert::ExecuteConversion` |
+| Encoder arguments | `conversion/MediaConversionTask.cpp#conversionArguments` |
+| Input gate, sidecar, output verification | `conversion/MediaConversionTask.cpp#MediaConversionTask::ConvertFile` |
+| Metadata preservation rules | `metadata/PreservationAudit.cpp#PreservationAudit::Compare` |
 
-Adding a CLI option: `include/ConversionOptions.h#ConversionOptions`, `CommandLine.cpp#ParseCommandLine`, the menu
+Adding a CLI option: `include/conversion/ConversionOptions.h#ConversionOptions`, `app/CommandLine.cpp#ParseCommandLine`, the menu
 prompt, and `ShowConversionPreview`.
 
 ## Knowledge links
 
-Conversion safety: K-041, K-048, K-056, K-029, K-030, K-032, K-038. Formats: K-016, K-017. Output layout and compatibility: K-065. Manual menu: K-024, K-049. Catalog/DB: K-051, K-042, K-040, K-050. Platform/build: K-006, K-061, K-043, K-062, K-033.
+Conversion safety: K-041, K-048, K-056, K-029, K-030, K-032, K-038. Formats: K-016, K-017. Output layout and compatibility: K-065. Manual menu: K-024, K-049. Catalog/DB: K-051, K-042, K-040, K-050. Platform/build: K-006, K-061, K-069, K-062, K-033.
 Only live entries are listed; superseded history is in `docs/knowledge/index.md` under "Closed".

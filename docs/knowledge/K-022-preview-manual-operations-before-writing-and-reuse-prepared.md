@@ -2,15 +2,15 @@
 id: K-022
 kind: decision
 title: "Preview manual operations before writing and reuse prepared inputs"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: superseded
 superseded_by: K-027
 created: 2026-10-11
 reviewed: 2026-10-11
 cites:
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: ConfirmPreview
-  - path: FlacConvert/src/FolderConvert.cpp
+  - path: AudioLibraryToolkit/src/conversion/FolderConvert.cpp
     symbol: "FolderConvert::PrepareConversion"
 ---
 

@@ -1,7 +1,7 @@
 #include "CatalogDatabase.h"
 
 #include "CommonUtils.h"
-#include "MediaConvertionTask.h"
+#include "MediaConversionTask.h"
 #include "MediaRecordJson.h"
 #include "MediaTrack.h"
 #include "PlatformUtils.h"
@@ -1178,7 +1178,7 @@ bool CatalogDatabase::Import(const DirectoryContentEntryList& albums,
             std::filesystem::remove(publishPath, ec);
             throw std::runtime_error("Database output directory changed before installation.");
         }
-        if (!MediaConvertionTask::InstallOutputFile(publishPath, outputDatabasePath, true)) {
+        if (!MediaConversionTask::InstallOutputFile(publishPath, outputDatabasePath, true)) {
             std::filesystem::remove(publishPath, ec);
             throw std::runtime_error("Cannot atomically install the completed catalog database.");
         }

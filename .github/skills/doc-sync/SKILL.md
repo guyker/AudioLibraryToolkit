@@ -1,6 +1,6 @@
 ---
 name: doc-sync
-description: Detect and fix drift between AudioLibraryToolkit code, FlacConvert/DESIGN.md, docs/features F-entries, README.md and the knowledge base after a change, or when asked to "check docs", "sync docs" or "are the docs up to date".
+description: Detect and fix drift between AudioLibraryToolkit code, AudioLibraryToolkit/DESIGN.md, docs/features F-entries, README.md and the knowledge base after a change, or when asked to "check docs", "sync docs" or "are the docs up to date".
 ---
 
 # Doc sync (AudioLibraryToolkit)
@@ -13,7 +13,7 @@ description: Detect and fix drift between AudioLibraryToolkit code, FlacConvert/
    `python tools\doc_impact.py --details` (or `--staged --details` / `--base <ref> --details`) for candidate documents.
 2. **Knowledge** – `kb.ps1 affected` (`-Staged` before a commit) and `kb.ps1 check`; handle each entry per the
    knowledge protocol (`reviewed`, `cite`, or new entry + supersede).
-3. **Citations** – for affected `path#Symbol` references in `FlacConvert/DESIGN.md` and `docs/features/*.md`, confirm
+3. **Citations** – for affected `path#Symbol` references in `AudioLibraryToolkit/DESIGN.md` and `docs/features/*.md`, confirm
    the symbols still exist (grep or LSP `workspaceSymbol`). Fix moved or renamed citations. Every K-id they cite must
    be live in `docs/knowledge/index.md`; replace a superseded id with its successor.
 4. **Content** – for materially affected symbols, or when their impact is unclear, compare against:

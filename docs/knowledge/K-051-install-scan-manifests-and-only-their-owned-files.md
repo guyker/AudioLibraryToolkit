@@ -2,13 +2,13 @@
 id: K-051
 kind: decision
 title: "Install scan manifests and only their owned files"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-005]
 created: 2026-11-18
-reviewed: 2026-11-23
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: installGeneratedFiles
 ---
 

@@ -9,7 +9,7 @@ Answer from the documentation first, then confirm in code. Read-only: do not edi
 
 ## Procedure
 
-1. **Locate** – `docs/features/index.md` → the F-entry for the feature; `FlacConvert/DESIGN.md` → component map,
+1. **Locate** – `docs/features/index.md` → the F-entry for the feature; `AudioLibraryToolkit/DESIGN.md` → component map,
    flow and contracts.
 2. **Why** – `kb.ps1 search <concept>` and `kb.ps1 related -Path <file>` (global project-memory skill). Note live
    decisions, constraints, traps and defects.

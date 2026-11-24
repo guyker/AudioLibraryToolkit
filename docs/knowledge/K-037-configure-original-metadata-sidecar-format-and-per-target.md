@@ -2,19 +2,19 @@
 id: K-037
 kind: decision
 title: "Configure original-metadata sidecar format and per-target policy; fail closed without an archive"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: superseded
 supersedes: [K-015, K-028]
 superseded_by: K-038
 created: 2026-11-12
 reviewed: 2026-11-12
 cites:
-  - path: FlacConvert/include/AppSettings.h
+  - path: AudioLibraryToolkit/include/app/AppSettings.h
     symbol: MetadataSidecarSettings.Resolve
-  - path: FlacConvert/src/FlacMetadata.cpp
+  - path: AudioLibraryToolkit/src/metadata/FlacMetadata.cpp
     symbol: FlacMetadata.Save
-  - path: FlacConvert/src/MediaConvertionTask.cpp
-    symbol: MediaConvertionTask.ConvertFile
+  - path: AudioLibraryToolkit/src/conversion/MediaConversionTask.cpp
+    symbol: MediaConversionTask.ConvertFile
 ---
 
 **Fact:** For MP3 targets and native FLAC sources, conversion archives the original FLAC marker, every metadata block and recognized leading/trailing tags byte-for-byte (`FlacMetadata::Save`). `config.json` `MetadataSidecars.Format` selects `binary` (`<audio>.flac-metadata`, default) or `json` (`<audio>.flac-metadata.json`: readable scan-schema metadata, informational only, plus the archive in Base64, which `FlacMetadata::Verify` checks). `ConvertToFlac` / `ConvertToMp3` are `disabled`, `optional` (written by default; menu prompt or CLI `--no-metadata-sidecar` turns it off) or `required` (default; a disable request is an error). `MetadataSidecarSettings::Resolve` sets `ConversionOptions::sidecarFormat` before planning. Without an archive `PreservationAudit::Compare` treats otherwise `SidecarOnly` losses (opaque blocks, repeated tags, chapters, unsupported pictures) as fatal. Only menu options 1/6 and CLI `convert` write sidecars.

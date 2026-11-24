@@ -5,7 +5,7 @@
 ## Project
 
 AudioLibraryToolkit is a C++ audio conversion and library-management utility. The application sources are under
-`FlacConvert/`; conversions run through the FFmpeg executable, and metadata and audio analysis also use FFmpeg
+`AudioLibraryToolkit/`; conversions run through the FFmpeg executable, and metadata and audio analysis also use FFmpeg
 libraries. See `README.md` for the feature overview.
 
 The core C++ sources must remain portable across Windows, Linux and macOS. CMake is the only build definition; Visual
@@ -17,8 +17,8 @@ platform-specific code behind narrow platform abstractions or conditional implem
 | Folder / file | What it is | Read first |
 |---|---|---|
 | `CMakeLists.txt`, `CMakePresets.json` | Shared Windows/Linux build | `README.md`, then platform CMake files |
-| `FlacConvert/` | The application: components, flows, contracts, schemas | `FlacConvert/DESIGN.md` |
-| `FlacConvert/src/`, `FlacConvert/include/` | Implementation and headers | `FlacConvert/DESIGN.md` component map, then the file |
+| `AudioLibraryToolkit/` | The application: components, flows, contracts, schemas | `AudioLibraryToolkit/DESIGN.md` |
+| `AudioLibraryToolkit/src/`, `AudioLibraryToolkit/include/` | Implementation and headers grouped by responsibility (`app`, `catalog`, `common`, `conversion`, `duplicates`, `media`, `metadata`, `platform`, `repair`); vendored RapidJSON stays under `include/rapidjson/` | `AudioLibraryToolkit/DESIGN.md` component map, then the file |
 | `docs/features/` | User-visible features (F-xxx): behaviour, entry points, acceptance checks | `docs/features/index.md` |
 | `tests/` | Native regression and Python integration tests, registered with CTest | `tests/CMakeLists.txt` |
 | `external/` | Third-party source/SDK dependencies | `CMakeLists.txt` and `cmake/platform/` for expected paths |
@@ -49,14 +49,14 @@ Windows requires a matching shared FFmpeg SDK, selected with `FFmpeg_ROOT` (defa
 libraries and requires the `ffmpeg`/`ffprobe` tools. SQLite amalgamation, CLI11 and spdlog are supplied in the
 repository/submodules. Build artifacts live under ignored `out/build/`.
 In Visual Studio, use File > Open > Folder on the repository root and pick a Windows preset; there is no `.sln`.
-CTest builds and runs the native regression executables and `tests/mp3_conversion.py` against disposable
+CTest builds and runs the native regression executables and `tests/audio_library_integration.py` against disposable
 generated fixtures. See `.github/instructions/audio-cpp.instructions.md` for audio validation and source safety.
 
 ## Where knowledge lives
 
 | Kind | Where | Changes how |
 |---|---|---|
-| What the system is (design, flows, contracts) | `FlacConvert/DESIGN.md` | Kept aligned with behaviour changes |
+| What the system is (design, flows, contracts) | `AudioLibraryToolkit/DESIGN.md` | Kept aligned with behaviour changes |
 | What users get (features, acceptance checks) | `docs/features/F-xxx-*.md` | Edited when important behaviour changes |
 | Rules for changing it | `.github/instructions/*.instructions.md` (scoped by `applyTo`) | Rewritten |
 | Why: decisions, traps, constraints, preferences, domain facts, known defects | `docs/knowledge/` (one file per entry; start at `docs/knowledge/index.md`) | Appended; the fact is never rewritten, only its status, review date and citations |

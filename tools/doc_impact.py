@@ -16,7 +16,7 @@ KNOWLEDGE_FILE = re.compile(r"^docs/knowledge/(K-\d{3,})-[^/]+\.md$")
 FEATURE_LINK = re.compile(r"\[(F-\d{3,})\]\((F-\d{3,}-[^/)]+\.md)\)")
 CODE_REFERENCE = re.compile(
     r"(?<![\w./-])"
-    r"((?:FlacConvert/)?(?:src/|include/)?(?:[\w.-]+/)*[\w.-]+"
+    r"((?:(?:AudioLibraryToolkit|FlacConvert)/)?(?:src/|include/)?(?:[\w.-]+/)*[\w.-]+"
     r"\.(?:cpp|cc|cxx|c|h|hpp))#[\w:~.]+",
     re.IGNORECASE,
 )
@@ -42,7 +42,13 @@ DESIGN_SECTIONS = (
     "Platform boundaries",
     "Build and external dependencies",
 )
-DESIGN_PATH = "FlacConvert/DESIGN.md"
+SOURCE_ROOTS = ("AudioLibraryToolkit", "FlacConvert")
+SOURCE_AREAS = frozenset(
+    ("app", "catalog", "common", "conversion", "duplicates", "media", "metadata", "platform", "repair")
+)
+DESIGN_PATH = "AudioLibraryToolkit/DESIGN.md"
+LEGACY_DESIGN_PATH = "FlacConvert/DESIGN.md"
+DESIGN_PATHS = (DESIGN_PATH, LEGACY_DESIGN_PATH)
 FEATURE_INDEX = "docs/features/index.md"
 
 
@@ -98,8 +104,10 @@ def changed_paths(root: Path, staged: bool, base: str | None) -> set[str]:
 
 def relevant(path: str) -> bool:
     return (
-        path.startswith(("FlacConvert/src/", "FlacConvert/include/", "tests/", "external/"))
-        or path in {"FlacConvert/config.default.json", "CMakeLists.txt", "CMakePresets.json", "FlacConvert/CMakeLists.txt"}
+        path.startswith(("tests/", "external/"))
+        or any(path.startswith(f"{root}/{folder}/") for root in SOURCE_ROOTS for folder in ("src", "include"))
+        or path in {"CMakeLists.txt", "CMakePresets.json"}
+        or any(path in {f"{root}/config.default.json", f"{root}/CMakeLists.txt"} for root in SOURCE_ROOTS)
         or path.startswith("cmake/")
     )
 
@@ -114,16 +122,17 @@ class Snapshot:
                 folder = root.joinpath(*directory.split("/"))
                 if folder.is_dir():
                     paths.update(f"{directory}/{file.name}" for file in folder.glob(pattern) if file.is_file())
-            for path in (DESIGN_PATH, FEATURE_INDEX):
+            for path in (*DESIGN_PATHS, FEATURE_INDEX):
                 if root.joinpath(*path.split("/")).is_file():
                     paths.add(path)
             self.paths = paths
         else:
-            scope = ("--", "docs/features", "docs/knowledge", DESIGN_PATH)
+            scope = ("--", "docs/features", "docs/knowledge", *DESIGN_PATHS)
             if mode == "staged":
                 self.paths = nul_paths(git(root, "ls-files", "-z", *scope))
             else:
                 self.paths = nul_paths(git(root, "ls-tree", "-r", "--name-only", "-z", "HEAD", *scope))
+        self.design_path = next((path for path in DESIGN_PATHS if path in self.paths), DESIGN_PATH)
 
     def read(self, path: str) -> str:
         if self.mode == "worktree":
@@ -142,20 +151,20 @@ def sections(text: str) -> set[str]:
 
 
 def source_reference(path: str) -> str:
-    if path.startswith("FlacConvert/"):
+    if path.startswith(tuple(f"{root}/" for root in SOURCE_ROOTS)):
         return path
     if path.startswith(("src/", "include/")):
-        return f"FlacConvert/{path}"
-    if "/" not in path:
+        return f"{SOURCE_ROOTS[0]}/{path}"
+    if "/" not in path or path.partition("/")[0] in SOURCE_AREAS:
         folder = "include" if PurePosixPath(path).suffix.lower() in {".h", ".hpp"} else "src"
-        return f"FlacConvert/{folder}/{path}"
+        return f"{SOURCE_ROOTS[0]}/{folder}/{path}"
     return path
 
 
 def references_match(changed: str, cited: str) -> bool:
     if changed == cited:
         return True
-    prefixes = ("FlacConvert/src/", "FlacConvert/include/")
+    prefixes = tuple(f"{root}/{folder}/" for root in SOURCE_ROOTS for folder in ("src", "include"))
     return (
         changed.startswith(prefixes)
         and cited.startswith(prefixes)
@@ -230,12 +239,12 @@ def knowledge_entries(snapshot: Snapshot, warnings: list[str]) -> dict[str, dict
 
 
 def check_documents(snapshot: Snapshot, features: dict, knowledge: dict, warnings: list[str]) -> None:
-    if DESIGN_PATH not in snapshot.paths:
-        warnings.append(f"{DESIGN_PATH}: missing from the selected snapshot")
+    if snapshot.design_path not in snapshot.paths:
+        warnings.append(f"{snapshot.design_path}: missing from the selected snapshot")
     else:
-        missing = set(DESIGN_SECTIONS) - sections(snapshot.read(DESIGN_PATH))
+        missing = set(DESIGN_SECTIONS) - sections(snapshot.read(snapshot.design_path))
         if missing:
-            warnings.append(f"{DESIGN_PATH}: missing sections: {', '.join(sorted(missing))}")
+            warnings.append(f"{snapshot.design_path}: missing sections: {', '.join(sorted(missing))}")
     if not features:
         warnings.append("docs/features: no feature entries found in the selected snapshot")
     if FEATURE_INDEX not in snapshot.paths:
@@ -273,7 +282,7 @@ def report(root: Path, staged: bool, base: str | None, details: bool) -> None:
     production_changes = [path for path in relevant_changes if not path.startswith("tests/")]
     document_changes = [
         path for path in changed
-        if path == DESIGN_PATH or path.startswith(("docs/features/", "docs/knowledge/"))
+        if path in DESIGN_PATHS or path.startswith(("docs/features/", "docs/knowledge/"))
     ]
     if not details and not production_changes and not document_changes:
         return
@@ -301,11 +310,11 @@ def report(root: Path, staged: bool, base: str | None, details: bool) -> None:
         print("\nChanged application, dependency, build or test paths:")
         for path in relevant_changes:
             print(f"- {label(path)}")
-        if DESIGN_PATH not in snapshot.paths:
-            print(f"\nDesign: {label(DESIGN_PATH)} is missing from the selected snapshot.")
+        if snapshot.design_path not in snapshot.paths:
+            print(f"\nDesign: {label(snapshot.design_path)} is missing from the selected snapshot.")
         else:
-            included = "included" if DESIGN_PATH in changed else "not included"
-            print(f"\nDesign: {label(DESIGN_PATH)} is {included} in these changes; review whether it needs updating.")
+            included = "included" if snapshot.design_path in changed else "not included"
+            print(f"\nDesign: {label(snapshot.design_path)} is {included} in these changes; review whether it needs updating.")
 
         print("\nCandidate features (direct file citations and matching source/header names only):")
         mapped = set()

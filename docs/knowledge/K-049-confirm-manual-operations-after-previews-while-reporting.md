@@ -2,15 +2,15 @@
 id: K-049
 kind: decision
 title: "Confirm manual operations after previews while reporting scan discovery failures"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-027]
 created: 2026-11-18
-reviewed: 2026-11-23
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: ConfirmPreview
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: ScanFolderAndCreateJSON
 ---
 

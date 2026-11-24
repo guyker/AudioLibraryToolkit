@@ -2,14 +2,14 @@
 id: K-047
 kind: defect
 title: "Output directory replacement can redirect writes into source libraries"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: fixed
 created: 2026-11-16
 reviewed: 2026-11-16
 cites:
-  - path: FlacConvert/src/FolderConvert.cpp
+  - path: AudioLibraryToolkit/src/conversion/FolderConvert.cpp
     symbol: "FolderConvert::ExecuteConversion"
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: installGeneratedFiles
 ---
 

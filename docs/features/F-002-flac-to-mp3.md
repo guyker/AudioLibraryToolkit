@@ -42,16 +42,16 @@ discard FLAC-only blocks, keep ReplayGain); every type can also skip the affecte
 
 ## Entry points
 - `AudioLibraryToolkit convert <input> --to mp3 [--mp3-quality N] [--downmix-to-stereo] [--overwrite]` →
-  `FlacConvertMain.cpp#RunWithArguments`
-- Menu option 6 → `FlacConvertMain.cpp#ConvertFLACToMP3` (prompts in `FlacConvertMain.cpp#ConfigureManualMp3`)
-- `include/ConversionOptions.h#ConversionOptions`, `MediaConvertionTask.cpp#conversionArguments`,
-  `FlacMetadata.cpp#FlacMetadata::Save`, `Mp3TagMetadata.cpp#Mp3TagMetadata::WriteFromFlac`,
-  `Mp3TagMetadata.cpp#Mp3TagMetadata::Read`, `Mp3TagIssues.cpp#Mp3TagIssues::Detect`,
-  `Mp3TagIssues.cpp#Mp3TagIssues::Resolve`, `FolderConvert.cpp#ApplyTagIssueResolutions`,
-  `FlacConvertMain.cpp#ResolveMenuTagIssues`
+  `app/AudioLibraryToolkitMain.cpp#RunWithArguments`
+- Menu option 6 → `app/AudioLibraryToolkitMain.cpp#ConvertFLACToMP3` (prompts in `app/AudioLibraryToolkitMain.cpp#ConfigureManualMp3`)
+- `include/conversion/ConversionOptions.h#ConversionOptions`, `conversion/MediaConversionTask.cpp#conversionArguments`,
+  `metadata/FlacMetadata.cpp#FlacMetadata::Save`, `metadata/Mp3TagMetadata.cpp#Mp3TagMetadata::WriteFromFlac`,
+  `metadata/Mp3TagMetadata.cpp#Mp3TagMetadata::Read`, `metadata/Mp3TagIssues.cpp#Mp3TagIssues::Detect`,
+  `metadata/Mp3TagIssues.cpp#Mp3TagIssues::Resolve`, `conversion/FolderConvert.cpp#ApplyTagIssueResolutions`,
+  `app/AudioLibraryToolkitMain.cpp#ResolveMenuTagIssues`
 
 ## Design and knowledge
-- DESIGN: `FlacConvert/DESIGN.md` → Conversion; Files and schemas (sidecar)
+- DESIGN: `AudioLibraryToolkit/DESIGN.md` → Conversion; Files and schemas (sidecar)
 - K-038 metadata sidecar policy, K-016 channel policy, K-017 MP3 encoding settings, K-065 output layout and retained menu defaults,
   K-029 preservation audit, K-066 skipped audio folders without FLAC, K-067 TagLib MP3 tag writing and verification
 
@@ -76,7 +76,7 @@ discard FLAC-only blocks, keep ReplayGain); every type can also skip the affecte
       without sidecars or extra FFmpeg alias occurrences; artwork and chapters remain intact.
 - [ ] An MP3-only or WAV-only album folder is absent from the output and listed in `skippedUnchangedDirectories`.
 - [ ] 5.1 source without downmix fails; with downmix produces stereo.
-- [ ] `--mp3-quality 10` is rejected by the CLI (`CommandLine.cpp#ParseCommandLine`).
+- [ ] `--mp3-quality 10` is rejected by the CLI (`app/CommandLine.cpp#ParseCommandLine`).
 
 ## Known limitations
 - Requires an `ffmpeg` build with `libmp3lame`.

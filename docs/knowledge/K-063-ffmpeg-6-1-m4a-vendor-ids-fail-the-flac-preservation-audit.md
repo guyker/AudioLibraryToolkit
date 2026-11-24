@@ -2,15 +2,15 @@
 id: K-063
 kind: defect
 title: "FFmpeg 6.1 M4A vendor IDs fail the FLAC preservation audit"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 created: 2026-11-22
-reviewed: 2026-11-22
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/PreservationAudit.cpp
-    symbol: isGeneratedMp4Tag
   - test: ConversionTests.test_aac_m4a_at_cd_sample_rate_converts_with_lossy_warning
   - test: ConversionTests.test_m4a_default_stream_tags_do_not_fail_flac_preservation_audit
+  - path: AudioLibraryToolkit/src/metadata/PreservationAudit.cpp
+    symbol: isGeneratedMp4Tag
 ---
 
 **Fact:** On Ubuntu 24.04 with FFmpeg 6.1.1, generated AAC and ALAC M4A fixtures expose a default `vendor_id`

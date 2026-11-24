@@ -2,17 +2,17 @@
 id: K-032
 kind: trap
 title: "Read and write conversion files through configured paths; canonical paths only for safety checks"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-020]
 created: 2026-11-10
-reviewed: 2026-11-23
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/FolderConvert.cpp
+  - path: AudioLibraryToolkit/src/conversion/FolderConvert.cpp
     symbol: FolderConvert.PrepareConversion
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: ConvertConfiguredLibraries
-  - path: FlacConvert/src/FolderConvert.cpp
+  - path: AudioLibraryToolkit/src/conversion/FolderConvert.cpp
     symbol: FolderConvert.ConvertAudioFolderToOutput
 ---
 

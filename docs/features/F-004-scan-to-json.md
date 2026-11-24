@@ -63,14 +63,14 @@ preserves prior catalog files. Duplicate detection and database import validate 
 then reassemble fragment sets before use.
 
 ## Entry points
-- `AudioLibraryToolkit scan <library> [--output-dir] [--full-rescan] [--tier catalog|integrity|analysis] [--archive-flac-metadata|--no-archive-flac-metadata]` → `FlacConvertMain.cpp#RunWithArguments`
-- Menu option 2 → `FlacConvertMain.cpp#ScanFolderAndCreateJSON`, `FlacConvertMain.cpp#installGeneratedFiles`
-- `AlbumCollection.cpp#AlbumCollection::LoadAlbumsCo`, `AlbumCollection.cpp#AlbumCollection::ImportMetadata`,
-  `AlbumCollection.cpp#AlbumCollection::SaveAlbumsToJSON`
-- `TagLibReader.cpp#TagLibReader::Read`, `MediaRecordJson.cpp#SerializeMediaRecord`
+- `AudioLibraryToolkit scan <library> [--output-dir] [--full-rescan] [--tier catalog|integrity|analysis] [--archive-flac-metadata|--no-archive-flac-metadata]` → `app/AudioLibraryToolkitMain.cpp#RunWithArguments`
+- Menu option 2 → `app/AudioLibraryToolkitMain.cpp#ScanFolderAndCreateJSON`, `app/AudioLibraryToolkitMain.cpp#installGeneratedFiles`
+- `catalog/AlbumCollection.cpp#AlbumCollection::LoadAlbumsCo`, `catalog/AlbumCollection.cpp#AlbumCollection::ImportMetadata`,
+  `catalog/AlbumCollection.cpp#AlbumCollection::SaveAlbumsToJSON`
+- `metadata/TagLibReader.cpp#TagLibReader::Read`, `catalog/MediaRecordJson.cpp#SerializeMediaRecord`
 
 ## Design and knowledge
-- DESIGN: `FlacConvert/DESIGN.md` → Scan to JSON; Files and schemas (album JSON)
+- DESIGN: `AudioLibraryToolkit/DESIGN.md` → Scan to JSON; Files and schemas (album JSON)
 - Schema: `docs/schemas/media-catalog-v2.schema.json`
 - Manifest schema: `docs/schemas/scan-manifest-v1.schema.json`
 - Scan report schema: `docs/schemas/scan-report-v2.schema.json` (version 1 remains available for older reports)

@@ -1,7 +1,7 @@
 # Feature registry
 
 One file per user-visible feature: `F-xxx-<kebab-name>.md`. An entry says **what the user gets and how to check it**.
-How it works lives in `FlacConvert/DESIGN.md`; why lives in `docs/knowledge/` (K-xxx); rules live in
+How it works lives in `AudioLibraryToolkit/DESIGN.md`; why lives in `docs/knowledge/` (K-xxx); rules live in
 `.github/instructions/`. Do not copy content between them; link instead.
 
 Unlike K-entries, F-entries are **edited in place** when important behaviour changes, in the same change as the code.
@@ -11,7 +11,7 @@ free id and add a row below. Retired features keep their file with status `remov
 ## Keeping features current
 
 Document important user-visible behaviour, contracts, outputs and acceptance checks, not every code change. Update
-the current entry and `FlacConvert/DESIGN.md` when they actually become inaccurate; do not add a per-change history
+the current entry and `AudioLibraryToolkit/DESIGN.md` when they actually become inaccurate; do not add a per-change history
 for formatting, routine renames or behaviour-preserving refactors. Record durable reasons and verified risks in the
 knowledge base only when its protocol calls for them.
 
@@ -34,7 +34,7 @@ diff and this index. The reports do not write entries or retain a change history
 | [F-008](F-008-interactive-menu.md) | Interactive menu, preview and confirmation | active |
 | [F-009](F-009-menu-option-5.md) | Menu option 5 | not implemented |
 | [F-010](F-010-session-logging.md) | Per-request session logging | active |
-| [F-011](F-011-flac-repair.md) | Repair recognized FLAC/MP3 metadata defects | active |
+| [F-011](F-011-metadata-repair.md) | Repair recognized FLAC/MP3 metadata defects | active |
 
 ## Template
 
@@ -50,7 +50,7 @@ Status: active | experimental | deprecated | removed | not implemented
 - <CLI command / menu option> → `path#Symbol`
 
 ## Design and knowledge
-- DESIGN: `FlacConvert/DESIGN.md` → <section>
+- DESIGN: `AudioLibraryToolkit/DESIGN.md` → <section>
 - K-xxx (short topic)
 
 ## Acceptance checks

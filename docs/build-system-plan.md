@@ -32,7 +32,7 @@ retired; Visual Studio opens the CMake presets directly.
 | Tests include a Python integration suite and two manually linked C++ executables | Register existing tests with CTest and replace manual linking against Debug objects |
 | Existing CI only reminded contributors about documentation impact | A separate Windows/Linux Debug/Release build and test workflow is now present |
 
-K-006 supports this architecture. K-043 describes the current Windows SDK layout;
+K-006 supports this architecture. K-069 describes the current Windows SDK layout;
 retain it during migration, not as a Linux dependency requirement. Preserve
 K-044's Windows runtime-DLL requirement. Reassess affected knowledge entries when
 implementation changes their facts; do not change their status during planning.
@@ -45,7 +45,7 @@ CMakePresets.json              Windows/Linux Debug and Release presets
 cmake\platform\
   Windows.cmake                MSVC options, SDK discovery, manifest, deployment
   Linux.cmake                  pkg-config FFmpeg discovery and Linux tools
-FlacConvert\
+AudioLibraryToolkit\
   CMakeLists.txt              Explicit source list; core and executable targets
 tests\
   CMakeLists.txt              Native tests, Python integration, fixture setup
@@ -59,9 +59,9 @@ Presets select native environments; they do not imply cross-compilation.
 
 Targets:
 
-- `FlacConvertCore`: internal static library containing the existing application
-  implementation except `FlacConvertMain.cpp`; no new public SDK.
-- `FlacConvert`: executable linking the core and containing the current entry
+- `AudioLibraryToolkitCore`: internal static library containing the existing application
+  implementation except `AudioLibraryToolkitMain.cpp`; no new public SDK.
+- `AudioLibraryToolkit`: executable linking the core and containing the current entry
   point/menu/CLI orchestration.
 - SQLite: compile only the existing `sqlite3.c` as C, with its existing effective
   settings preserved; link platform requirements through CMake.

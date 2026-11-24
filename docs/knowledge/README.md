@@ -14,13 +14,13 @@ Record important, verified context, not a diary of formatting, routine refactors
 id: K-001
 kind: trap                 # decision | trap | constraint | defect | preference | domain
 title: "A short, specific summary of the verified fact"
-area: [FlacConvert]        # one or more of the areas in kb.config.json; detail goes in the title
+area: [AudioLibraryToolkit]        # one or more of the areas in kb.config.json; detail goes in the title
 status: active             # active | fixed | superseded | archived
 supersedes: []             # ids this entry replaces
 created: YYYY-MM-DD
 reviewed: YYYY-MM-DD       # last time someone confirmed it is still true
 cites:                     # path + symbol (or test); never line numbers
-  - path: FlacConvert/src/FolderConvert.cpp
+  - path: AudioLibraryToolkit/src/conversion/FolderConvert.cpp
     symbol: FolderConvert::ScanAudioFiles
 ---
 

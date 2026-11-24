@@ -24,7 +24,7 @@ ctest --preset windows-debug
 Use `linux-debug` instead on Linux. Tests use disposable generated audio fixtures. The build instructions also list
 known FFmpeg-version-related test failures on the Ubuntu CI reference environment.
 
-For behavior changes, consult the [design](FlacConvert/DESIGN.md) and
+For behavior changes, consult the [design](AudioLibraryToolkit/DESIGN.md) and
 [feature registry](docs/features/index.md), update relevant documentation, and add focused regression coverage.
 Keep core C++ portable across Windows, Linux and macOS; isolate platform-specific behavior.
 

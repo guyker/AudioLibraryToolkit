@@ -2,15 +2,15 @@
 id: K-039
 kind: decision
 title: "Refresh database rows by imported album path"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: superseded
 superseded_by: K-040
 created: 2026-11-15
 reviewed: 2026-11-15
 cites:
-  - path: FlacConvert/src/AlbumCollection.cpp
+  - path: AudioLibraryToolkit/src/catalog/AlbumCollection.cpp
     symbol: "AlbumCollection::ExportToDatabase"
-  - path: FlacConvert/src/MediaTrack.cpp
+  - path: AudioLibraryToolkit/src/media/MediaTrack.cpp
     symbol: "MediaTrack::GetCreateTableSQL"
 ---
 

@@ -2,17 +2,17 @@
 id: K-065
 kind: decision
 title: "Separate outputs by operation while preserving catalog workflows"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-025, K-026, K-031]
 created: 2026-11-23
-reviewed: 2026-11-23
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/include/OutputLayout.h
+  - path: AudioLibraryToolkit/include/common/OutputLayout.h
     symbol: "OutputLayout::Catalog"
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: configuredCatalogDirectory
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: ConfigureManualMp3
 ---
 

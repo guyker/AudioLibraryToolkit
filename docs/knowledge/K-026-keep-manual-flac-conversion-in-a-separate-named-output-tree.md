@@ -2,16 +2,16 @@
 id: K-026
 kind: decision
 title: "Keep manual FLAC conversion in a separate named output tree"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: superseded
 supersedes: [K-021]
 superseded_by: K-065
 created: 2026-10-11
 reviewed: 2026-11-19
 cites:
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: ConvertFLACToFLAC
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: ConvertConfiguredLibraries
 ---
 

@@ -3,8 +3,9 @@ id: K-043
 kind: constraint
 title: "Windows builds need a matching shared FFmpeg SDK selected by FFmpeg_ROOT"
 area: ["External Dependencies"]
-status: active
+status: superseded
 supersedes: [K-009]
+superseded_by: K-069
 created: 2026-11-16
 reviewed: 2026-11-16
 cites:

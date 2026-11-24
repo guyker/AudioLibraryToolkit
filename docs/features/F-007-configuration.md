@@ -42,14 +42,14 @@ archives independently of conversion `MetadataSidecars`; menu and CLI choices ca
 size limit. Large albums split into track fragments; a track that cannot fit fails the scan.
 
 ## Entry points
-- `AppSettings.cpp#AppSettingsJson::LoadForCommandLine` (CLI), `AppSettings.cpp#AppSettingsJson::AppSetting` (menu),
-  both through `AppSettings.cpp#AppSettingsJson::LoadWithDefaults`
-- `include/AppSettings.h#AppSettingsJson::GetDefaultSettings`, `AppSettings.cpp#AppSettingsJson::CreateInitialConfiguration`,
-  `AppSettings.cpp#AppSettingsJson::FindDefaultConfigTemplate`, `FlacConvert/config.default.json`,
-  `include/AppSettings.h#MediaDirectoryElement`
+- `app/AppSettings.cpp#AppSettingsJson::LoadForCommandLine` (CLI), `app/AppSettings.cpp#AppSettingsJson::AppSetting` (menu),
+  both through `app/AppSettings.cpp#AppSettingsJson::LoadWithDefaults`
+- `include/app/AppSettings.h#AppSettingsJson::GetDefaultSettings`, `app/AppSettings.cpp#AppSettingsJson::CreateInitialConfiguration`,
+  `app/AppSettings.cpp#AppSettingsJson::FindDefaultConfigTemplate`, `AudioLibraryToolkit/config.default.json`,
+  `include/app/AppSettings.h#MediaDirectoryElement`
 
 ## Design and knowledge
-- DESIGN: `FlacConvert/DESIGN.md` → Configuration
+- DESIGN: `AudioLibraryToolkit/DESIGN.md` → Configuration
 - K-061 per-user configuration and explicit required paths
 
 ## Acceptance checks

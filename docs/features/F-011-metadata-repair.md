@@ -49,12 +49,12 @@ phases with a known total show a rough ETA. Interactive updates reuse one line; 
 of terminal control sequences. Phase boundaries are retained in the session log in both modes.
 
 ## Entry points
-- `repair <input> [--output-dir <directory>] [--overwrite] [--rules <ids>] [--remove-id3v1] [--dry-run] [--jobs <1-16>]` → `FlacConvert/src/FlacConvertMain.cpp#RunWithArgumentsImpl`
-  → `FlacConvert/src/AudioRepair.cpp#AudioRepair::Prepare`, `FlacConvert/src/AudioRepair.cpp#AudioRepair::Execute`
-- Menu option 7 → `FlacConvert/src/FlacConvertMain.cpp#RepairConfiguredLibraries`
+- `repair <input> [--output-dir <directory>] [--overwrite] [--rules <ids>] [--remove-id3v1] [--dry-run] [--jobs <1-16>]` → `AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp#RunWithArgumentsImpl`
+  → `AudioLibraryToolkit/src/repair/AudioRepair.cpp#AudioRepair::Prepare`, `AudioLibraryToolkit/src/repair/AudioRepair.cpp#AudioRepair::Execute`
+- Menu option 7 → `AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp#RepairConfiguredLibraries`
 
 ## Design and knowledge
-- DESIGN: `FlacConvert/DESIGN.md` → Metadata repair; rules in `FlacConvert/src/RepairRules.cpp#RepairRules::Analyze`
+- DESIGN: `AudioLibraryToolkit/DESIGN.md` → Metadata repair; rules in `AudioLibraryToolkit/src/repair/RepairRules.cpp#RepairRules::Analyze`
 - Knowledge: K-065 operation-based output layout; the stable repair and verification contract is documented in DESIGN.
 
 ## Acceptance checks

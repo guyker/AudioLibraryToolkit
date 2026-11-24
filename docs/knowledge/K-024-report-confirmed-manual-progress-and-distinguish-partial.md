@@ -2,14 +2,14 @@
 id: K-024
 kind: decision
 title: "Report confirmed manual progress and distinguish partial completion from failure"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 created: 2026-10-11
-reviewed: 2026-11-23
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: ManualOperationSummary
-  - path: FlacConvert/src/FolderConvert.cpp
+  - path: AudioLibraryToolkit/src/conversion/FolderConvert.cpp
     symbol: "FolderConvert::ExecuteConversion"
 ---
 

@@ -58,7 +58,7 @@ endfunction()
 function(afc_embed_windows_manifest target)
     add_custom_command(TARGET "${target}" POST_BUILD
         COMMAND "${MSVC_MT_EXECUTABLE}"
-            -manifest "${PROJECT_SOURCE_DIR}/FlacConvert/app.manifest"
+            -manifest "${PROJECT_SOURCE_DIR}/AudioLibraryToolkit/app.manifest"
             "-updateresource:$<TARGET_FILE:${target}>"
         VERBATIM)
 endfunction()

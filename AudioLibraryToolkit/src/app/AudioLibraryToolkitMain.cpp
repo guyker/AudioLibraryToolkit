@@ -1,4 +1,3 @@
-// FlacConvert.cpp : This file contains the 'main' function. Program execution begins and ends there.
 //
 
 #include <iostream>
@@ -58,8 +57,8 @@ extern "C" {
 
 #include "MediaInformation.h"
 
-#include "MediaConvertionTask.h"
-#include "MediaConvertionAsyncTask.h"
+#include "MediaConversionTask.h"
+#include "MediaConversionAsyncTask.h"
 #include "AppSettings.h"
 #include "CommonUtils.h"
 #include "RunLogging.h"
@@ -67,7 +66,7 @@ extern "C" {
 
 #include "PlatformUtils.h"
 
-#include "ffmpeg.h"
+#include "FFmpeg.h"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -787,7 +786,7 @@ bool installScanReport(const fs::path& targetDirectory, const fs::path& libraryR
     }
     const bool anchored = outputDirectory->IsAnchored(targetDirectory);
     const bool installed = written && anchored &&
-        MediaConvertionTask::InstallOutputFile(temporary, target, true);
+        MediaConversionTask::InstallOutputFile(temporary, target, true);
     if (!installed) {
         std::error_code ec;
         fs::remove(temporary, ec);
@@ -1046,7 +1045,7 @@ bool installGeneratedFiles(const fs::path& stagedDirectory, const fs::path& targ
             rollback();
             return false;
         }
-        if (!MediaConvertionTask::InstallOutputFile(temporary, installed, false)) {
+        if (!MediaConversionTask::InstallOutputFile(temporary, installed, false)) {
             std::error_code cleanupError;
             fs::remove(temporary, cleanupError);
             rollback();

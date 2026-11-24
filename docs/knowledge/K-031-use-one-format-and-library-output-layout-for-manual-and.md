@@ -2,15 +2,15 @@
 id: K-031
 kind: decision
 title: "Use one format and library output layout for manual and explicit conversion"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: superseded
 superseded_by: K-065
 created: 2026-10-11
 reviewed: 2026-11-19
 cites:
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: RunWithArguments
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: ConvertConfiguredLibraries
 ---
 

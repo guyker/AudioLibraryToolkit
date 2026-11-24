@@ -8,35 +8,35 @@ add_test(NAME dependency-version-report
         "${CMAKE_COMMAND}" "${PROJECT_SOURCE_DIR}/cmake/PrintDependencyVersions.cmake")
 
 add_executable(preservation_audit_test preservation_audit.cpp)
-target_link_libraries(preservation_audit_test PRIVATE FlacConvertCore)
+target_link_libraries(preservation_audit_test PRIVATE AudioLibraryToolkitCore)
 add_executable(warning_regressions_test warning_regressions.cpp)
-target_link_libraries(warning_regressions_test PRIVATE FlacConvertCore)
+target_link_libraries(warning_regressions_test PRIVATE AudioLibraryToolkitCore)
 add_executable(media_metadata_json_test media_metadata_json.cpp)
-target_link_libraries(media_metadata_json_test PRIVATE FlacConvertCore)
+target_link_libraries(media_metadata_json_test PRIVATE AudioLibraryToolkitCore)
 add_executable(media_record_json_test media_record_json.cpp)
-target_link_libraries(media_record_json_test PRIVATE FlacConvertCore)
+target_link_libraries(media_record_json_test PRIVATE AudioLibraryToolkitCore)
 add_executable(taglib_smoke_test taglib_smoke.cpp)
-target_link_libraries(taglib_smoke_test PRIVATE FlacConvertCore)
+target_link_libraries(taglib_smoke_test PRIVATE AudioLibraryToolkitCore)
 add_executable(decode_analyzer_test decode_analyzer.cpp)
-target_link_libraries(decode_analyzer_test PRIVATE FlacConvertCore)
+target_link_libraries(decode_analyzer_test PRIVATE AudioLibraryToolkitCore)
 add_executable(bounded_task_runner_test bounded_task_runner.cpp)
 target_include_directories(bounded_task_runner_test PRIVATE
-    "${PROJECT_SOURCE_DIR}/FlacConvert/include")
+    "${PROJECT_SOURCE_DIR}/AudioLibraryToolkit/include/common")
 target_compile_features(bounded_task_runner_test PRIVATE cxx_std_20)
 add_executable(scoped_current_directory_test scoped_current_directory.cpp)
-target_link_libraries(scoped_current_directory_test PRIVATE FlacConvertCore)
+target_link_libraries(scoped_current_directory_test PRIVATE AudioLibraryToolkitCore)
 add_executable(scan_report_schema_test scan_report_schema.cpp)
-target_link_libraries(scan_report_schema_test PRIVATE FlacConvertCore)
+target_link_libraries(scan_report_schema_test PRIVATE AudioLibraryToolkitCore)
 add_executable(duplicate_review_test duplicate_review.cpp)
-target_link_libraries(duplicate_review_test PRIVATE FlacConvertCore)
+target_link_libraries(duplicate_review_test PRIVATE AudioLibraryToolkitCore)
 add_executable(duplicate_matcher_test duplicate_matcher.cpp)
-target_link_libraries(duplicate_matcher_test PRIVATE FlacConvertCore)
+target_link_libraries(duplicate_matcher_test PRIVATE AudioLibraryToolkitCore)
 add_executable(duplicate_comparison_test duplicate_comparison.cpp)
-target_link_libraries(duplicate_comparison_test PRIVATE FlacConvertCore)
+target_link_libraries(duplicate_comparison_test PRIVATE AudioLibraryToolkitCore)
 add_executable(run_logging_test run_logging.cpp)
-target_link_libraries(run_logging_test PRIVATE FlacConvertCore)
+target_link_libraries(run_logging_test PRIVATE AudioLibraryToolkitCore)
 add_executable(app_settings_config_test app_settings_config.cpp)
-target_link_libraries(app_settings_config_test PRIVATE FlacConvertCore)
+target_link_libraries(app_settings_config_test PRIVATE AudioLibraryToolkitCore)
 
 foreach(_target IN ITEMS preservation_audit_test warning_regressions_test media_metadata_json_test media_record_json_test taglib_smoke_test decode_analyzer_test bounded_task_runner_test scoped_current_directory_test scan_report_schema_test duplicate_review_test duplicate_matcher_test duplicate_comparison_test run_logging_test app_settings_config_test)
     target_compile_options(${_target} PRIVATE
@@ -92,7 +92,7 @@ add_test(NAME run-logging
     COMMAND "$<TARGET_FILE:run_logging_test>")
 add_test(NAME app-settings-config
     COMMAND "$<TARGET_FILE:app_settings_config_test>"
-        "${PROJECT_SOURCE_DIR}/FlacConvert/config.default.json")
+        "${PROJECT_SOURCE_DIR}/AudioLibraryToolkit/config.default.json")
 add_test(NAME config-startup
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/config_startup.py"
         "$<TARGET_FILE:AudioLibraryToolkit>")
@@ -105,7 +105,7 @@ if(WIN32)
             "$<TARGET_FILE:run_logging_test>" --progress)
 endif()
 add_test(NAME mp3-conversion-integration
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/mp3_conversion.py"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/audio_library_integration.py"
         --converter "$<TARGET_FILE:AudioLibraryToolkit>"
         --ffmpeg "${FFMPEG_EXECUTABLE}"
         --ffprobe "${FFPROBE_EXECUTABLE}"

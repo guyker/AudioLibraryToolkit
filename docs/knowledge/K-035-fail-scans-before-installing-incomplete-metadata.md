@@ -2,14 +2,14 @@
 id: K-035
 kind: trap
 title: "Fail scans before installing incomplete metadata"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 created: 2026-11-10
-reviewed: 2026-11-23
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/AlbumCollection.cpp
+  - path: AudioLibraryToolkit/src/catalog/AlbumCollection.cpp
     symbol: "AlbumCollection::SaveAlbumsToJSON"
-  - path: tests/mp3_conversion.py
+  - path: tests/audio_library_integration.py
     symbol: ConversionTests.test_incomplete_scan_preserves_previous_json_and_accepts_uppercase_extension
 ---
 

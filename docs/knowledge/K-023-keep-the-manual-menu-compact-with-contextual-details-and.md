@@ -2,15 +2,15 @@
 id: K-023
 kind: decision
 title: "Keep the manual menu compact with contextual details and one confirmation"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: superseded
 superseded_by: K-027
 created: 2026-10-11
 reviewed: 2026-10-11
 cites:
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: GetUserAction
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: ConfirmManualAction
 ---
 

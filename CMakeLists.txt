@@ -20,8 +20,8 @@ endforeach()
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/sqlite-amalgamation/sqlite3.c")
     message(FATAL_ERROR "SQLite amalgamation missing under external/sqlite-amalgamation.")
 endif()
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/FlacConvert/include/rapidjson/document.h")
-    message(FATAL_ERROR "Vendored RapidJSON headers missing under FlacConvert/include/rapidjson.")
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/AudioLibraryToolkit/include/rapidjson/document.h")
+    message(FATAL_ERROR "Vendored RapidJSON headers missing under AudioLibraryToolkit/include/rapidjson.")
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
@@ -83,7 +83,7 @@ else()
     message(FATAL_ERROR "Unsupported target platform: ${CMAKE_SYSTEM_NAME}")
 endif()
 
-add_subdirectory(FlacConvert)
+add_subdirectory(AudioLibraryToolkit)
 
 find_package(Git QUIET)
 if(WIN32)
@@ -112,12 +112,12 @@ add_custom_target(check_taglib_updates ALL
         "-DTAGLIB_UPDATE_TMP_DIR=${CMAKE_BINARY_DIR}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckTagLibUpdate.cmake"
     VERBATIM)
-add_dependencies(FlacConvertCore check_taglib_updates)
+add_dependencies(AudioLibraryToolkitCore check_taglib_updates)
 
 install(TARGETS AudioLibraryToolkit
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 # The executable finds this template at <bindir>/../share/AudioLibraryToolkit with the default layout.
-install(FILES FlacConvert/config.default.json
+install(FILES AudioLibraryToolkit/config.default.json
     DESTINATION "${CMAKE_INSTALL_DATADIR}/AudioLibraryToolkit")
 
 install(FILES LICENSE THIRD_PARTY_NOTICES.md

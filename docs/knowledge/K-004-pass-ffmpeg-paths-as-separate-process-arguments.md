@@ -2,14 +2,14 @@
 id: K-004
 kind: trap
 title: "Pass FFmpeg paths as separate process arguments"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: superseded
 superseded_by: K-014
 created: 2026-10-09
 reviewed: 2026-10-10
 cites:
-  - path: FlacConvert/src/MediaConvertionTask.cpp
-    symbol: "MediaConvertionTask::ConvertFile"
+  - path: AudioLibraryToolkit/src/conversion/MediaConversionTask.cpp
+    symbol: "MediaConversionTask::ConvertFile"
 ---
 
 **Fact:** `MediaConvertionTask::ConvertFile` starts FFmpeg with `_wspawnvp` and an argument vector containing the executable, source path, options, and temporary output path separately.

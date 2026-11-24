@@ -1,6 +1,6 @@
 #include "CommonUtils.h"
 #include "MediaTrack.h"
-#include "ffmpeg.h"
+#include "FFmpeg.h"
 
 #include <algorithm>
 #include <array>
@@ -12,7 +12,6 @@
 #include <thread>
 #include <vector>
 
-// Link with the Debug application objects except FlacConvertMain.obj and the FFmpeg libraries.
 // Arguments are generated 48 kHz stereo WAV fixtures: a 997 Hz FFmpeg sine and silence.
 
 static void require(bool condition, const char* message) {

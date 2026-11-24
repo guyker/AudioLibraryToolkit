@@ -32,11 +32,11 @@ Options 3 and 4 read option 2's `catalog-json` output; a previous per-library sc
 only when the new catalog directory is absent.
 
 ## Entry points
-- `FlacConvertMain.cpp#RunLegacyMenu`, `FlacConvertMain.cpp#GetUserAction`, `FlacConvertMain.cpp#ConfirmPreview`,
-  `FlacConvertMain.cpp#ManualOperationSummary`
+- `app/AudioLibraryToolkitMain.cpp#RunLegacyMenu`, `app/AudioLibraryToolkitMain.cpp#GetUserAction`, `app/AudioLibraryToolkitMain.cpp#ConfirmPreview`,
+  `app/AudioLibraryToolkitMain.cpp#ManualOperationSummary`
 
 ## Design and knowledge
-- DESIGN: `FlacConvert/DESIGN.md` → Entry points; Key flows
+- DESIGN: `AudioLibraryToolkit/DESIGN.md` → Entry points; Key flows
 - K-024 confirmed progress and partial completion, K-065 operation-specific output and retained MP3 defaults,
   K-049 `RUN` after reusable previews and scan failure diagnostics, compact menu and contextual help
 

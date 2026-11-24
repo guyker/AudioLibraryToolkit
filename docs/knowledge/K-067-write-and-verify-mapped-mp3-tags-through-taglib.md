@@ -2,18 +2,18 @@
 id: K-067
 kind: decision
 title: "Write and verify mapped MP3 tags through TagLib"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 created: 2026-11-23
-reviewed: 2026-11-23
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/Mp3TagMetadata.cpp
-    symbol: Mp3TagMetadata.WriteFromFlac
-  - path: FlacConvert/src/Mp3TagMetadata.cpp
-    symbol: Mp3TagMetadata.Read
-  - path: FlacConvert/src/PreservationAudit.cpp
-    symbol: PreservationAudit.Compare
   - test: ConversionTests.test_mp3_taglib_preserves_repeated_date_values_without_sidecar
+  - path: AudioLibraryToolkit/src/metadata/Mp3TagMetadata.cpp
+    symbol: Mp3TagMetadata.WriteFromFlac
+  - path: AudioLibraryToolkit/src/metadata/Mp3TagMetadata.cpp
+    symbol: Mp3TagMetadata.Read
+  - path: AudioLibraryToolkit/src/metadata/PreservationAudit.cpp
+    symbol: PreservationAudit.Compare
 ---
 
 **Fact:** `Mp3TagMetadata::WriteFromFlac` maps FLAC comments into ID3v2.4 frames and `Mp3TagMetadata::Read` reads those

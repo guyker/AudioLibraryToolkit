@@ -2,12 +2,12 @@
 id: K-064
 kind: decision
 title: "Seed first-run configuration from a shipped commented template"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 created: 2026-11-22
-reviewed: 2026-11-22
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/AppSettings.cpp
+  - path: AudioLibraryToolkit/src/app/AppSettings.cpp
     symbol: "AppSettingsJson::FindDefaultConfigTemplate"
 ---
 

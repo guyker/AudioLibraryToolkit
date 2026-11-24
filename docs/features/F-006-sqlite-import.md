@@ -21,12 +21,12 @@ catalogs never trigger fallback. Old database locations are not migrated or modi
 `catalog-sqlite` location creates a new database.
 
 ## Entry points
-- `AudioLibraryToolkit db import <json dir> [--output-dir]` → `FlacConvertMain.cpp#ImportJsonDirectoryToDatabase`
-- Menu option 4 → `FlacConvertMain.cpp#ExportJSONToDB`
-- `AlbumCollection.cpp#AlbumCollection::ExportToDatabase`, `CatalogDatabase.cpp#CatalogDatabase::Import`
+- `AudioLibraryToolkit db import <json dir> [--output-dir]` → `app/AudioLibraryToolkitMain.cpp#ImportJsonDirectoryToDatabase`
+- Menu option 4 → `app/AudioLibraryToolkitMain.cpp#ExportJSONToDB`
+- `catalog/AlbumCollection.cpp#AlbumCollection::ExportToDatabase`, `catalog/CatalogDatabase.cpp#CatalogDatabase::Import`
 
 ## Design and knowledge
-- DESIGN: `FlacConvert/DESIGN.md` → Database import; Output-directory anchoring; Files and schemas (SQLite catalog
+- DESIGN: `AudioLibraryToolkit/DESIGN.md` → Database import; Output-directory anchoring; Files and schemas (SQLite catalog
   schema v2)
 - K-042 SQLite long-path VFS; K-040 library-relative file identity; K-050 complete album fragments;
   K-065 operation layout and legacy catalog compatibility

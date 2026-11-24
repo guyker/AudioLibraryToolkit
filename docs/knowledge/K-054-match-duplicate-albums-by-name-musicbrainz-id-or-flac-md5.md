@@ -2,13 +2,13 @@
 id: K-054
 kind: decision
 title: "Match duplicate albums by name, MusicBrainz ID or FLAC MD5, with duration-tolerant track pairing"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-046]
 created: 2026-11-19
-reviewed: 2026-11-21
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/DuplicateMatcher.cpp
+  - path: AudioLibraryToolkit/src/duplicates/DuplicateMatcher.cpp
     symbol: "DuplicateMatcher::EvaluatePair"
 ---
 

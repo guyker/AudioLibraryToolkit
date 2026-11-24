@@ -49,14 +49,14 @@ Inactive application-owned logs older than 30 days are removed; the logger also 
 and reports the failure.
 
 ## Entry points
-- CLI commands → `FlacConvertMain.cpp#RunWithArguments` → `RunLogging.cpp#RunLogging::Start` / `RunLogging::Finish`
-- Menu option 1 → `FolderConvert.cpp#FolderConvert::ExecuteConversion`
-- Menu option 2 → `FlacConvertMain.cpp#ScanFolderAndCreateJSON`, `TagLibReader.cpp#TagLibReader::Read`
-- FFmpeg warnings → `ffmpeg.cpp#FFmpeg::scoped_ffmpeg_log_callback` → `RunLogging.cpp#RunLogging::RecordWarning`
-- Detailed log override → `CommandLine.cpp#add_config_option`, `FlacConvertMain.cpp#RunWithArgumentsImpl`
+- CLI commands → `app/AudioLibraryToolkitMain.cpp#RunWithArguments` → `app/RunLogging.cpp#RunLogging::Start` / `RunLogging::Finish`
+- Menu option 1 → `conversion/FolderConvert.cpp#FolderConvert::ExecuteConversion`
+- Menu option 2 → `app/AudioLibraryToolkitMain.cpp#ScanFolderAndCreateJSON`, `metadata/TagLibReader.cpp#TagLibReader::Read`
+- FFmpeg warnings → `platform/FFmpeg.cpp#FFmpeg::scoped_ffmpeg_log_callback` → `app/RunLogging.cpp#RunLogging::RecordWarning`
+- Detailed log override → `app/CommandLine.cpp#add_config_option`, `app/AudioLibraryToolkitMain.cpp#RunWithArgumentsImpl`
 
 ## Design and knowledge
-- DESIGN: `FlacConvert/DESIGN.md` → Run logging; Configuration
+- DESIGN: `AudioLibraryToolkit/DESIGN.md` → Run logging; Configuration
 - Structured reports: F-003 (`conversion-audit.json`), F-004 (`scan-report.json`)
 
 ## Acceptance checks

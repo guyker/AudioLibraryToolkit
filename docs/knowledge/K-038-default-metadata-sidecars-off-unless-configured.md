@@ -2,13 +2,13 @@
 id: K-038
 kind: decision
 title: "Default metadata sidecars off unless configured"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-037]
 created: 2026-11-12
-reviewed: 2026-11-23
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/include/AppSettings.h
+  - path: AudioLibraryToolkit/include/app/AppSettings.h
     symbol: MetadataSidecarSettings
 ---
 

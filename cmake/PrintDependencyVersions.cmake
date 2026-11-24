@@ -67,7 +67,7 @@ report_version("fmt (bundled with spdlog)" "${_fmt}")
 
 read_version_macro("${REPORT_SOURCE_DIR}/external/sqlite-amalgamation/sqlite3.h" "SQLITE_VERSION" _sqlite)
 report_version("SQLite" "${_sqlite}")
-read_triplet("${REPORT_SOURCE_DIR}/FlacConvert/include/rapidjson/rapidjson.h" "RAPIDJSON" _rapidjson "_VERSION")
+read_triplet("${REPORT_SOURCE_DIR}/AudioLibraryToolkit/include/rapidjson/rapidjson.h" "RAPIDJSON" _rapidjson "_VERSION")
 report_version("RapidJSON" "${_rapidjson}")
 
 read_version_macro("${REPORT_FFMPEG_INCLUDE_DIR}/libavutil/ffversion.h" "FFMPEG_VERSION" _ffmpeg)

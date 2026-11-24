@@ -2,13 +2,13 @@
 id: K-007
 kind: decision
 title: "Use platform-appropriate default output directories"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: superseded
 superseded_by: K-061
 created: 2026-10-09
 reviewed: 2026-11-22
 cites:
-  - path: FlacConvert/include/AppSettings.h
+  - path: AudioLibraryToolkit/include/app/AppSettings.h
     symbol: "AppSettingsJson::DefaultOutDirectory"
 ---
 

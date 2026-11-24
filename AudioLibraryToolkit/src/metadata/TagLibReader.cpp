@@ -33,7 +33,7 @@
 #include <spdlog/spdlog.h>
 
 #include "CommonUtils.h"
-#include "ffmpeg.h"
+#include "FFmpeg.h"
 
 namespace {
 

@@ -2,13 +2,13 @@
 id: K-057
 kind: decision
 title: "Scan skips directory links and over-depth folders with warnings instead of failing"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: superseded
 superseded_by: K-058
 created: 2026-11-21
 reviewed: 2026-11-21
 cites:
-  - path: FlacConvert/src/AlbumCollection.cpp
+  - path: AudioLibraryToolkit/src/catalog/AlbumCollection.cpp
     symbol: "AlbumCollection::LoadAlbumsCo"
 ---
 

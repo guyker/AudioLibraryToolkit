@@ -67,14 +67,14 @@ Catalog JSON and databases are not changed by a move: rerun option 2 afterward. 
 but retains database albums absent from the import; it does not automatically purge moved albums.
 
 ## Entry points
-- `AudioLibraryToolkit duplicates <json dir> [--open] [--report <file>]` → `FlacConvertMain.cpp#RunWithArguments`
-- Menu option 3 → `FlacConvertMain.cpp#ScanFolderProcessJSONAndFindDuplicates`
-- `DuplicateMatcher.cpp#DuplicateMatcher::FindDuplicates`
-- `DuplicateComparison.cpp#DuplicateComparison::DescribeAlbum`, `DuplicateComparison.cpp#DuplicateComparison::DescribePair`
-- `DuplicateReview.cpp#DuplicateReview::ReviewGroup`
+- `AudioLibraryToolkit duplicates <json dir> [--open] [--report <file>]` → `app/AudioLibraryToolkitMain.cpp#RunWithArguments`
+- Menu option 3 → `app/AudioLibraryToolkitMain.cpp#ScanFolderProcessJSONAndFindDuplicates`
+- `duplicates/DuplicateMatcher.cpp#DuplicateMatcher::FindDuplicates`
+- `duplicates/DuplicateComparison.cpp#DuplicateComparison::DescribeAlbum`, `duplicates/DuplicateComparison.cpp#DuplicateComparison::DescribePair`
+- `duplicates/DuplicateReview.cpp#DuplicateReview::ReviewGroup`
 
 ## Design and knowledge
-- DESIGN: `FlacConvert/DESIGN.md` → Duplicates
+- DESIGN: `AudioLibraryToolkit/DESIGN.md` → Duplicates
 - Knowledge: K-052 (explicit confirmation for each quarantined album); K-055 (preserve direct-match connectivity);
   K-065 (operation layout and legacy catalog compatibility)
 - Related config: `MinMatchingTracksForDuplicate`, `SizeMatchPercentageThreshold`, `DuplicateDurationToleranceSeconds`,

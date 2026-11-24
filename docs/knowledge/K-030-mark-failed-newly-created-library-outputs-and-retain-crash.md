@@ -2,12 +2,12 @@
 id: K-030
 kind: decision
 title: "Mark failed newly created library outputs and retain crash markers"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 created: 2026-10-11
-reviewed: 2026-11-23
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/FolderConvert.cpp
+  - path: AudioLibraryToolkit/src/conversion/FolderConvert.cpp
     symbol: FolderConvert.ExecuteConversion
 ---
 

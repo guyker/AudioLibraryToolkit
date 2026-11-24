@@ -2,15 +2,15 @@
 id: K-059
 kind: decision
 title: "Store configuration in a per-user platform directory"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: superseded
 superseded_by: K-060
 created: 2026-11-22
 reviewed: 2026-11-22
 cites:
-  - path: FlacConvert/src/PlatformUtils.cpp
+  - path: AudioLibraryToolkit/src/platform/PlatformUtils.cpp
     symbol: UserConfigDirectory
-  - path: FlacConvert/src/AppSettings.cpp
+  - path: AudioLibraryToolkit/src/app/AppSettings.cpp
     symbol: "AppSettingsJson::LoadForCommandLine"
 ---
 

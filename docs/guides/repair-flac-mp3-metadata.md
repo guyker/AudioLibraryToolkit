@@ -41,4 +41,4 @@ MP3 ID3v1 tags are kept by default for older players.
 For an interactive HTML preview before repair, run `AudioLibraryToolkit` without arguments and choose menu option 7;
 the preview requires a separate `RUN` confirmation before repair output is written.
 
-See the [repair feature reference](../features/F-011-flac-repair.md) for supported rules and limitations.
+See the [repair feature reference](../features/F-011-metadata-repair.md) for supported rules and limitations.

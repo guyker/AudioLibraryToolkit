@@ -2,16 +2,16 @@
 id: K-025
 kind: decision
 title: "Offer per-operation MP3 quality downmix and overwrite with safe defaults"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: superseded
 supersedes: [K-019]
 superseded_by: K-065
 created: 2026-10-11
 reviewed: 2026-11-19
 cites:
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: ConfigureManualMp3
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: ConvertFLACToMP3
 ---
 

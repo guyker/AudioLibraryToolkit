@@ -1,5 +1,5 @@
 
-#include "MediaConvertionTask.h"
+#include "MediaConversionTask.h"
 
 #include <algorithm>
 #include <string>
@@ -28,7 +28,7 @@
 
 #include "AppSettings.h"
 #include "CommonUtils.h"
-#include "ffmpeg.h"
+#include "FFmpeg.h"
 #include "PlatformUtils.h"
 #include "FlacMetadata.h"
 #include "MediaTrack.h"
@@ -42,7 +42,7 @@ namespace
 class FFmpegProgressOutput
 {
 public:
-    FFmpegProgressOutput(std::optional<double> duration, const MediaConvertionTask::ProgressCallback& callback)
+    FFmpegProgressOutput(std::optional<double> duration, const MediaConversionTask::ProgressCallback& callback)
         : _duration(duration), _callback(callback) {}
 
     bool Consume(std::string_view line)
@@ -98,7 +98,7 @@ private:
     }
 
     std::optional<double> _duration;
-    const MediaConvertionTask::ProgressCallback& _callback;
+    const MediaConversionTask::ProgressCallback& _callback;
     double _fraction{ 0 };
     bool _reported = false;
     std::chrono::steady_clock::time_point _lastReport{};
@@ -327,7 +327,7 @@ std::vector<std::string> conversionArguments(const ConversionOptions& options,
 
 int runFFmpeg(const std::wstring& executable, const fs::path& source, const fs::path& destination,
     bool overwrite, const std::vector<std::string>& conversion, const fs::path& diagnosticSource,
-    std::optional<double> duration, const MediaConvertionTask::ProgressCallback& callback)
+    std::optional<double> duration, const MediaConversionTask::ProgressCallback& callback)
 {
     FFmpegProgressOutput progress(duration, callback);
 #ifdef _WIN32
@@ -522,7 +522,7 @@ int runFFmpeg(const std::wstring& executable, const fs::path& source, const fs::
 }
 
 
-int MediaConvertionTask::ConvertFile()
+int MediaConversionTask::ConvertFile()
 {
     if (_progressCallback) _progressCallback(std::nullopt, "Preparing");
     const auto metadata = FFmpeg::GetFFprobeMetadataAPI(_sourcePath);
@@ -746,7 +746,7 @@ int MediaConvertionTask::ConvertFile()
 }
 
 
-int MediaConvertionTask::Run() {
+int MediaConversionTask::Run() {
     if (_status != -1) {
         _status = ConvertFile();
     }
@@ -755,13 +755,13 @@ int MediaConvertionTask::Run() {
 }
 
 
-bool MediaConvertionTask::InstallOutputFile(const fs::path& temporary, const fs::path& target, bool overwrite)
+bool MediaConversionTask::InstallOutputFile(const fs::path& temporary, const fs::path& target, bool overwrite)
 {
     return installFile(temporary, target, overwrite);
 }
 
 
-int MediaConvertionTask::PostRun() {
+int MediaConversionTask::PostRun() {
     if (_status != -1) {
         _status = InstallTemporaryOutput();
     }
@@ -769,7 +769,7 @@ int MediaConvertionTask::PostRun() {
     return _status;
 }
 
-int MediaConvertionTask::InstallTemporaryOutput()
+int MediaConversionTask::InstallTemporaryOutput()
 {
     _failureType = "IO";
     if (_status == -1) {

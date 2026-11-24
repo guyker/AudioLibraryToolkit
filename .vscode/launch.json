@@ -1,0 +1,24 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug AudioLibraryToolkit (Windows)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}\\out\\build\\windows-debug\\AudioLibraryToolkit\\AudioLibraryToolkit.exe",
+      "cwd": "${workspaceFolder}",
+      "stopAtEntry": false,
+      "preLaunchTask": "CMake build (Debug)"
+    },
+    {
+      "name": "Debug AudioLibraryToolkit (Linux)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/out/build/linux-debug/AudioLibraryToolkit/AudioLibraryToolkit",
+      "cwd": "${workspaceFolder}",
+      "stopAtEntry": false,
+      "preLaunchTask": "CMake build (Debug)",
+      "MIMode": "gdb"
+    }
+  ]
+}

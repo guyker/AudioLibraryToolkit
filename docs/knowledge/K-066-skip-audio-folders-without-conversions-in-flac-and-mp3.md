@@ -2,19 +2,19 @@
 id: K-066
 kind: decision
 title: "Skip audio folders without conversions in FLAC and MP3 output"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-036]
 created: 2026-11-23
-reviewed: 2026-11-23
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/FolderConvert.cpp
+  - path: AudioLibraryToolkit/src/conversion/FolderConvert.cpp
     symbol: FolderConvert.PrepareConversion
-  - path: FlacConvert/src/FolderConvert.cpp
+  - path: AudioLibraryToolkit/src/conversion/FolderConvert.cpp
     symbol: writeAudit
-  - path: tests/mp3_conversion.py
+  - path: tests/audio_library_integration.py
     symbol: ConversionTests.test_flac_skips_unchanged_audio_folders_and_keeps_written_folders_complete
-  - path: tests/mp3_conversion.py
+  - path: tests/audio_library_integration.py
     symbol: ConversionTests.test_mp3_omits_folders_with_audio_but_no_flac
 ---
 

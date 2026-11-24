@@ -2,14 +2,14 @@
 id: K-050
 kind: trap
 title: "Validate complete scan album fragments before catalog operations"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 created: 2026-11-18
-reviewed: 2026-11-19
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/src/AlbumCollection.cpp
+  - path: AudioLibraryToolkit/src/catalog/AlbumCollection.cpp
     symbol: AlbumCollection.ReassembleAlbums
-  - path: FlacConvert/src/CatalogDatabase.cpp
+  - path: AudioLibraryToolkit/src/catalog/CatalogDatabase.cpp
     symbol: CatalogDatabase.Import
 ---
 

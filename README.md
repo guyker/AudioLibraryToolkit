@@ -246,8 +246,11 @@ isolated under `out/build/<preset>`. To stage a Windows build, run `cmake --inst
 on Linux, run `cmake --install out/build/linux-debug`. Add `--prefix <directory>` to choose another location.
 Linux uses installed system FFmpeg libraries. Windows stages the matched runtime DLLs beside
 `AudioLibraryToolkit.exe`.
-Existing build directories may still contain an obsolete `FlacConvert` executable; run the new
-`AudioLibraryToolkit` executable instead.
+For Windows Debug, run `out\build\windows-debug\AudioLibraryToolkit\AudioLibraryToolkit.exe`.
+Existing build directories may still contain obsolete executables under `FlacConvert`.
+
+The root VS Code workspace provides a Debug build task and launch configurations using these presets and the C/C++
+extension. On Windows, start VS Code from an x64 Visual Studio developer environment so CMake can find MSVC.
 
 ## Configuration and first run
 
@@ -290,11 +293,11 @@ configuration locations such as `C:\ProgramData\AudioLibraryToolkit` are not sea
 The first-run file is a copy of the commented default template `config.default.json`, which the build places beside
 the executable and `cmake --install` places in `share/AudioLibraryToolkit`; its comments explain the additional
 settings. If the template is missing or invalid, a warning is shown and built-in defaults are written instead. The
-source copy is `FlacConvert\config.default.json`.
+source copy is `AudioLibraryToolkit\config.default.json`.
 
 ## Design and feature documentation
 
-`FlacConvert\DESIGN.md` describes the application; `docs\features\index.md` lists its important features and
+`AudioLibraryToolkit\DESIGN.md` describes the application; `docs\features\index.md` lists its important features and
 `docs\knowledge\index.md` records durable decisions and risks. Keep these current when material behaviour, contracts
 or design change; routine edits do not need a documentation entry or change log.
 
@@ -499,7 +502,7 @@ Programmatic use reuses the existing task lifecycle:
 
 ```cpp
 ConversionOptions options{ AudioTarget::Mp3, 0, false };
-MediaConvertionTask task(sourceFlac, targetMp3, uniqueTemporaryMp3, false, options);
+MediaConversionTask task(sourceFlac, targetMp3, uniqueTemporaryMp3, false, options);
 if (task.Run() != 0 || task.PostRun() != 0) {
     // Handle the logged conversion/installation failure.
 }
@@ -517,7 +520,7 @@ CTest registers the native regression checks and the generated-fixture Python in
 the Python suite directly:
 
 ```text
-python tests\mp3_conversion.py --converter out\build\windows-debug\FlacConvert\AudioLibraryToolkit.exe --ffmpeg external\ffmpeg\ffmpeg-master-latest-win64-gpl-shared\bin\ffmpeg.exe --ffprobe external\ffmpeg\ffmpeg-master-latest-win64-gpl-shared\bin\ffprobe.exe
+python tests\audio_library_integration.py --converter out\build\windows-debug\AudioLibraryToolkit\AudioLibraryToolkit.exe --ffmpeg external\ffmpeg\ffmpeg-master-latest-win64-gpl-shared\bin\ffmpeg.exe --ffprobe external\ffmpeg\ffmpeg-master-latest-win64-gpl-shared\bin\ffprobe.exe
 ```
 
 `FLACSettings.ffmpeg_exe_name` selects the conversion executable. The `ffmpeg_convert_24bit_flac` and

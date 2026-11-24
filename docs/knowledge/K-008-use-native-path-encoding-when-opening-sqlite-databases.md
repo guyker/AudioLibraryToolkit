@@ -2,13 +2,13 @@
 id: K-008
 kind: trap
 title: "Use native path encoding when opening SQLite databases"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: superseded
 superseded_by: K-011
 created: 2026-10-09
 reviewed: 2026-10-09
 cites:
-  - path: FlacConvert/src/AlbumCollection.cpp
+  - path: AudioLibraryToolkit/src/catalog/AlbumCollection.cpp
     symbol: "AlbumCollection::ExportToDatabase"
 ---
 

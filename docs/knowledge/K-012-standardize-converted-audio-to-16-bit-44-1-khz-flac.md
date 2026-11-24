@@ -2,13 +2,13 @@
 id: K-012
 kind: decision
 title: "Standardize converted audio to 16-bit 44.1 kHz FLAC"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: superseded
 superseded_by: K-017
 created: 2026-10-10
 reviewed: 2026-10-10
 cites:
-  - path: FlacConvert/src/MediaConvertionTask.cpp
+  - path: AudioLibraryToolkit/src/conversion/MediaConversionTask.cpp
     symbol: runFFmpeg
 ---
 

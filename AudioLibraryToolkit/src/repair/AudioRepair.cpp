@@ -2,7 +2,7 @@
 
 #include "BoundedTaskRunner.h"
 #include "CommonUtils.h"
-#include "MediaConvertionTask.h"
+#include "MediaConversionTask.h"
 #include "PlatformUtils.h"
 #include "PreservationAudit.h"
 #include "RepairRules.h"
@@ -1374,7 +1374,7 @@ bool writeReport(const fs::path& reportPath, std::string_view content, bool over
         const std::string actual{ std::istreambuf_iterator<char>(verify), std::istreambuf_iterator<char>() };
         return verify && actual == content;
     }();
-    if (!verified || !MediaConvertionTask::InstallOutputFile(temporary, reportPath, overwrite)) {
+    if (!verified || !MediaConversionTask::InstallOutputFile(temporary, reportPath, overwrite)) {
         fs::remove(temporary, ec);
         if (ec) spdlog::warn("Cannot remove repair report temporary '{}': {}", utf8(temporary), ec.message());
         return false;

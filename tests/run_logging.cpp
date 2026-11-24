@@ -1,6 +1,6 @@
 #include "CommandLine.h"
 #include "RunLogging.h"
-#include "ffmpeg.h"
+#include "FFmpeg.h"
 
 #include <chrono>
 #include <cstdio>

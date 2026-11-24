@@ -22,11 +22,11 @@ session log rather than repeated as a console warning. Unchanged tag-key aliases
 are file-only warnings; the audit still records all such differences (F-010).
 
 ## Entry points
-- `FolderConvert.cpp#FolderConvert::ExecuteConversion` (marker, finish, rename), `FolderConvert.cpp#writeAudit`
-- `PreservationAudit.cpp#PreservationAudit::Compare`, `PreservationAudit.cpp#PreservationAudit::VerifyCopy`
+- `conversion/FolderConvert.cpp#FolderConvert::ExecuteConversion` (marker, finish, rename), `conversion/FolderConvert.cpp#writeAudit`
+- `metadata/PreservationAudit.cpp#PreservationAudit::Compare`, `metadata/PreservationAudit.cpp#PreservationAudit::VerifyCopy`
 
 ## Design and knowledge
-- DESIGN: `FlacConvert/DESIGN.md` → Files and schemas (`conversion-audit.json`); Output-directory anchoring; Contracts
+- DESIGN: `AudioLibraryToolkit/DESIGN.md` → Files and schemas (`conversion-audit.json`); Output-directory anchoring; Contracts
   (ownership, reserved names)
 - K-029 preservation audit, K-030 failure marking and ownership, K-024 sequential stop-on-error,
   K-066 complete folders and skipped unchanged folders, K-067 direct TagLib verification of MP3 tags

@@ -20,11 +20,11 @@
 namespace fs = std::filesystem;
 
 
-class MediaConvertionTask {
+class MediaConversionTask {
 public:
     using ProgressCallback = std::function<void(std::optional<double>, std::string_view)>;
-    MediaConvertionTask() = delete;
-    MediaConvertionTask(const fs::path sourcePath, const fs::path targetPath, const fs::path targetTMPPath,
+    MediaConversionTask() = delete;
+    MediaConversionTask(const fs::path sourcePath, const fs::path targetPath, const fs::path targetTMPPath,
         bool overwriteTarget = true, ConversionOptions options = {}) :
         _sourcePath(sourcePath), _targetPath(targetPath), _targetTMPPath(targetTMPPath),
         _overwriteTarget(overwriteTarget), _options(options), _status(0) {}
@@ -38,7 +38,7 @@ public:
     const char* GetFailureType() const { return _failureType; }
     void SetProgressCallback(ProgressCallback callback) { _progressCallback = std::move(callback); }
 
-    virtual ~MediaConvertionTask() {}
+    virtual ~MediaConversionTask() {}
 
 protected:
 

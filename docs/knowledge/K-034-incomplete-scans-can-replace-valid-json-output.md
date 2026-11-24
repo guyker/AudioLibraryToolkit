@@ -2,15 +2,15 @@
 id: K-034
 kind: defect
 title: "Incomplete scans can replace valid JSON output"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: fixed
 fixed_by: K-035
 created: 2026-11-10
 reviewed: 2026-11-10
 cites:
-  - path: FlacConvert/src/AlbumCollection.cpp
+  - path: AudioLibraryToolkit/src/catalog/AlbumCollection.cpp
     symbol: "AlbumCollection::SaveAlbumsToJSON"
-  - path: FlacConvert/src/FlacConvertMain.cpp
+  - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: ScanFolderAndCreateJSON
 ---
 

@@ -2,12 +2,12 @@
 id: K-033
 kind: trap
 title: "Use a portable case-insensitive comparison for JSON keys"
-area: [FlacConvert]
+area: [AudioLibraryToolkit]
 status: active
 created: 2026-11-10
-reviewed: 2026-11-16
+reviewed: 2026-11-24
 cites:
-  - path: FlacConvert/include/JsonUtils.h
+  - path: AudioLibraryToolkit/include/common/JsonUtils.h
     symbol: "JsonUtils::caseInsensitiveEquals"
 ---
 

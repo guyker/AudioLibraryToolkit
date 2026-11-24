@@ -41,13 +41,13 @@ preservation differences remain visible warnings, and `conversion-audit.json` re
 check (F-003).
 
 ## Entry points
-- `AudioLibraryToolkit convert <input> [--output-dir] [--overwrite]` → `FlacConvertMain.cpp#RunWithArguments` →
-  `FolderConvert.cpp#FolderConvert::ConvertAudioFolderToOutput`
-- Menu option 1 → `FlacConvertMain.cpp#ConvertFLACToFLAC` → `FlacConvertMain.cpp#ConvertConfiguredLibraries`
-- Per file → `MediaConvertionTask.cpp#MediaConvertionTask::ConvertFile`, `MediaConvertionTask.cpp#conversionArguments`
+- `AudioLibraryToolkit convert <input> [--output-dir] [--overwrite]` → `app/AudioLibraryToolkitMain.cpp#RunWithArguments` →
+  `conversion/FolderConvert.cpp#FolderConvert::ConvertAudioFolderToOutput`
+- Menu option 1 → `app/AudioLibraryToolkitMain.cpp#ConvertFLACToFLAC` → `app/AudioLibraryToolkitMain.cpp#ConvertConfiguredLibraries`
+- Per file → `conversion/MediaConversionTask.cpp#MediaConversionTask::ConvertFile`, `conversion/MediaConversionTask.cpp#conversionArguments`
 
 ## Design and knowledge
-- DESIGN: `FlacConvert/DESIGN.md` → Key flows / Conversion; Contracts and invariants
+- DESIGN: `AudioLibraryToolkit/DESIGN.md` → Key flows / Conversion; Contracts and invariants
 - K-041 install after success, K-048 codec-aware AAC quality gate, K-056 FFmpeg argument vector, K-038 sidecar policy,
   K-032 configured vs canonical paths, K-065 operation-based output layout, K-066 complete folders, K-058 source link rejection
 

@@ -22,7 +22,7 @@ extern "C" {
 #include "CommonUtils.h"
 #include "FFmpegWrapper.h"
 #include "PlatformUtils.h"
-#include "ffmpeg.h"
+#include "FFmpeg.h"
 
 namespace {
 

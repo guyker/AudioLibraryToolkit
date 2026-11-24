@@ -12,7 +12,7 @@ locals; do not flag them. Ignore C#/WPF guidance.
 ## Read first
 
 1. The diff (`git --no-pager diff` / PR files)
-2. `FlacConvert/DESIGN.md` sections for every touched component
+2. `AudioLibraryToolkit/DESIGN.md` sections for every touched component
 3. `kb.ps1 related -Path <each changed file>`; live K-entries are constraints the diff must respect
 4. Affected `docs/features/F-xxx` entries
 5. `.github/instructions/audio-cpp.instructions.md`
