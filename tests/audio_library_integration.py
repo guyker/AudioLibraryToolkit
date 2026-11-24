@@ -2057,15 +2057,16 @@ class ConversionTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(self.output.exists())
             self.assertEqual(hashlib.sha256(self.track.read_bytes()).digest(), self.original_hash)
-            for description in ("Convert to FLAC [sources unchanged]", "NOT IMPLEMENTED",
+            for description in ("Convert to FLAC [sources unchanged]",
                                 "Exit without running an action", "? - Help"):
                 self.assertIn(description, result.stdout)
+            self.assertNotIn("  5 -", result.stdout)
+            self.assertNotIn("Scan directories directly to SQLite", result.stdout)
             if "5" not in selection:
                 self.assertNotIn("      Input:", result.stdout)
                 self.assertNotIn("      Output:", result.stdout)
                 self.assertNotIn("      Changes:", result.stdout)
             if "5" in selection:
-                self.assertIn("Option 5 is not implemented", result.stdout)
                 self.assertIn("Invalid selection", result.stdout)
 
     def test_menu_help_displays_details_without_preparing_actions(self):

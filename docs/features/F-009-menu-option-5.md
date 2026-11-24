@@ -1,10 +1,10 @@
 # F-009: Menu option 5
 
-Status: not implemented
+Status: removed
 
 ## Behaviour
-Option 5 is listed by the legacy menu but has no operation; selecting it prints "Option 5 is not implemented. Use
-option 2, then option 4." and the menu asks again.
+Option 5 has been removed from the legacy menu and its help. Selecting 5 is rejected as an invalid selection.
+Options 6 and 7 retain their existing numbers.
 
 ## Entry points
 - `app/AudioLibraryToolkitMain.cpp#RunLegacyMenu`
@@ -13,7 +13,7 @@ option 2, then option 4." and the menu asks again.
 - DESIGN: `AudioLibraryToolkit/DESIGN.md` → Entry points
 
 ## Acceptance checks
-- [ ] Selecting 5 performs no file operation and returns to the prompt.
+- [ ] Option 5 is not listed; selecting 5 is rejected without preparing an operation.
 
 ## Known limitations
-- Intended purpose is not documented; ask the owner before implementing or removing it.
+- None.

@@ -3,8 +3,9 @@ id: K-049
 kind: decision
 title: "Confirm manual operations after previews while reporting scan discovery failures"
 area: [AudioLibraryToolkit]
-status: active
+status: superseded
 supersedes: [K-027]
+superseded_by: K-072
 created: 2026-11-18
 reviewed: 2026-11-24
 cites:

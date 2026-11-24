@@ -81,7 +81,10 @@ extern "C" {
 namespace fs = std::filesystem;
 
 
-enum class ConvertActionEnum { NullEnum, ConverEnum, CreateJSONEnum, CreateDBFromFolderEnum, ProcessJSONEnum, PopulateJsonToDBEnum, ConvertMp3Enum, RepairEnum, ExitEnum };
+enum class ConvertActionEnum {
+    NullEnum, ConverEnum, CreateJSONEnum, ProcessJSONEnum, PopulateJsonToDBEnum,
+    ConvertMp3Enum = 6, RepairEnum, ExitEnum
+};
 
 
 namespace
@@ -3087,7 +3090,7 @@ struct MenuEntry {
     const char* details;
 };
 
-constexpr std::array<MenuEntry, 7> MenuEntries{ {
+constexpr std::array<MenuEntry, 6> MenuEntries{ {
     { '1', ConvertActionEnum::ConverEnum,
         "Convert to FLAC [sources unchanged]",
         "      Input: all regular files and directories in the active source libraries, recursively.\n"
@@ -3122,9 +3125,6 @@ constexpr std::array<MenuEntry, 7> MenuEntries{ {
         "      Output: OutDirectory/catalog-sqlite/<mediaName>/catalog-v2.sqlite.\n"
         "      Changes: creates/updates database records; source audio and JSON are unchanged.\n"
         "               Does not scan audio directly; preview shows the configured filenames.\n" },
-    { '5', ConvertActionEnum::CreateDBFromFolderEnum, "Scan directories directly to SQLite [NOT IMPLEMENTED]",
-        "      Input/Output/Changes: none; selection 5 runs no action.\n"
-        "      Use option 2, then option 4 instead.\n" },
     { '6', ConvertActionEnum::ConvertMp3Enum, "Convert FLAC to MP3 [sources unchanged]",
         "      Input: native FLAC files in the active source libraries, recursively.\n"
         "      Output: OutDirectory/converted-mp3/<mediaName>/ with relative paths preserved:\n"
@@ -3175,7 +3175,7 @@ ConvertActionEnum GetUserAction()
     std::cout << "  0 - Exit without running an action\n"
         "  ? - Help: input, output and changes for all options\n\n";
     for (;;) {
-        std::cout << "Enter option [0-7 or ?], then press Enter: " << std::flush;
+        std::cout << "Enter one of the listed numbers, 0 to exit, or ? for help: " << std::flush;
         std::string input;
         if (!std::getline(std::cin, input)) {
             if (std::cin.eof()) {
@@ -3202,14 +3202,10 @@ ConvertActionEnum GetUserAction()
         const auto entry = std::find_if(MenuEntries.begin(), MenuEntries.end(),
             [&](const MenuEntry& option) { return option.number == input[0]; });
         if (entry == MenuEntries.end()) {
-            std::cout << "Invalid selection. Enter a number from 0 to 7, or ? for help.\n";
+            std::cout << "Invalid selection. Choose a listed option or 0 to exit.\n";
             continue;
         }
         ShowActionDetails(*entry);
-        if (entry->action == ConvertActionEnum::CreateDBFromFolderEnum) {
-            std::cout << "Option 5 is not implemented. Use option 2, then option 4.\n";
-            continue;
-        }
         return entry->action;
     }
 }

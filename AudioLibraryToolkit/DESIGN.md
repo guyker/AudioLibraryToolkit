@@ -89,7 +89,7 @@ flowchart LR
 | `duplicates <json dir> [--open] [--report <file>]` | `ScanFolderProcessJSONAndFindDuplicates` | Opens folders only with `--open`; `--report` writes a new JSON report |
 | `db import <json dir> [--output-dir]` | `ImportJsonDirectoryToDatabase` | `<output root>/catalog-sqlite/<JSON folder name>/catalog-v2.sqlite`; output root is `--output-dir`, else `OutDirectory` |
 | `repair <input> [--output-dir] [--overwrite] [--rules <ids>]` | `AudioRepair::Prepare` → `AudioRepair::Execute` | `<output root>/repaired-metadata/<input folder name>`; output root is `--output-dir`, else `OutDirectory` |
-| No arguments | `RunLegacyMenu` | Options 1 FLAC, 2 scan, 3 duplicates, 4 DB import, 5 not implemented, 6 MP3, 7 repair; library options use active `MediaDirectoryList` entries |
+| No arguments | `RunLegacyMenu` | Options 1 FLAC, 2 scan, 3 duplicates, 4 DB import, 6 MP3, 7 repair; option 5 is unassigned; library options use active `MediaDirectoryList` entries |
 
 All commands accept `--config <file>` and `--log-level info\|debug\|trace`. Exit code is 0 on success, non-zero on any failure.
 

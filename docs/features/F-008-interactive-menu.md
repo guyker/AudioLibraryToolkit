@@ -7,6 +7,7 @@ Running with no arguments uses the first-run setup and required configuration de
 menu over the configured active libraries. Every mutating option prints
 an operation preview (inputs, outputs, counts, overwrite effects) and runs only after the user types exactly `RUN`;
 `BACK` returns to the menu; `EXIT`, Enter, any other text or EOF cancels without executing the operation.
+Option 5 is not listed or accepted; the existing MP3 and repair choices remain options 6 and 7.
 Conflicts block the run before installing output. After a started or failed operation a summary reports Completed, Partially
 completed or Failed with confirmed counts, and the program exits. Duplicate review also reports `Stopped by user`
 when ended early. `0` or EOF at the menu exits; `?` shows help.
@@ -45,6 +46,7 @@ only when the new catalog directory is absent.
       a scan preview failure may write a temporary diagnostic report.
 - [ ] The menu cannot start without an output root and at least one active configured library.
 - [ ] `BACK` returns to the menu; EOF on stdin exits cleanly.
+- [ ] Option 5 is absent from the menu and help; selecting it is rejected without preparing an action.
 - [ ] Option 2 can enable or disable FLAC archives before the preview without changing the saved configuration.
 - [ ] Option 7 previews FLAC/MP3 repair findings and requires `RUN` before writing repaired copies.
 - [ ] Option 7 rejects two active libraries whose repair outputs collide without creating `repaired-metadata` output.
@@ -54,4 +56,3 @@ only when the new catalog directory is absent.
 
 ## Known limitations
 - Option 3 always opens duplicate folders.
-- Option 5 is not implemented (F-009).
