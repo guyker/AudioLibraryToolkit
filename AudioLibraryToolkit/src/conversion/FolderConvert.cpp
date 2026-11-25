@@ -82,6 +82,8 @@ struct CaseInsensitivePathLess
     }
 };
 
+constexpr std::string_view temporaryFilenamePrefix = ".afc-convert-";
+
 fs::path makeTemporaryOutputPath(const fs::path& targetPath, std::uint64_t sequence)
 {
     const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -90,10 +92,30 @@ fs::path makeTemporaryOutputPath(const fs::path& targetPath, std::uint64_t seque
 #else
     const auto processId = getpid();
 #endif
-    fs::path filename = fs::path(".afc-convert-" + std::to_string(processId) + "-" +
+    fs::path filename = fs::path(std::string(temporaryFilenamePrefix) + std::to_string(processId) + "-" +
         std::to_string(timestamp) + "-" + std::to_string(sequence));
     filename += targetPath.extension();
     return targetPath.parent_path() / filename;
+}
+
+bool isConversionTemporaryFile(const fs::path& path)
+{
+    const auto name = CommonUtils::path_to_utf8(path.filename());
+    if (!JsonUtils::caseInsensitiveEquals(
+        name.substr(0, temporaryFilenamePrefix.size()).c_str(), temporaryFilenamePrefix.data())) {
+        return false;
+    }
+    auto remaining = std::string_view(name).substr(temporaryFilenamePrefix.size());
+    for (int component = 0; component < 3; ++component) {
+        if (remaining.empty()) return false;
+        const auto digits = remaining.find_first_not_of("0123456789");
+        if (digits == 0) return false;
+        if (digits == std::string_view::npos) return component == 2;
+        if (remaining[digits] != (component == 2 ? '.' : '-')) return false;
+        if (component == 2) return true;
+        remaining.remove_prefix(digits + 1);
+    }
+    return false;
 }
 
 fs::path anchoredOutputPath(const fs::path& path, const fs::path& outputRoot)
@@ -606,6 +628,13 @@ int FolderConvert::PrepareConversion(
                         return -1;
                     }
                     continue;
+                }
+                if (isConversionTemporaryFile(entry.path())) {
+                    spdlog::error("Conversion source contains a temporary conversion artifact: '{}'. "
+                        "It may be incomplete or retained for recovery. Review it and move it outside the source tree, "
+                        "or choose a source folder without previous conversion output. No conversion was started.",
+                        CommonUtils::path_to_utf8(entry.path()));
+                    return -1;
                 }
                 const auto extension = MediaTrack::FileExtension(entry.path());
                 if (MediaTrack::IsFileConvertable(entry.path())) {

@@ -654,6 +654,92 @@ class ConversionTests(unittest.TestCase):
                 self.assertEqual(hashlib.sha256(self.track.read_bytes()).digest(), self.original_hash)
             path.unlink()
 
+    def test_conversion_temporaries_in_source_block_before_writes(self):
+        nested = self.source / "normalized-flac" / "previous" / "Album"
+        nested.mkdir(parents=True)
+        artifacts = (
+            (self.source, ".afc-convert-123-456-7.flac", b""),
+            (nested, ".afc-convert-123-456-7.flac", b"incomplete audio"),
+            (nested, ".AFC-CONVERT-123-456-8.FLAC", self.plain),
+            (nested, ".afc-convert-123-456-9.flac.input.flac", self.plain),
+            (nested, ".afc-convert-123-456-10.flac.flac-metadata", b"recovery metadata"),
+            (nested, ".afc-convert-123-456-11.json", b"{}"),
+            (nested, ".afc-convert-123-456-12", b"unfinished companion"),
+        )
+        for target in ("flac", "mp3"):
+            for index, (directory, name, content) in enumerate(artifacts):
+                with self.subTest(target=target, artifact=name, directory=directory):
+                    artifact = directory / name
+                    artifact.write_bytes(content)
+                    before = {path.relative_to(self.source): hashlib.sha256(path.read_bytes()).digest()
+                              for path in self.source.rglob("*") if path.is_file()}
+                    output = self.work / f"artifact-output-{target}-{index}"
+                    try:
+                        result = run(ARGS.converter, "convert", self.source, "--output-dir", output,
+                                     "--config", self.config, "--to", target, "--overwrite")
+                        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                        self.assertIn("temporary conversion artifact", result.stdout + result.stderr)
+                        self.assertIn(name, result.stdout + result.stderr)
+                        self.assertIn("outside the source tree", result.stdout + result.stderr)
+                        self.assertNotIn("Conversion started:", result.stdout + result.stderr)
+                        self.assertFalse(output.exists())
+                        after = {path.relative_to(self.source): hashlib.sha256(path.read_bytes()).digest()
+                                 for path in self.source.rglob("*") if path.is_file()}
+                        self.assertEqual(after, before)
+                    finally:
+                        artifact.unlink()
+
+    def test_similar_temporary_names_remain_normal_source_files(self):
+        names = (".afc-convert-recording.flac", ".afc-convert-123-456-.flac",
+                 ".afc-convert-123-456-7-live.flac", ".afc-convert-123-456-7track.flac")
+        for name in names:
+            (self.source / name).write_bytes(self.fixture.read_bytes())
+        companions = {".afc-convert-cover.txt": b"cover notes", ".hidden-note": b"album notes"}
+        for name, content in companions.items():
+            (self.source / name).write_bytes(content)
+        before = {path.name: hashlib.sha256(path.read_bytes()).digest() for path in self.source.iterdir()}
+        for target in ("flac", "mp3"):
+            with self.subTest(target=target):
+                self.convert(target=target)
+                destination = self.destination(target)
+                for name in names:
+                    self.assertTrue((destination / Path(name).with_suffix("." + target)).is_file())
+                for name, content in companions.items():
+                    self.assertEqual((destination / name).read_bytes(), content)
+                report = self.audit(destination)
+                self.assertEqual(report["counts"]["installedAudio"], 1 + len(names))
+                self.assertEqual(report["counts"]["installedCompanions"], len(companions))
+                self.assertEqual({path.name: hashlib.sha256(path.read_bytes()).digest()
+                                  for path in self.source.iterdir()}, before)
+
+    def test_worker_conversion_preview_and_run_reject_source_temporaries(self):
+        nested = self.source / "normalized-flac" / "previous"
+        nested.mkdir(parents=True)
+        artifact = nested / ".afc-convert-123-456-7.flac"
+        artifact.write_bytes(b"incomplete audio")
+        requests = [
+            {"protocolVersion": 1, "requestId": f"{target}-{mode}", "type": mode,
+             "operation": "convert",
+             "parameters": {"inputPath": str(self.source), "outputDirectory": str(self.output),
+                            "configPath": str(self.config), "target": target}}
+            for target in ("flac", "mp3") for mode in ("preview", "run")
+        ]
+        result = subprocess.run(
+            [str(ARGS.converter), "--worker"],
+            input="".join(json.dumps(request) + "\n" for request in requests),
+            capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        events = [json.loads(line) for line in result.stdout.splitlines()]
+        completed = {event["requestId"]: event for event in events if event["type"] == "completed"}
+        self.assertEqual(set(completed), {request["requestId"] for request in requests})
+        self.assertTrue(all(event["status"] == "failed" and event["exitCode"] != 0
+                            for event in completed.values()), completed)
+        self.assertEqual(result.stderr.count("temporary conversion artifact"), len(requests))
+        self.assertNotIn("Conversion started:", result.stderr)
+        self.assertFalse(self.output.exists())
+        self.assertEqual(artifact.read_bytes(), b"incomplete audio")
+        self.assertEqual(hashlib.sha256(self.track.read_bytes()).digest(), self.original_hash)
+
     def test_existing_marker_blocks_even_overwrite(self):
         self.destination().mkdir(parents=True)
         marker = self.destination() / ".conversion-in-progress"
@@ -2498,6 +2584,13 @@ class ConversionTests(unittest.TestCase):
         for album in albums:
             album.mkdir()
             (album / "track.flac").write_bytes(self.fixture.read_bytes())
+
+        def source_snapshot():
+            return {path.relative_to(worker_source): (path.is_dir(), path.stat().st_mtime_ns,
+                                                     None if path.is_dir() else path.read_bytes())
+                    for path in worker_source.rglob("*")}
+
+        source_before = source_snapshot()
         settings = json.loads(self.config.read_text(encoding="utf-8"))
         settings["OutDirectory"] = str(worker_output)
         settings["MediaDirectoryList"] = [
@@ -2551,9 +2644,12 @@ class ConversionTests(unittest.TestCase):
                                     if event.get("requestId") == "duplicate-quarantine" and
                                     event["type"] == "completed")
         self.assertEqual(quarantine_completed["status"], "succeeded", quarantine_events)
-        self.assertFalse(Path(selected_album).exists())
-        self.assertTrue(any((worker_output / "quarantine").rglob("move.json")))
-        self.assertTrue(next(album for album in albums if album.exists()).is_dir())
+        self.assertEqual(source_snapshot(), source_before, "Duplicate quarantine changed the source library")
+        receipts = list((worker_output / "quarantine").rglob("move.json"))
+        self.assertEqual(len(receipts), 1)
+        self.assertEqual(json.loads(receipts[0].read_text(encoding="utf-8"))["state"], "completed")
+        copied = receipts[0].parent / Path(selected_album).name / "track.flac"
+        self.assertEqual(copied.read_bytes(), (Path(selected_album) / "track.flac").read_bytes())
 
     def test_scan_ffmpeg_warnings_are_file_only_and_preserved_in_report(self):
         self.track.unlink()

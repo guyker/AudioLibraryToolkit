@@ -14,8 +14,14 @@ applyTo: "AudioLibraryToolkit/src/**,AudioLibraryToolkit/include/**"
   thread-safe; ensure asynchronous tasks finish before their captured objects are destroyed.
 - Preserve existing conversion settings unless a change is requested. Do not silently change sample rate, bit depth,
   channels, tags or artwork. Lossless encoding does not make resampling or bit-depth reduction lossless.
-- Require successful conversion and output verification before replacing/deleting an original. Use collision-safe
-  temporary paths and recoverable replacement; failed conversion or replacement must leave the original recoverable.
+- **Source libraries are strictly read-only, in every option, command, worker request and failure path.** Never create,
+  modify, rename, retag, touch or delete any file or folder inside a source library (including temporaries, markers,
+  locks, sidecars, logs, reports, receipts or databases). Put temporary and generated files only in the output tree or
+  the system temp directory, and validate before writing that the destination neither is nor overlaps a source root
+  (`isSameOrChildPath` in both directions, `ScopedCurrentDirectory::EnterValidatedDirectory`). Open source files for
+  reading only. Features that would remove or replace originals (for example duplicate quarantine) must copy instead and
+  leave deletion to the user. Tests for any writing path must assert the source tree is unchanged.
+- Use collision-safe temporary paths in the output and verified, recoverable replacement for output files.
 - For CLI paths, check process exit status and handle Windows Unicode paths and argument quoting without interpreting
   filenames as shell syntax. Report failures explicitly.
 - Keep program-authored console and log text (progress bars, spinners, markers) 7-bit ASCII; user data such as paths

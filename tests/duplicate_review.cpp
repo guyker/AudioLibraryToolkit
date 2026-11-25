@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -37,6 +38,18 @@ std::string read(const fs::path& path)
     std::ifstream file(path, std::ios::binary);
     require(static_cast<bool>(file), "Could not read fixture");
     return { std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
+}
+
+// Full snapshot of a source tree: entry type, bytes and modification time for every entry.
+std::map<fs::path, std::string> snapshot(const fs::path& root)
+{
+    std::map<fs::path, std::string> entries;
+    for (const auto& entry : fs::recursive_directory_iterator(root)) {
+        const auto relative = entry.path().lexically_relative(root);
+        const auto stamp = std::to_string(fs::last_write_time(entry.path()).time_since_epoch().count());
+        entries[relative] = entry.is_directory() ? "dir|" + stamp : "file|" + stamp + "|" + read(entry.path());
+    }
+    return entries;
 }
 
 struct Fixture
@@ -93,15 +106,15 @@ void promptChoices()
     require(fixture.review("invalid\nSTOP\n").action == DuplicateReview::Action::Stop,
         "Invalid input advanced without a valid choice");
     require(fixture.review("1\n\nSTOP\n").movedAlbum == 0,
-        "Cancelled move was executed");
+        "Cancelled copy was executed");
     require(fixture.review("2\n").action == DuplicateReview::Action::Stop,
-        "EOF at MOVE confirmation was not safe");
+        "EOF at COPY confirmation was not safe");
     require(fs::exists(fixture.first / "track.flac") && fs::exists(fixture.second / "track.flac"),
         "Review or cancellation changed an album");
     require(!fs::exists(fixture.output), "Read-only review or cancellation created output");
 }
 
-void moveAlbum(int choice, bool longPath = false)
+void copyAlbum(int choice, bool longPath = false)
 {
     Fixture fixture(longPath);
     const auto source = choice == 1 ? fixture.first : fixture.second;
@@ -110,10 +123,11 @@ void moveAlbum(int choice, bool longPath = false)
     const auto keepBytes = read(keep / "track.flac");
     write(fixture.output / "quarantine" / "unrelated.txt", "unrelated");
     write(fixture.output / "deleted" / "previous.txt", "previous");
-    const auto result = fixture.review(std::to_string(choice) + "\nMOVE\n\n");
+    const auto sourceBefore = snapshot(fixture.library);
+    const auto result = fixture.review(std::to_string(choice) + "\nCOPY\n\n");
     require(result.action == DuplicateReview::Action::Continue && result.movedAlbum == choice,
-        "Confirmed move failed or did not pause afterward");
-    require(!fs::exists(source), "Moved source directory still exists");
+        "Confirmed copy failed or did not pause afterward");
+    require(snapshot(fixture.library) == sourceBefore, "Quarantine copy changed the source library");
     require(fs::equivalent(result.destination.parent_path().parent_path(), fixture.output / "quarantine"),
         "Moved album was not placed under quarantine");
     require(read(result.destination / "track.flac") == trackBytes, "Moved track changed");
@@ -123,28 +137,29 @@ void moveAlbum(int choice, bool longPath = false)
     require(read(fixture.output / "deleted" / "previous.txt") == "previous",
         "Previous deleted output changed");
     require(read(result.destination.parent_path() / "move.json").find("\"completed\"") != std::string::npos,
-        "Completed move receipt missing");
+        "Completed copy receipt missing");
     if (choice == 1) {
         require(read(result.destination / "artwork" / "cover.jpg") == "picture", "Artwork was not moved");
         require(read(result.destination / "playlist.m3u") == "track.flac", "Playlist was not moved");
         require(fs::is_directory(result.destination / "empty"), "Empty subdirectory was not moved");
     }
     const auto secondMove = DuplicateReview::ReviewPair;
-    std::istringstream input("1\nMOVE\nSTOP\n");
+    std::istringstream input("1\nCOPY\nSTOP\n");
     std::ostringstream messages;
     const auto repeat = secondMove(keep, result.destination, { fixture.library },
         fixture.output, false, input, messages);
     require(repeat.movedAlbum == 1 && repeat.action == DuplicateReview::Action::Stop,
         "Second move or stop-after-move failed");
     require(repeat.destination != result.destination && fs::exists(result.destination),
-        "Repeated album name overwrote a prior move");
+        "Repeated album name overwrote a prior copy");
+    require(snapshot(fixture.library) == sourceBefore, "Repeated quarantine copy changed the source library");
 }
 
 void unsafeMoves()
 {
     {
         Fixture fixture;
-        const auto result = fixture.review("1\nMOVE\n", { fixture.first, fixture.library });
+        const auto result = fixture.review("1\nCOPY\n", { fixture.first, fixture.library });
         require(result.action == DuplicateReview::Action::Error, "Library root could be moved");
         require(fs::exists(fixture.first / "track.flac"), "Refused root move changed source");
     }
@@ -152,14 +167,14 @@ void unsafeMoves()
         Fixture fixture;
         fixture.second = fixture.first / "nested";
         write(fixture.second / "track.flac", "nested album");
-        require(fixture.review("1\nMOVE\n").action == DuplicateReview::Action::Error,
+        require(fixture.review("1\nCOPY\n").action == DuplicateReview::Action::Error,
             "Nested kept album could be moved");
         require(fs::exists(fixture.second / "track.flac"), "Nested kept album changed");
     }
     {
         Fixture fixture;
         fixture.output = fixture.library / "out";
-        require(fixture.review("1\nMOVE\n").action == DuplicateReview::Action::Error,
+        require(fixture.review("1\nCOPY\n").action == DuplicateReview::Action::Error,
             "Deleted output inside source library accepted");
         require(fs::exists(fixture.first / "track.flac"), "Unsafe output changed source");
     }
@@ -168,7 +183,7 @@ void unsafeMoves()
         std::error_code ec;
         fs::create_directory_symlink(fixture.second, fixture.first / "linked", ec);
         if (!ec) {
-            require(fixture.review("1\nMOVE\n").action == DuplicateReview::Action::Error,
+            require(fixture.review("1\nCOPY\n").action == DuplicateReview::Action::Error,
                 "Album containing a directory link could be moved");
             require(fs::exists(fixture.first / "track.flac") &&
                 read(fixture.second / "track.flac") == "keep", "Link refusal changed source");
@@ -183,7 +198,7 @@ void unsafeMoves()
         std::error_code ec;
         fs::create_directory_symlink(fixture.second, fixture.output / "quarantine", ec);
         if (!ec) {
-            require(fixture.review("1\nMOVE\n").action == DuplicateReview::Action::Error,
+            require(fixture.review("1\nCOPY\n").action == DuplicateReview::Action::Error,
                 "Deleted output alias into the kept library accepted");
             require(read(fixture.first / "track.flac") == std::string(150000, 'x') &&
                 read(fixture.second / "track.flac") == "keep",
@@ -202,8 +217,9 @@ void relativePaths()
     Fixture fixture;
     const auto previous = fs::current_path();
     fixture.output = "out";
+    const auto sourceBefore = snapshot(fixture.library);
     fs::current_path(fixture.root);
-    const auto result = fixture.review("1\nMOVE\n\n", { fs::path("library") });
+    const auto result = fixture.review("1\nCOPY\n\n", { fs::path("library") });
     const bool restored = fs::equivalent(fs::current_path(), fixture.root);
     fs::current_path(previous);
     require(restored, "Move did not restore its working directory");
@@ -211,6 +227,7 @@ void relativePaths()
         "Relative configured paths changed meaning while output was anchored");
     require(read(result.destination / "track.flac") == std::string(150000, 'x'),
         "Relative output did not preserve the album");
+    require(snapshot(fixture.library) == sourceBefore, "Relative quarantine copy changed the source library");
 }
 
 void movedPathContainment()
@@ -253,48 +270,32 @@ void reviewGroup()
     require(blockedText.find("remaining albums would split into groups") != std::string::npos,
         "Disconnected-group refusal was not explained");
 
-    const auto [moved, movedText] = run("1\nMOVE\n2\nMOVE\n\n");
+    const auto sourceBefore = snapshot(fixture.library);
+    const auto [moved, movedText] = run("1\nCOPY\n2\nCOPY\n\n");
     require(moved.action == DuplicateReview::Action::Continue &&
         moved.movedAlbums == std::vector<std::size_t>{ 0, 1 } && moved.destinations.size() == 2,
-        "Group review did not move the chosen albums in order");
-    require(!fs::exists(fixture.first) && !fs::exists(fixture.second) && fs::exists(third / "track.flac"),
-        "Group review moved the wrong albums");
+        "Group review did not copy the chosen albums in order");
+    require(snapshot(fixture.library) == sourceBefore, "Group quarantine changed the source library");
     require(read(moved.destinations[0] / "track.flac") == std::string(150000, 'x') &&
-        read(moved.destinations[1] / "track.flac") == "keep", "Group move changed album content");
-    require(movedText.find("[moved]") != std::string::npos, "Moved album not marked in the group list");
+        read(moved.destinations[1] / "track.flac") == "keep", "Group copy changed album content");
+    require(movedText.find("[quarantined]") != std::string::npos,
+        "Quarantined album not marked in the group list");
     require(movedText.find("Direct matches: 1-2 2-3") != std::string::npos,
         "Direct match relationships were not displayed");
 }
 
 #ifdef _WIN32
-void failedCopyAndCleanup()
+void failedCopy()
 {
-    for (const DWORD share : { DWORD(0), DWORD(FILE_SHARE_READ | FILE_SHARE_WRITE) }) {
-        Fixture fixture;
-        const auto source = share == 0 ? fixture.first / "artwork" / "cover.jpg" :
-            fixture.first / "track.flac";
-        const auto original = read(source);
-        const auto handle = CreateFileW(source.c_str(), GENERIC_READ, share, nullptr, OPEN_EXISTING, 0, nullptr);
-        require(handle != INVALID_HANDLE_VALUE, "Could not lock source fixture");
-        const auto result = fixture.review("1\nMOVE\n");
-        CloseHandle(handle);
-        require(result.action == DuplicateReview::Action::Error, "Locked source move unexpectedly succeeded");
-        require(read(source) == original, "Locked original changed");
-        if (share != 0) {
-            require(!fs::exists(fixture.first / "artwork" / "cover.jpg"),
-                "Fixture did not exercise a partially completed source cleanup");
-            require(read(result.destination / "artwork" / "cover.jpg") == "picture",
-                "Cleanup failure lost already removed artwork");
-            require(read(result.destination / "track.flac") == std::string(150000, 'x'),
-                "Cleanup failure did not retain complete verified copy");
-            require(read(result.destination.parent_path() / "move.json").find("\"verified\"") != std::string::npos,
-                "Cleanup failure lost verified receipt");
-        }
-        else {
-            require(read(fixture.first / "track.flac") == std::string(150000, 'x'),
-                "Copy failure removed an original before verification");
-        }
-    }
+    Fixture fixture;
+    const auto source = fixture.first / "artwork" / "cover.jpg";
+    const auto sourceBefore = snapshot(fixture.library);
+    const auto handle = CreateFileW(source.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    require(handle != INVALID_HANDLE_VALUE, "Could not lock source fixture");
+    const auto result = fixture.review("1\nCOPY\n");
+    CloseHandle(handle);
+    require(result.action == DuplicateReview::Action::Error, "Locked source copy unexpectedly succeeded");
+    require(snapshot(fixture.library) == sourceBefore, "Failed quarantine copy changed the source library");
 }
 #endif
 }
@@ -303,15 +304,15 @@ int main()
 {
     try {
         promptChoices();
-        moveAlbum(1);
-        moveAlbum(2);
-        moveAlbum(1, true);
+        copyAlbum(1);
+        copyAlbum(2);
+        copyAlbum(1, true);
         unsafeMoves();
         relativePaths();
         movedPathContainment();
         reviewGroup();
 #ifdef _WIN32
-        failedCopyAndCleanup();
+        failedCopy();
 #endif
         return 0;
     }

@@ -19,7 +19,7 @@ modification time are flagged, but do not prove file identity; legacy records do
 selection reflects the scan, not subsequent changes. The CLI remains read-only.
 
 The decision-focused console output includes a group recap immediately before the menu choice, with album numbers
-matching the move menu. It shows current album/release/artist/date/edition/label/catalog/MusicBrainz tags (including
+matching the quarantine menu. It shows current album/release/artist/date/edition/label/catalog/MusicBrainz tags (including
 variants across tracks), scanned/current/readable track counts, format/resolution variants, and total bytes and
 duration for the readable scanned tracks only. Each direct pair starts with a prominent banner marking its scan-time
 rule-based confidence and showing the relative scale; the active label uses normal-intensity black text with a distinct background colour on
@@ -35,7 +35,7 @@ warned; artwork is not treated as audio.
 Scan-only artwork descriptors, integrity statuses/errors and findings are summarized separately from current probes.
 Changed/missing/added files trigger a rescan warning; added tracks remain uncompared.
 Other immediate files/folders (such as artwork, booklets and nested discs) are listed as uncompared; inspect them
-before a whole-folder move.
+before a whole-folder quarantine copy.
 Unknown values are not proof of equality. Exact confidence means equal stored FLAC MD5s, not byte-identical files or
 fresh verification. Higher bitrate/resolution/size or a lossless format does not establish original source quality.
 No signal-quality analysis, automatic quality ranking or keep/delete recommendation is performed.
@@ -53,23 +53,22 @@ can read the previous `OutDirectory/<mediaName>` scan directory with a warning. 
 does not fall back to old data, and the two locations are never merged. CLI JSON inputs remain explicit.
 
 Menu option 3 pauses after each group. Press Enter (or type `CONTINUE`) for the next group, or `STOP` to finish;
-EOF also stops safely. Choose an album number (while more than one album remains) to preview moving that entire album
+EOF also stops safely. Choose an album number (while more than one album remains) to preview copying that entire album
 folder, including artwork, playlists and subfolders, to a unique folder under `OutDirectory/quarantine`. Only typing
-`MOVE` at the second confirmation
-executes the move. The complete copy is verified byte-for-byte before originals are removed, including when output
-is on a different drive. No existing destination is overwritten. A failed copy leaves originals intact;
-a cleanup failure stops review and retains the verified copy, possibly with partial originals.
-Each move has a `move.json` receipt (`copying`, `verified`, or `completed`). The group list is shown again after a move;
-direct match relationships are displayed, and a move that would disconnect the remaining group is refused. Later
-pairs involving the moved folder or its descendants are skipped.
+`COPY` at the second confirmation executes the copy. Source libraries are read-only (K-076): the original album is
+never modified, renamed or deleted; delete it yourself after review if wanted. The complete copy is verified
+byte-for-byte, including when output is on a different drive. No existing destination is overwritten.
+Each copy has a `move.json` receipt (`copying` or `completed`; the historical file name is kept). The group list is
+shown again with quarantined albums marked; direct match relationships are displayed, and a selection that would
+disconnect the remaining group is refused. Later pairs involving the quarantined folder or its descendants are skipped.
 Library roots, nested/aliased pairs, album links and linked contents, and source/output overlap are refused.
-Catalog JSON and databases are not changed by a move: rerun option 2 afterward. Option 4 reimports current albums
-but retains database albums absent from the import; it does not automatically purge moved albums.
+Catalog JSON and databases are not changed: after deleting reviewed originals yourself, rerun option 2. Option 4
+reimports current albums but retains database albums absent from the import.
 
 Worker clients (F-012) can also provide album paths explicitly selected from a duplicate report. The backend
 recomputes current groups, requires each selected album to belong to exactly one current group, rejects nested
-selections, and preserves the one-album-kept and direct-match-connectivity checks before delegating the verified move
-to `DuplicateReview::ReviewGroup`. Unselected albums are not moved. This path requires active source library roots
+selections, and preserves the one-album-kept and direct-match-connectivity checks before delegating the verified copy
+to `DuplicateReview::ReviewGroup`. Unselected albums are not copied; no source album is changed. This path requires active source library roots
 and an output root; catalog JSON and databases are not rewritten.
 
 ## Entry points
@@ -82,7 +81,7 @@ and an output root; catalog JSON and databases are not rewritten.
 
 ## Design and knowledge
 - DESIGN: `AudioLibraryToolkit/DESIGN.md` → Duplicates
-- Knowledge: K-052 (menu confirmation for each quarantined album); K-074 (explicit client selections and
+- Knowledge: K-076 (source libraries are read-only; quarantine copies); K-077 (explicit client selections and
   direct-match connectivity); K-065 (operation layout and legacy catalog compatibility)
 - Related config: `MinMatchingTracksForDuplicate`, `SizeMatchPercentageThreshold`, `DuplicateDurationToleranceSeconds`,
   `DuplicateFuzzyNames`, `DuplicateStripEditionText`, `DuplicatePartialMatches`, `DuplicatePartialMinCoverage`; `ExtraAudioQualityMetrics`
@@ -96,7 +95,7 @@ and an output root; catalog JSON and databases are not rewritten.
 - [ ] Same album name with different artists is not reported unless MusicBrainz or FLAC MD5 agree.
 - [ ] `--report` writes the groups and track pairings, refuses an existing report file and any path inside a source
       library, and fails safely for legacy inputs without trusted library roots.
-- [ ] CLI duplicates and menu review without a confirmed move create or change no files.
+- [ ] CLI duplicates and menu review without a confirmed copy create or change no files.
 - [ ] CLI without `--open` opens no folders.
 - [ ] Menu option 3 reads option 2's `catalog-json` output; legacy fallback occurs only if that library folder is absent.
 - [ ] Empty JSON directory exits non-zero.
@@ -112,24 +111,23 @@ and an output root; catalog JSON and databases are not rewritten.
       confidence output contains no ANSI colour codes.
 - [ ] Equal technical properties remain visible; unknown bit depth is not printed as zero-bit or declared equal.
 - [ ] Full differing tags, including long UTF-8 values and first-audio-stream tags, are readable; tag controls are escaped.
-- [ ] Stale/missing/added files, unmatched tracks, hash conflicts and integrity findings are visible before a move choice.
+- [ ] Stale/missing/added files, unmatched tracks, hash conflicts and integrity findings are visible before a quarantine choice.
 - [ ] Menu review waits for a valid choice after each group; EOF/STOP does not process further groups, and bridge
       removal cannot split the remaining direct-match graph.
-- [ ] Only `MOVE` after selecting an album number relocates it; the last remaining album cannot be selected; removing a
-      bridge album that disconnects the remaining direct-match graph is refused; all bytes and nested/empty folders
-      are preserved.
-- [ ] Cancellation, invalid choices, copy failures, and unsafe move paths leave originals unchanged.
-- [ ] Source-cleanup failure retains the complete verified copy and stops review.
-- [ ] Moving an album skips later pairs involving it or its descendants without probing nonexistent paths.
+- [ ] Only `COPY` after selecting an album number quarantines it; the last remaining album cannot be selected;
+      selecting a bridge album that disconnects the remaining direct-match graph is refused; all bytes and
+      nested/empty folders are copied.
+- [x] Successful quarantine, cancellation, invalid choices, copy failures and unsafe paths leave every source library
+      byte- and timestamp-identical, with no added or removed entries.
+- [ ] Quarantining an album skips later pairs involving it or its descendants.
 - [ ] Repeated names use separate destinations under `quarantine`; previous `deleted` output and the kept album remain unchanged.
 - [ ] A `quarantine` output alias into any active library is refused without writing into that library.
-- [x] Worker quarantine moves only explicitly selected album paths, recomputes current groups, and preserves verified
-      copy-before-removal and direct-match-connectivity checks.
+- [x] Worker quarantine copies only explicitly selected album paths, recomputes current groups, verifies the copy,
+      preserves direct-match-connectivity checks and leaves the source library unchanged.
 
 ## Known limitations
 - Menu results are logged only; CLI and worker clients can write a JSON report.
 - Stored FLAC MD5s are trusted as recorded; they are not re-verified by decoding. No acoustic fingerprinting.
 - Requires the source folders recorded in JSON to still exist.
-- Quarantine moves require enough free output space for a complete album copy; originals are removed only after
-  verification.
-- No automatic restore or catalog rewrite is performed; inspect `move.json` after interruption. Do not edit folders during a move.
+- Quarantine requires enough free output space for a complete album copy. Originals are never removed by the toolkit.
+- No catalog rewrite is performed; inspect `move.json` after interruption. Do not edit folders during a copy.

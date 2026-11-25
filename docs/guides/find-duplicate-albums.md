@@ -45,8 +45,8 @@ rule-based matches, not probabilities; an exact FLAC MD5 match is based on store
 the files are byte-identical. Higher bitrate or resolution alone does not establish better source quality. Rescan if
 files have changed since the catalog was created.
 
-The `duplicates` command does not move or delete albums. In the interactive menu, option 3 can move a selected album
-folder to `OutDirectory/quarantine` only after a separate `MOVE` confirmation; the folder is copied and verified before
-originals are removed. A cleanup failure can leave partial originals beside a complete verified copy. Rescan afterward.
+The toolkit never moves, changes or deletes albums in a source library. In the interactive menu, option 3 can copy a
+selected album folder to `OutDirectory/quarantine` only after a separate `COPY` confirmation; the copy is verified
+byte-for-byte and the original is left unchanged. Delete reviewed originals yourself, then rescan.
 
 See the [duplicate feature reference](../features/F-005-duplicate-albums.md) for matching rules, options and limitations.

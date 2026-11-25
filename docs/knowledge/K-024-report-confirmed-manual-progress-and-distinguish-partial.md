@@ -5,7 +5,7 @@ title: "Report confirmed manual progress and distinguish partial completion from
 area: [AudioLibraryToolkit]
 status: active
 created: 2026-10-11
-reviewed: 2026-11-24
+reviewed: 2026-11-25
 cites:
   - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: ManualOperationSummary

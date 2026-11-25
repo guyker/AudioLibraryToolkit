@@ -3,8 +3,9 @@ id: K-074
 kind: decision
 title: "Preserve explicit quarantine selections and connected survivors for all clients"
 area: [AudioLibraryToolkit]
-status: active
+status: superseded
 supersedes: [K-055]
+superseded_by: K-077
 created: 2026-11-24
 reviewed: 2026-11-24
 cites:

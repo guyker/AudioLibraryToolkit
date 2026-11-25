@@ -38,8 +38,10 @@ namespace DuplicateReview
         std::vector<std::filesystem::path> destinations;
     };
 
-    // Reviews a group of two or more duplicate albums. Albums can be moved one at a time, each with an
-    // explicit MOVE confirmation; moves that disconnect the remaining direct-match graph are refused.
+    // Reviews a group of two or more duplicate albums. Albums can be copied to quarantine one at a time,
+    // each with an explicit COPY confirmation; source albums are never modified or removed. Selections
+    // that would disconnect the remaining direct-match graph are refused. movedAlbum/movedAlbums keep
+    // their historical names and list albums copied to quarantine.
     GroupResult ReviewGroup(const std::vector<std::filesystem::path>& albums,
         const std::vector<std::pair<std::size_t, std::size_t>>& directMatches,
         const std::vector<std::filesystem::path>& libraryRoots,

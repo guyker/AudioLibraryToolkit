@@ -14,6 +14,10 @@ The core C++ sources must remain portable across Windows, Linux and macOS. CMake
 Studio is used through its CMake "Open Folder" support, not a hand-maintained solution. Isolate
 platform-specific code behind narrow platform abstractions or conditional implementations.
 
+**Absolute rule: source library folders are read-only.** No option, command, worker request or failure path may
+create, modify, rename or delete anything inside a source library. Temporary and generated files belong only in the
+output tree or system temp. See `.github/instructions/audio-cpp.instructions.md`.
+
 ## Map
 
 | Folder / file | What it is | Read first |

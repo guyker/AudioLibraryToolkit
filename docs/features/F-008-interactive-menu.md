@@ -18,8 +18,8 @@ values) blocks the run before any repair is installed. Redundant MP3 ID3v1
 removal is offered per run and defaults to NO. See F-011 for the
 supported repair and manual-review cases.
 After the initial `RUN`, option 3 pauses per duplicate group, with a numbered evidence/metadata recap beside the
-choice prompt; an optional whole-folder move to `quarantine` requires
-its own path preview and exact `MOVE` confirmation (F-005). Enter continues the review rather than canceling it.
+choice prompt; an optional whole-folder copy to `quarantine` requires
+its own path preview and exact `COPY` confirmation (F-005); sources are never changed. Enter continues the review rather than canceling it.
 Before the option 2 preview, a per-run YES/NO prompt selects byte-exact FLAC metadata archives; Enter keeps the
 configured default (normally NO), and BACK/EXIT/EOF cancels before the scan. The preview shows the selected policy
 and warns that prior manifest-owned archives are retired after success (F-004). The preview also counts folders that

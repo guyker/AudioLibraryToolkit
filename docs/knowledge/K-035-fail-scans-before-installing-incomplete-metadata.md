@@ -5,7 +5,7 @@ title: "Fail scans before installing incomplete metadata"
 area: [AudioLibraryToolkit]
 status: active
 created: 2026-11-10
-reviewed: 2026-11-24
+reviewed: 2026-11-25
 cites:
   - path: AudioLibraryToolkit/src/catalog/AlbumCollection.cpp
     symbol: "AlbumCollection::SaveAlbumsToJSON"

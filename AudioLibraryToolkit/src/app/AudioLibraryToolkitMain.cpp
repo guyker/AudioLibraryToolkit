@@ -1261,8 +1261,8 @@ struct ManualOperationSummary {
             std::cout << "  Output: " << outputDescription << '\n';
         }
         if (movedAlbums || skippedDuplicatePairs) {
-            std::cout << "  Albums moved to deleted: " << movedAlbums
-                << "; pairs skipped after moves: " << skippedDuplicatePairs << '\n';
+            std::cout << "  Albums copied to quarantine: " << movedAlbums
+                << "; pairs skipped after quarantine: " << skippedDuplicatePairs << '\n';
         }
         if (!started) {
             std::cout << "  No action was started.\n";
@@ -2906,7 +2906,7 @@ int ScanFolderProcessJSONAndFindDuplicates(const std::vector<fs::path>& jsonFile
                     const auto& pair = matches.pairs[pairIndex];
                     const auto& evaluation = pair.evaluation;
                     if (movedAlbums[pair.first] || movedAlbums[pair.second]) {
-                        spdlog::info("Skipping duplicate pair {}/{} because an album was moved to deleted.",
+                        spdlog::info("Skipping duplicate pair {}/{} because an album was copied to quarantine.",
                             pairNumber, matches.pairs.size());
                         if (summary) ++summary->skippedDuplicatePairs;
                         continue;
@@ -2996,7 +2996,7 @@ int ScanFolderProcessJSONAndFindDuplicates(const std::vector<fs::path>& jsonFile
                     for (const auto album : selectedAlbumsByGroup[groupIndex]) {
                         const auto found = positionByAlbum.find(album);
                         if (found == positionByAlbum.end()) {
-                            spdlog::error("Selected duplicate album was already moved by another review group.");
+                            spdlog::error("Selected duplicate album was already quarantined by another review group.");
                             return 1;
                         }
                         selectedPositions.push_back(found->second);
@@ -3044,7 +3044,7 @@ int ScanFolderProcessJSONAndFindDuplicates(const std::vector<fs::path>& jsonFile
                     }
                     std::ostringstream scripted;
                     for (const auto selected : selectedPositions) {
-                        scripted << selected + 1 << "\nMOVE\n";
+                        scripted << selected + 1 << "\nCOPY\n";
                     }
                     scripted << '\n';
                     std::istringstream scriptedInput(scripted.str());
@@ -3326,8 +3326,8 @@ constexpr std::array<MenuEntry, 6> MenuEntries{ {
         "      Input: generated JSON from option 2; source folders must remain accessible\n"
         "             for track metadata/quality comparisons.\n"
         "      Output: duplicate reports in the console; opens matching album folders.\n"
-        "      Changes: pauses after each pair; an explicitly confirmed choice moves a whole\n"
-        "               album to OutDirectory/quarantine. JSON and databases are not updated.\n" },
+        "      Changes: pauses after each pair; an explicitly confirmed choice copies a whole\n"
+        "               album to OutDirectory/quarantine; sources are never changed.\n" },
     { '4', ConvertActionEnum::PopulateJsonToDBEnum, "Import metadata JSON into SQLite",
         "      Input: generated JSON from option 2 for each active library.\n"
         "      Output: OutDirectory/catalog-sqlite/<mediaName>/catalog-v2.sqlite.\n"
@@ -3525,11 +3525,11 @@ int RunLegacyMenu()
             }
             std::cout << "  Output: console reports and opened matching album folders.\n"
                 "  Matches are grouped; review pauses after each group: Enter continues; STOP ends review.\n"
-                "  Optional: choose an album number, then type MOVE to move its entire folder to:\n"
+                "  Optional: choose an album number, then type COPY to copy its entire folder to:\n"
                 "    " << pathToUtf8(OutputLayout::Quarantine(review.outputRoot)) << "\n"
-                "  The last remaining album of a group cannot be moved.\n"
-                "  Moves copy and verify all files before removing originals; no destination is overwritten.\n"
-                "  JSON/databases remain unchanged; run option 2 after moving albums.\n"
+                "  The last remaining album of a group cannot be quarantined.\n"
+                "  Copies are verified; source albums are never modified or deleted, and no destination is\n"
+                "  overwritten. Delete reviewed originals yourself if wanted, then run option 2.\n"
                 "  Track metadata is read from source folders during comparisons.\n";
             if (jsonFiles.empty()) {
                 spdlog::error("No generated JSON input; run option 2 first.");

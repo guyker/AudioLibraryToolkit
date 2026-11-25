@@ -626,7 +626,7 @@ export function App() {
     }
     if (!window.confirm(
       `Quarantine ${selectedQuarantinePaths.length} selected album folder(s)?\n\n` +
-      "The backend creates and verifies a complete copy before removing originals. " +
+      "The backend creates and verifies a complete copy; originals are never modified or deleted. " +
       "Catalog JSON and databases are not updated.")) {
       return;
     }

@@ -18,8 +18,9 @@ audio integrity, repair FLAC and MP3 metadata, convert audio, and export a searc
 - **Convert audio:** create 16-bit / 44.1 kHz FLAC files or convert FLAC to MP3 using FFmpeg.
 
 Scanning and duplicate checking are read-only with respect to the music library. Conversion and repair write to a
-separate output tree; they do not modify source files. The interactive duplicate-review menu can optionally move an
-album after explicit confirmation. Review matches yourself: the tool does not automatically choose which copy to keep.
+separate output tree. Source libraries are strictly read-only in every option: no file or folder in a source is ever
+created, modified, renamed or deleted. The interactive duplicate-review menu can optionally copy an album to
+quarantine after explicit confirmation; you delete originals yourself. Review matches yourself: the tool does not automatically choose which copy to keep.
 
 ## Quick start
 
@@ -61,13 +62,15 @@ Found 1 duplicate album pair(s) in 1 group(s) (exact 1, strong 0, probable 0, pa
 |---|---|
 | 1 / `convert --to flac` | `normalized-flac\<library-name>` |
 | 2 / `scan` | `catalog-json\<library-name>` |
-| 3 / confirmed duplicate move | `quarantine\<unique-move-folder>\<album-folder>` |
+| 3 / confirmed duplicate quarantine copy | `quarantine\<unique-move-folder>\<album-folder>` |
 | 4 / `db import` | `catalog-sqlite\<library-name>\catalog-v2.sqlite` |
 | 6 / `convert --to mp3` | `converted-mp3\<library-name>` |
 | 7 / `repair` | `repaired-metadata\<library-name>` |
 
 Relative source paths are retained within conversion and repair output. Audits, reports and sidecars stay alongside
 the output they describe. CLI commands use the input folder name; menu operations use configured `mediaName` when set.
+Conversion preparation rejects internal `.afc-convert-...` temporary files in the source with recovery guidance;
+review them before moving them outside the source tree. No artifacts are automatically deleted or ignored.
 
 Menu options 3 and 4 automatically read option 2's `catalog-json` output. If that library's new catalog folder is
 absent, they can read the previous `<base-root>\<library-name>` scan folder with a warning. Old and new batches are
@@ -121,13 +124,13 @@ explicitly. Native metadata inventory is partial for FLAC/MP3 and unsupported fo
    No signal-quality analysis or automatic keep/delete recommendation is performed (`ExtraAudioQualityMetrics` is
    deprecated and ignored).
 3. Menu option 3 opens one matching group at a time and waits: Enter continues; `STOP` finishes. Choose an album number,
-   then confirm the displayed paths with `MOVE`, to move that entire album folder (including artwork and subfolders)
-   under `OutDirectory/quarantine`. All files are copied and verified before originals are removed, also across drives.
-   A unique destination and `move.json` receipt are retained; cleanup failure can leave partial originals beside a
-   complete verified copy. Direct match relationships are shown, and a move that disconnects the remaining group is
-   refused. Later pairs involving a moved folder are skipped. Rerun option 2 afterward to refresh the
+   then confirm the displayed paths with `COPY`, to copy that entire album folder (including artwork and subfolders)
+   under `OutDirectory/quarantine`. All files are copied and verified byte-for-byte, also across drives; the source
+   album is never changed or deleted. A unique destination and `move.json` receipt are retained. Direct match
+   relationships are shown, and a selection that disconnects the remaining group is refused. Later pairs involving a
+   quarantined folder are skipped. After deleting reviewed originals yourself, rerun option 2 to refresh the
    scan; option 4 reimports current albums but does not purge absent albums from an existing database.
-   Library roots, linked/nested pairs and unsafe output overlap cannot be moved.
+   Library roots, linked/nested pairs and unsafe output overlap cannot be quarantined.
    The `duplicates` command stays noninteractive/read-only and opens folders only with `--open`. Use
    `--report <new file>` to write a JSON report of groups, evidence and track pairings. Reports must be outside source
    libraries; legacy input without library-root metadata cannot be reported.
@@ -160,7 +163,7 @@ Scan previews discover albums without collecting track metadata until confirmed.
 checks remain part of conversion; counts and destination checks reflect preview-time file state.
 Enter `?` at the selection prompt to see all action descriptions without scanning or writing.
 At the preview confirmation, `BACK` returns to the menu and `EXIT` quits without starting the action.
-Starting an action uses the same single `RUN` confirmation. Optional album moves during option 3 require a separate `MOVE`.
+Starting an action uses the same single `RUN` confirmation. Optional album quarantine copies during option 3 require a separate `COPY`.
 Enter, unrecognized confirmation text or EOF still cancels and exits. Option numbers are unchanged.
 Option `2` asks whether to export separate byte-exact native FLAC metadata archives; the configured default is
 `ScanFlacMetadataArchives` (normally `false`). Enter keeps that default; `YES` or `NO` applies only to the current

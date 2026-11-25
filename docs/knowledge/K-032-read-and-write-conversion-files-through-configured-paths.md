@@ -6,7 +6,7 @@ area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-020]
 created: 2026-11-10
-reviewed: 2026-11-24
+reviewed: 2026-11-25
 cites:
   - path: AudioLibraryToolkit/src/conversion/FolderConvert.cpp
     symbol: FolderConvert.PrepareConversion

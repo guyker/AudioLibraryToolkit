@@ -17,7 +17,7 @@ Operation forms start with the backend's configured source library and output ro
 overrides. Catalog JSON inputs for duplicate detection and database import are separate from audio-library paths.
 Choose an operation and its input directory. Conversion/repair require a preview followed by execution confirmation.
 For MP3 tag issues, choose resolutions or keep the configured backend policy. Duplicate detection can save a report;
-review the report, select specific albums and confirm before quarantining. Refresh catalogs after a move.
+review the report, select specific albums and confirm before quarantining. Quarantine copies albums; originals are unchanged. Delete reviewed originals yourself, then refresh catalogs.
 
 The status strip above the workspace shows the run message, progress and the latest output line. Select **View logs**
 to open the full operation log over the window (press Escape to close), copy it, or jump to the latest line. Select

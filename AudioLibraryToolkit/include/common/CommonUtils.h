@@ -143,8 +143,6 @@ namespace CommonUtils
 
     constexpr std::array<char, 4> ProgressCircleChars = { '|', '/', '-', '\\' };
 
-    std::size_t deleteFilesWithSamePrefix(const fs::path& filePath);
-
     
 
     long long GetMilliFromDuration(auto time1, auto time2)

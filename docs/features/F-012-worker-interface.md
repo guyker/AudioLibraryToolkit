@@ -46,7 +46,7 @@ reject stale revisions, and are saved atomically with a recovery backup.
 - Conversion and repair previews are textual summaries, not persisted plan tokens; execution re-runs preflight before
   writing. Duplicate quarantine recomputes the groups and verifies selections against current results.
 - Duplicate quarantine requires source-library roots in `MediaDirectoryList`; catalog-only configurations without
-  active library roots can still detect and report duplicates, but cannot move albums.
+  active library roots can still detect and report duplicates, but cannot quarantine albums.
 - Unspecified MP3 tag choices still obey `TagIssueResolution` (`"ask"` stops before writing; `"auto"` applies
   recommendations).
 - The process protocol is not a C++ ABI. The internal static target is not an installed public SDK.

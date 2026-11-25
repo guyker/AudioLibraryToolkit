@@ -3,7 +3,8 @@ id: K-052
 kind: decision
 title: "Quarantine duplicate albums only by explicit per-pair choice"
 area: [AudioLibraryToolkit]
-status: active
+status: superseded
+superseded_by: K-076
 created: 2026-11-18
 reviewed: 2026-11-24
 cites:

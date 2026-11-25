@@ -56,8 +56,8 @@ should not write the file directly.
 Duplicate review is a two-request flow: run `duplicates` with a new `reportPath`, inspect the schema-v1 report, then
 send selected album paths in `duplicateQuarantinePaths`. The backend recomputes the groups and validates the choices
 against the current scan. Quarantine requires `outputDirectory` (or configured `OutDirectory`) and at least one active
-source library in `MediaDirectoryList`. Moves retain the existing copy-verify-before-removal safety behavior; catalog
-JSON and databases are not updated.
+source library in `MediaDirectoryList`. Quarantine is copy-only: albums are copied and verified, and source libraries
+are never modified or deleted (`movedAlbum(s)` result names are historical). Catalog JSON and databases are not updated.
 
 ## Events
 

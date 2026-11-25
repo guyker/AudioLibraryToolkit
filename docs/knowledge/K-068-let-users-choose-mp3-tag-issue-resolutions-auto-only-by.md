@@ -5,7 +5,7 @@ title: "Let users choose MP3 tag-issue resolutions, auto only by configuration"
 area: [AudioLibraryToolkit]
 status: active
 created: 2026-11-23
-reviewed: 2026-11-24
+reviewed: 2026-11-25
 cites:
   - test: ConversionTests.test_cli_ask_tag_issues_stop_before_writing
   - path: AudioLibraryToolkit/src/metadata/Mp3TagIssues.cpp

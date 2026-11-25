@@ -15,6 +15,10 @@ Convertible sources below 16-bit or 44.1 kHz are rejected; they are not silently
 AAC `.m4a` sources are exempt only from the bit-depth check because AAC does not expose a meaningful source PCM bit
 depth; they still require a verified sample rate of at least 44.1 kHz and produce a warning that lossy-to-FLAC
 conversion cannot restore lost quality.
+Preparation rejects internal `.afc-convert-<pid>-<time>-<n>[.<suffix>]` temporary files anywhere in the source tree,
+before any conversion output is written. The diagnostic identifies the file and asks for manual review outside the
+source tree; it does not delete or silently skip potentially recoverable output. This also applies to worker previews
+and MP3 conversion. Other dotfiles and similar names without the generated numeric structure remain normal inputs.
 Without `--overwrite`, existing targets are never replaced. Exit code 0 only if every planned item was preserved.
 If planned destinations already exist, the console identifies the output folder and conflict count, explains that
 it may contain previous run results, and suggests a different output root or explicit overwrite. Duplicate output
@@ -80,6 +84,9 @@ check (F-003).
 - [ ] Libraries without conversions write only the report (listing `"."`) without launching the encoder.
 - [ ] Copy failure retains the failure marker/report and reports unattempted copies as not installed.
 - [ ] Any source file or directory symlink/reparse point fails during preparation before output is written.
+- [ ] Internal conversion temporaries at the source root or any nested depth fail CLI/worker preparation with recovery
+      guidance and no output writes, even with overwrite; every source file remains unchanged.
+- [ ] Similar legitimate track names and unrelated dotfiles are still converted or copied normally.
 - [ ] Explicit `--overwrite` writes a formerly skipped folder completely once it gains a conversion.
 
 ## Known limitations

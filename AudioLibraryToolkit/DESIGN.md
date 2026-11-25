@@ -41,7 +41,7 @@ It runs as explicit CLI commands, a versioned headless worker, or, with no argum
 | Album collection | `src/catalog/AlbumCollection.cpp`, `include/catalog/AlbumCollection.h` | Discovery (`AlbumCollection::LoadAlbumsCo`), metadata import/cache reuse, JSON save/load, `AlbumCollection::ExportToDatabase` |
 | Duplicate matching | `src/duplicates/DuplicateMatcher.cpp`, `include/duplicates/DuplicateMatcher.h` | `DuplicateMatcher::FindDuplicates`: aliases, candidate indexes, pair evaluation, confidence and grouping |
 | Duplicate comparison output | `src/duplicates/DuplicateComparison.cpp`, `include/duplicates/DuplicateComparison.h` | Pure descriptions of current album snapshots and scan-time pair evidence; stable group-local album numbers |
-| Duplicate review | `src/duplicates/DuplicateReview.cpp`, `include/duplicates/DuplicateReview.h` | Per-group menu choices and worker-validated explicit album selections; verified whole-folder moves to `OutDirectory/quarantine` |
+| Duplicate review | `src/duplicates/DuplicateReview.cpp`, `include/duplicates/DuplicateReview.h` | Per-group menu choices and worker-validated explicit album selections; verified whole-folder copies to `OutDirectory/quarantine`; sources are never changed |
 | Output layout | `include/common/OutputLayout.h` | Shared operation/library path mapping for menu and CLI output |
 | Platform adapters | `src/platform/PlatformUtils.cpp`, `include/platform/PlatformUtils.h` | Per-user config location, UTF-16/UTF-8, `PlatformUtils::WindowsLongPath`, `PlatformUtils::OpenDirectory` |
 | Utilities | `src/common/CommonUtils.cpp`, `include/common/CommonUtils.h`, `include/common/BoundedTaskRunner.h`, `src/common/JsonUtils.cpp`, `include/common/JsonUtils.h` | UTF-8 path helpers, coroutine `Generator`, bounded task runner, JSON helpers |
@@ -82,7 +82,7 @@ flowchart LR
     DUP --> REP[Console report / open folders]
     DUP -->|worker report and selected quarantine paths| QR[Recompute groups and validate selection]
     QR --> Q[DuplicateReview::ReviewGroup]
-    Q -->|verified copy then remove| QUAR[(OutDirectory/quarantine)]
+    Q -->|verified copy; source unchanged| QUAR[(OutDirectory/quarantine)]
     JSON --> DB[ExportJSONToDB / ImportJsonDirectoryToDatabase]
     DB --> SQL[(OutDirectory/catalog-sqlite/name/catalog-v2.sqlite)]
 ```
@@ -114,7 +114,7 @@ operation creates a blank editable file from the shipped commented template when
 and refuses to overwrite an existing file. Configuration snapshots return built-in defaults without creating a missing file; writes require the snapshot revision, patch only supplied
 top-level keys, validate through `AppSettingsJson`, preserve JSON comments and unknown keys, create a `.bak`
 recovery copy, and atomically replace the file. A stale revision or locked save fails without overwriting newer
-configuration. The worker also accepts explicit duplicate quarantine selections; current matches and move safety are
+configuration. The worker also accepts explicit duplicate quarantine selections; current matches and copy safety are
 revalidated by the backend. Unspecified MP3 tag choices retain the configured `TagIssueResolution` policy.
 Quarantine requires active source library roots in `MediaDirectoryList` and does not update catalog JSON or databases.
 
@@ -176,7 +176,12 @@ and actionable preservation warnings and errors remain visible.
 ### Conversion (menu 1/6, `convert`)
 
 1. **Plan** – `FolderConvert::PrepareConversion` resolves input/output, rejects source/output overlap and reserved
-   state names, enumerates source entries once, classifies convertible audio (`MediaTrack::IsFileConvertable`), maps files to
+   state names, enumerates source entries once, and rejects regular files matching the internal
+   `.afc-convert-<pid>-<time>-<n>[.<suffix>]` namespace at any depth (case-insensitive prefix, three numeric identifiers).
+   This includes temporary audio, decoder inputs, sidecars, reports and companion copies. Preparation identifies
+   the artifact and requests review outside the source tree; it never deletes or silently skips recovery files,
+   even with overwrite enabled. Similar filenames without the generated identifier structure remain ordinary input.
+   It classifies convertible audio (`MediaTrack::IsFileConvertable`), maps files to
    `<output>/<relative path>` with a unique temporary (`.afc-convert-<pid>-<time>-<n><ext>`), and records existing
    targets and case-insensitive collisions, including file/directory collisions. Both targets count files, audio
    and conversions (FLAC: every convertible file; MP3: `.flac` only) per source subtree. The topmost subtrees with
@@ -450,7 +455,7 @@ mistaken for audio; additional audio streams are explicitly warned.
 current release/artist/date/edition/label/catalog/identifier tag variants, track counts, format/resolution variants,
 duration/bytes over readable scanned tracks, and scan-only artwork/integrity/findings inventories.
 Other immediate files/folders are listed as uncompared companions; no recursive or non-audio content comparison is
-implied, even though a whole-folder move includes them.
+implied, even though a whole-folder quarantine copy includes them.
 The recap repeats each direct pair's confidence, rationale, coverage and hash agreement without repeating track
 details. Exact confidence means equal stored FLAC MD5s, not byte-identical files or fresh decoded-audio verification.
 Properties are not source-quality scores; no automatic keep/delete recommendation or signal-quality analysis is made.
@@ -467,20 +472,20 @@ existing report or a path inside any source library is refused. Report generatio
 trusted library root, and a failed or stopped run still records its status.
 Menu option 3 warns about overlapping active libraries, opens only the current group's folders and calls
 `DuplicateReview::ReviewGroup` after the group's pairs: Enter/`CONTINUE` advances, `STOP` or EOF ends review, and an
-album number selects that whole album folder for relocation while more than one album remains. The group displays
-its direct-match edges; a proposed move is rejected if the remaining induced graph would disconnect. The move preview
-shows exact paths and requires `MOVE`; any other confirmation cancels the move. After a move, the group list is shown
-again with moved albums marked; later pairs involving a moved folder or its descendants are skipped.
-The summary distinguishes user-stopped review and counts completed comparisons, moved albums, and skipped pairs.
+album number selects that whole album folder for quarantine while more than one album remains. The group displays
+its direct-match edges; a proposed selection is rejected if the remaining induced graph would disconnect. The preview
+shows exact paths and requires `COPY`; any other confirmation cancels. Afterwards the group list is shown again with
+quarantined albums marked; later pairs involving a quarantined folder or its descendants are skipped.
+The summary distinguishes user-stopped review and counts completed comparisons, quarantined albums, and skipped pairs.
 
-Moves use a unique `OutDirectory/quarantine/album-<time>-<sequence>/<original-folder-name>` destination, with a sibling
-`move.json` receipt. They copy regular files and directory structure (including artwork and empty/nested folders),
-verify the complete inventory and each file byte-for-byte (`PreservationAudit::VerifyCopy`), recheck source identity
-and inventory, then remove only enumerated originals after a further per-file verification. The same copy/verify/remove
-flow supports same-volume and cross-volume moves. No destination is overwritten. A failure before source cleanup
-leaves originals intact; a failure during cleanup stops review and retains the complete verified copy, possibly
-alongside partial originals. Receipts progress through `copying`, `verified` (cleanup may be incomplete), and `completed`.
-Interrupted/failed copies are retained for inspection rather than silently retried or erased.
+Source libraries are read-only (K-076), so quarantine is copy-only: the toolkit never modifies, renames or deletes the
+original album; the user deletes reviewed originals. Copies use a unique
+`OutDirectory/quarantine/album-<time>-<sequence>/<original-folder-name>` destination, with a sibling `move.json`
+receipt (historical name). They copy regular files and directory structure (including artwork and empty/nested
+folders), restore file modification times on the copy, verify the complete inventory and each file byte-for-byte
+(`PreservationAudit::VerifyCopy`), and recheck source identity and inventory. No destination is overwritten.
+Receipts progress through `copying` and `completed`. Interrupted/failed copies are retained for inspection rather
+than silently retried or erased.
 Library roots/ancestors, albums outside configured active libraries, identical/aliased/nested pair folders, links and
 reparse points inside an album, and output roots overlapping any configured source library are refused.
 Configured paths are used for I/O and canonical paths only for safety comparisons; output publication uses a
@@ -636,7 +641,7 @@ fail configuration loading.
 | Album JSON | `OutDirectory/catalog-json/<name>/media_out_<name>[_<n>].json` (schema v2; see `docs/schemas/media-catalog-v2.schema.json`) | `AlbumCollection::SaveAlbumsToJSON` |
 | Scan manifest | `OutDirectory/catalog-json/<name>/scan-manifest.json` (schema v1; batch inventory, SHA-256 integrity and archive references) | `writeScanManifest` |
 | FLAC metadata archive | Optional `OutDirectory/catalog-json/<name>/scan_metadata_<source-path-sha256>.flac-metadata` (native metadata blocks only; referenced by manifest) | `FlacMetadata::Save` / `FlacMetadata::Verify` |
-| Quarantined duplicate album | `OutDirectory/quarantine/album-<time>-<sequence>/<original-folder-name>/` plus sibling `move.json` | `DuplicateReview::ReviewGroup` after explicit `MOVE` confirmation |
+| Quarantined duplicate album | `OutDirectory/quarantine/album-<time>-<sequence>/<original-folder-name>/` plus sibling `move.json` | `DuplicateReview::ReviewGroup` after explicit `COPY` confirmation (source unchanged) |
 | JSON diagnostic reports | `<album json>_ffmpeg_error.json` when captured (excluded from inputs); legacy `_error.json` reports are also excluded | `AlbumCollection` |
 | SQLite catalog | `OutDirectory/catalog-sqlite/<name>/catalog-v2.sqlite` (`user_version=2`) | `CatalogDatabase::Import` |
 

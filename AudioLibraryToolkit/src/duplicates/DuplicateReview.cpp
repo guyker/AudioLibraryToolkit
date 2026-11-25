@@ -157,16 +157,12 @@ void validateMove(const fs::path& source, const fs::path& keep,
     if (isLink(source)) throw std::runtime_error("Cannot move an album link or reparse point.");
 }
 
-void moveAlbum(const fs::path& source, const fs::path& keep,
+// Source libraries are read-only: the album is copied and verified, never removed or modified.
+void copyAlbumToQuarantine(const fs::path& source, const fs::path& keep,
     const std::vector<fs::path>& roots, const fs::path& outputRoot, const fs::path& destination)
 {
     validateMove(source, keep, roots, outputRoot);
     const auto originalKey = fs::canonical(source);
-    const auto checkSource = [&] {
-        if (isLink(source) || fs::canonical(source) != originalKey) {
-            throw std::runtime_error("Album directory changed during source cleanup.");
-        }
-    };
     const auto before = inventory(source);
     PlatformUtils::ScopedCurrentDirectory anchor;
     if (!anchor.EnterValidatedDirectory(OutputLayout::Quarantine(outputRoot), source, true)) {
@@ -211,36 +207,14 @@ void moveAlbum(const fs::path& source, const fs::path& keep,
     }
     validateMove(source, keep, roots, outputRoot);
     if (fs::canonical(source) != originalKey)
-        throw std::runtime_error("Album path changed while copying; originals were not removed.");
+        throw std::runtime_error("Album path changed while copying; the quarantine copy is incomplete.");
     if (inventory(source) != before)
-        throw std::runtime_error("Album contents changed while copying; originals were not removed.");
+        throw std::runtime_error("Album contents changed while copying; the quarantine copy is incomplete.");
     if (!anchor.IsAnchored(OutputLayout::Quarantine(outputRoot)))
-        throw std::runtime_error("Quarantine output anchor changed while copying; originals were not removed.");
-    writeReceipt(receiptDirectory, source, destination, "verified");
-    spdlog::info("Verified complete album copy at '{}'; removing originals from '{}'.",
-        CommonUtils::path_to_utf8(destination), CommonUtils::path_to_utf8(source));
-    for (const auto& [relative, entry] : before) {
-        if (entry.directory) continue;
-        checkSource();
-        validateEntryPath(source, relative);
-        validateEntryPath(destination, relative);
-        verifyFile(source / relative, destination / relative);
-        if (!fs::remove(source / relative)) {
-            throw std::runtime_error("Cannot remove verified original file.");
-        }
-    }
-    for (auto it = before.rbegin(); it != before.rend(); ++it) {
-        if (it->second.directory) {
-            checkSource();
-            validateEntryPath(source, it->first);
-            if (!fs::remove(source / it->first)) {
-                throw std::runtime_error("Cannot remove emptied original directory.");
-            }
-        }
-    }
-    checkSource();
-    if (!fs::remove(source)) throw std::runtime_error("Cannot remove emptied original album directory.");
+        throw std::runtime_error("Quarantine output anchor changed while copying.");
     writeReceipt(receiptDirectory, source, destination, "completed");
+    spdlog::info("Verified complete album copy at '{}'; the source album '{}' was not changed.",
+        CommonUtils::path_to_utf8(destination), CommonUtils::path_to_utf8(source));
 }
 
 std::string readResponse(std::istream& input)
@@ -267,12 +241,12 @@ fs::path newDestination(const fs::path& root, const fs::path& source)
 std::string confirmMove(const fs::path& source, const fs::path& destination,
     std::istream& input, std::ostream& output)
 {
-    output << "\nMove entire folder (including artwork and subfolders):\n  From: "
+    output << "\nCopy entire folder to quarantine (including artwork and subfolders):\n  From: "
         << CommonUtils::path_to_utf8(source) << "\n  To: "
         << CommonUtils::path_to_utf8(destination)
-        << "\nThe complete copy is verified before removing originals. A cleanup failure can leave\n"
-           "partial originals; the verified copy is retained. Catalog JSON/databases are not updated.\n"
-           "Type MOVE to confirm, or press Enter to cancel: " << std::flush;
+        << "\nThe copy is verified. The source album is never modified or deleted; remove it yourself\n"
+           "after review if wanted. Catalog JSON/databases are not updated.\n"
+           "Type COPY to confirm, or press Enter to cancel: " << std::flush;
     return readResponse(input);
 }
 }
@@ -310,7 +284,7 @@ DuplicateReview::Result DuplicateReview::ReviewPair(const fs::path& first, const
             output << "\nDuplicate review:\n  1: " << CommonUtils::path_to_utf8(album1)
                 << "\n  2: " << CommonUtils::path_to_utf8(album2)
                 << "\nPress Enter to continue, STOP to finish";
-            if (result.movedAlbum == 0) output << ", or 1/2 to move that entire album to deleted";
+            if (result.movedAlbum == 0) output << ", or 1/2 to copy that entire album to quarantine (source is not changed)";
             output << ": " << std::flush;
             const auto response = readResponse(input);
             if (response.empty() || response == "CONTINUE") return result;
@@ -332,15 +306,15 @@ DuplicateReview::Result DuplicateReview::ReviewPair(const fs::path& first, const
                 result.action = Action::Stop;
                 return result;
             }
-            if (confirmation != "MOVE") {
+            if (confirmation != "COPY") {
                 result.destination.clear();
-                output << "Move cancelled; originals unchanged.\n";
+                output << "Copy cancelled; nothing was written.\n";
                 continue;
             }
-            moveAlbum(source, keep, roots, root, result.destination);
+            copyAlbumToQuarantine(source, keep, roots, root, result.destination);
             result.movedAlbum = selected;
-            output << "Album moved to " << CommonUtils::path_to_utf8(result.destination)
-                << "\nRun option 2 after review to refresh the catalog.\n";
+            output << "Album copied to " << CommonUtils::path_to_utf8(result.destination)
+                << "\nThe source album was not changed; delete it yourself after review if wanted.\n";
         }
     }
     catch (const std::exception& error) {
@@ -389,11 +363,11 @@ DuplicateReview::GroupResult DuplicateReview::ReviewGroup(const std::vector<fs::
             output << '\n';
             for (std::size_t index = 0; index < paths.size(); ++index) {
                 output << "  " << index + 1 << ": " << CommonUtils::path_to_utf8(paths[index])
-                    << (moved[index] ? "  [moved]" : "") << '\n';
+                    << (moved[index] ? "  [quarantined]" : "") << '\n';
             }
             const bool canMove = remaining() > 1;
             output << "Press Enter to continue, STOP to finish";
-            if (canMove) output << ", or an album number to move that entire album to deleted";
+            if (canMove) output << ", or an album number to copy that entire album to quarantine (source is not changed)";
             output << ": " << std::flush;
             const auto response = readResponse(input);
             if (response.empty() || response == "CONTINUE") return result;
@@ -434,7 +408,7 @@ DuplicateReview::GroupResult DuplicateReview::ReviewGroup(const std::vector<fs::
                 }
                 const auto connectedCount = static_cast<std::size_t>(std::ranges::count(reachable, true));
                 if (connectedCount != remaining() - 1) {
-                    output << "Cannot move this album: the remaining albums would split into groups without "
+                    output << "Cannot quarantine this album: the remaining albums would split into groups without "
                         "direct matches.\n";
                     continue;
                 }
@@ -452,23 +426,23 @@ DuplicateReview::GroupResult DuplicateReview::ReviewGroup(const std::vector<fs::
                 result.action = Action::Stop;
                 return result;
             }
-            if (confirmation != "MOVE") {
+            if (confirmation != "COPY") {
                 pendingDestination.clear();
-                output << "Move cancelled; originals unchanged.\n";
+                output << "Copy cancelled; nothing was written.\n";
                 continue;
             }
-            moveAlbum(source, paths[*keepIndex], roots, root, pendingDestination);
+            copyAlbumToQuarantine(source, paths[*keepIndex], roots, root, pendingDestination);
             moved[sourceIndex] = true;
             result.movedAlbums.push_back(sourceIndex);
             result.destinations.push_back(pendingDestination);
-            output << "Album moved to " << CommonUtils::path_to_utf8(pendingDestination)
-                << "\nRun option 2 after review to refresh the catalog.\n";
+            output << "Album copied to " << CommonUtils::path_to_utf8(pendingDestination)
+                << "\nThe source album was not changed; delete it yourself after review if wanted.\n";
             pendingDestination.clear();
         }
     }
     catch (const std::exception& error) {
-        spdlog::error("Duplicate review failed: {}. Any move copy is retained at '{}'; inspect move.json "
-            "before retrying. Source cleanup may be incomplete only after verification.",
+        spdlog::error("Duplicate review failed: {}. Any partial quarantine copy is at '{}'; inspect move.json "
+            "before retrying. The source album was not changed.",
             error.what(), CommonUtils::path_to_utf8(pendingDestination));
         result.action = Action::Error;
         return result;
