@@ -58,6 +58,39 @@ int ApplicationServices::Run(const CommandLineOptions& options)
         if (options.configPathSpecified) {
             explicitConfigPath = pathFromUtf8(options.configPath);
         }
+        if (options.action == CommandAction::InitializeDefaultConfig) {
+            std::string error;
+            const auto path = AppSettingsJson::ResolveConfigPath(explicitConfigPath, error);
+            if (path.empty() || !AppSettingsJson::CreateDefaultConfiguration(path, error)) {
+                std::cerr << "Configuration setup failed: " << error << '\n';
+                return 1;
+            }
+            std::cout << "Default configuration created at " << pathToUtf8(path) << ".\n";
+            return 0;
+        }
+        if (options.action == CommandAction::ReadConfiguration) {
+            std::string snapshot;
+            std::string error;
+            if (!AppSettingsJson::ReadConfigurationSnapshot(explicitConfigPath, snapshot, error)) {
+                std::cerr << "Configuration error: " << error << '\n';
+                return 1;
+            }
+            std::cout << snapshot;
+            return 0;
+        }
+        if (options.action == CommandAction::ValidateConfiguration ||
+            options.action == CommandAction::SaveConfiguration) {
+            std::string snapshot;
+            std::string error;
+            if (!AppSettingsJson::ApplyConfigurationPatch(explicitConfigPath, options.configRevision,
+                    options.configurationPatch, options.action == CommandAction::SaveConfiguration,
+                    snapshot, error)) {
+                std::cerr << "Configuration error: " << error << '\n';
+                return 1;
+            }
+            std::cout << snapshot;
+            return 0;
+        }
         std::string configurationError;
         const auto settings = AppSettingsJson::LoadForCommandLine(explicitConfigPath, configurationError);
         if (!settings) {

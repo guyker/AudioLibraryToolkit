@@ -21,10 +21,11 @@ npm run dev
 `npm run package:win` creates a Windows NSIS installer; `npm run package:linux` creates a Linux AppImage. These package
 the UI and TypeScript worker client, not the C++ backend or FFmpeg.
 
-In the app's Settings, choose a separately built `AudioLibraryToolkit` executable. Optionally select its config file
-and set an output root. Settings can create a first-run configuration from chosen output/library paths without
-overwriting an existing file. Conversion and repair show non-mutating previews before execution; MP3 conversion has
-per-issue tag choices. Duplicate reports support explicit album selection and confirmed quarantine.
+In the app's Settings, choose or discover a separately built `AudioLibraryToolkit` executable. Optionally select its
+config file. Settings can load and edit an existing backend configuration or explicitly create an editable default
+from the backend's shipped template, without overwriting an existing file. Conversion and repair show non-mutating
+previews before execution; MP3 conversion has per-issue tag choices. Duplicate reports support explicit album
+selection and confirmed quarantine.
 
 The UI owns interaction, not media-processing policy. It uses only a compatible installed executable at runtime;
 backend configuration, protocol validation, source protection and verified output installation remain authoritative.

@@ -7,6 +7,9 @@ import type {
   WorkerOperation,
   WorkerOperationParameters,
 } from "@audio-library/worker-client";
+import type { BackendConfigurationSnapshot } from "./bridge";
+import { LogViewer, latestLogLine } from "./LogViewer";
+import { subscribeToLogs } from "./logStream.mjs";
 
 type Screen = WorkerOperation | "settings";
 type RunState = "idle" | "running" | "succeeded" | "failed" | "cancelled";
@@ -88,6 +91,37 @@ const tagIssueFields: {
 ];
 
 const emptySettings: Settings = { backendPath: "", configPath: "", outputDirectory: "", libraryPath: "" };
+
+const configurationGroups: Record<string, string[]> = {
+  "Library & paths": ["OutDirectory", "DatabaseFileName", "MediaDirectoryList"],
+  Scanning: ["Incremental", "ScanFlacMetadataArchives", "ScanTier", "CatalogExtensions"],
+  Conversion: ["FLACSettings", "MetadataSidecars", "TagIssueResolution"],
+  Duplicates: [
+    "MinMatchingTracksForDuplicate", "SizeMatchPercentageThreshold",
+    "DuplicateDurationToleranceSeconds", "DuplicateFuzzyNames",
+    "DuplicateStripEditionText", "DuplicatePartialMatches", "DuplicatePartialMinCoverage",
+  ],
+  Performance: [
+    "UseAsyncMetadataReads", "MetadataScanMaxThreads", "DecodeWorkers",
+    "ExtraAudioQualityMetrics", "AlbumsSplitThreshold", "JsonBatchTargetBytes",
+    "RecursionDirectorySearchDepth",
+  ],
+  Advanced: ["Version", "LogLevel"],
+};
+
+const complexConfigurationKeys = new Set([
+  "MediaDirectoryList", "CatalogExtensions", "FLACSettings", "MetadataSidecars",
+]);
+
+function mediaLibraryPath(configuration: Record<string, unknown>): string {
+  const entries = configuration.MediaDirectoryList;
+  if (!Array.isArray(entries)) return "";
+  const firstActive = entries.find((entry) =>
+    typeof entry === "object" && entry !== null && "isActive" in entry &&
+    entry.isActive === true && "mediaPath" in entry && typeof entry.mediaPath === "string");
+  return firstActive && typeof firstActive === "object" && "mediaPath" in firstActive
+    ? String(firstActive.mediaPath) : "";
+}
 
 function isMutating(screen: WorkerOperation, parameters: WorkerOperationParameters): boolean {
   if (screen === "duplicates") return typeof parameters.reportPath === "string" && parameters.reportPath.length > 0;
@@ -173,8 +207,17 @@ export function App() {
   const [settings, setSettings] = useState<Settings>(emptySettings);
   const [settingsDraft, setSettingsDraft] = useState<Settings>(emptySettings);
   const [settingsMessage, setSettingsMessage] = useState("");
-  const [inputPath, setInputPath] = useState("");
+  const [audioInputPath, setAudioInputPath] = useState("");
+  const [catalogInputPath, setCatalogInputPath] = useState("");
   const [outputDirectory, setOutputDirectory] = useState("");
+  const [configuredOutputDirectory, setConfiguredOutputDirectory] = useState("");
+  const [configurationSnapshot, setConfigurationSnapshot] =
+    useState<BackendConfigurationSnapshot | null>(null);
+  const [configurationDraft, setConfigurationDraft] = useState<Record<string, unknown>>({});
+  const [configurationText, setConfigurationText] = useState<Record<string, string>>({});
+  const [configurationTab, setConfigurationTab] = useState("Library & paths");
+  const [configurationMessage, setConfigurationMessage] = useState("");
+  const [discoveringBackend, setDiscoveringBackend] = useState(false);
   const [options, setOptions] = useState<Record<string, string | boolean | number>>({
     target: "flac",
     mp3Quality: 0,
@@ -188,6 +231,9 @@ export function App() {
   const [runState, setRunState] = useState<RunState>("idle");
   const [runMessage, setRunMessage] = useState("Choose an operation to begin.");
   const [runOutput, setRunOutput] = useState("");
+  const [logsOpen, setLogsOpen] = useState(false);
+  const logSheetRef = useRef<HTMLElement>(null);
+  const viewLogsButtonRef = useRef<HTMLButtonElement>(null);
   const [activeRequest, setActiveRequest] = useState("");
   const activeRequestRef = useRef("");
   const activeModeRef = useRef<"preview" | "run">("run");
@@ -198,26 +244,45 @@ export function App() {
   const [errorMessage, setErrorMessage] = useState("");
 
   const selectedOperation = screen === "settings" ? null : screen;
+  const usesCatalogInput = selectedOperation === "duplicates" || selectedOperation === "databaseImport";
+  const inputPath = usesCatalogInput ? catalogInputPath : audioInputPath;
   const metadata = selectedOperation ? operationInfo[selectedOperation] : null;
-  const inputLabel = selectedOperation === "duplicates" || selectedOperation === "databaseImport"
+  const inputLabel = usesCatalogInput
     ? "Catalog JSON directory" : "Source library";
+
+  function setInputPath(value: string) {
+    if (usesCatalogInput) setCatalogInputPath(value);
+    else setAudioInputPath(value);
+  }
 
   useEffect(() => {
     void window.audioLibrary.getSettings().then((value) => {
       setSettings(value);
       setSettingsDraft(value);
       setOutputDirectory(value.outputDirectory);
+      setAudioInputPath(value.libraryPath);
+      if (value.backendPath) {
+        void loadBackendConfiguration(value.backendPath, value.configPath, false);
+      } else {
+        setScreen("settings");
+        setConfigurationMessage("Choose or discover the backend, then use an existing configuration or create one from defaults.");
+      }
     }).catch((error: unknown) => {
       setErrorMessage(error instanceof Error ? error.message : String(error));
     });
   }, []);
 
   useEffect(() => {
+    return subscribeToLogs(window.audioLibrary, setRunOutput, (error: unknown) => {
+      setErrorMessage(`Could not load logs: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }, []);
+
+  useEffect(() => {
     const unsubscribeEvent = window.audioLibrary.onOperationEvent(({ requestId, event }) => {
       if (requestId !== activeRequestRef.current) return;
-      setRunMessage(eventText(event));
-      if (event.type === "output") {
-        setRunOutput((current) => (current + event.text).slice(-200_000));
+      if (event.type !== "output" && event.type !== "ready") {
+        setRunMessage(eventText(event));
       }
     });
     const unsubscribeResult = window.audioLibrary.onOperationResult((result) => {
@@ -243,10 +308,10 @@ export function App() {
       setRunState(result.status);
       setRunMessage(result.status === "cancelled"
         ? "Stopped. Completed outputs are retained; inspect the destination for partial work."
-        : result.status === "succeeded" ? "Operation completed." : "Operation failed.");
-      if (result.stderr) {
-        setRunOutput((current) => (current + "\n" + result.stderr).slice(-200_000));
-      }
+        : result.status === "failed" ? "Operation failed. Open the logs for details."
+          : activeModeRef.current === "preview"
+            ? "Preview complete. Review the planned changes in the logs, then run the operation."
+            : "Operation completed.");
       activeRequestRef.current = "";
       activeModeRef.current = "run";
       activeOperationRef.current = null;
@@ -259,7 +324,6 @@ export function App() {
       setRunState("failed");
       setRunMessage(failure.message);
       setErrorMessage(failure.message);
-      setRunOutput((current) => (current + "\n" + failure.diagnostics).slice(-200_000));
       activeRequestRef.current = "";
       activeModeRef.current = "run";
       activeOperationRef.current = null;
@@ -288,6 +352,42 @@ export function App() {
     const match = runMessage.match(/\((\d{1,3})%\)/);
     return match ? Math.min(Number(match[1]), 100) : null;
   }, [runMessage]);
+  const latestOutput = useMemo(() => latestLogLine(runOutput), [runOutput]);
+
+  useEffect(() => {
+    if (!logsOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setLogsOpen(false);
+      } else if (event.key === "Tab") {
+        const elements = logSheetRef.current?.querySelectorAll<HTMLElement>("button:not(:disabled), pre[tabindex]");
+        if (!elements?.length) return;
+        const first = elements[0];
+        const last = elements[elements.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      viewLogsButtonRef.current?.focus();
+    };
+  }, [logsOpen]);
+
+  async function openLogWindow() {
+    setLogsOpen(false);
+    try {
+      await window.audioLibrary.openLogWindow();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   function setOption(name: string, value: string | boolean | number) {
     setOptions((current) => ({ ...current, [name]: value }));
@@ -303,61 +403,154 @@ export function App() {
     if (value) setValue(value);
   }
 
+  async function discoverBackend() {
+    setConfigurationMessage("");
+    setDiscoveringBackend(true);
+    try {
+      const discovered = await window.audioLibrary.discoverBackend();
+      if (!discovered) {
+        setConfigurationMessage("No compatible AudioLibraryToolkit executable was found. Choose it manually.");
+        return;
+      }
+      const next = { ...settingsDraft, backendPath: discovered };
+      const saved = await window.audioLibrary.saveSettings(next);
+      setSettings(saved);
+      setSettingsDraft(saved);
+      await loadBackendConfiguration(discovered, saved.configPath, false);
+    } catch (error) {
+      setConfigurationMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDiscoveringBackend(false);
+    }
+  }
+
+  async function loadBackendConfiguration(
+    backendPath = settingsDraft.backendPath,
+    configPath = settingsDraft.configPath,
+    saveDesktopSettings = true,
+  ) {
+    setConfigurationMessage("");
+    try {
+      if (!backendPath.trim()) throw new Error("Choose or discover the backend executable first.");
+      if (saveDesktopSettings) {
+        const saved = await window.audioLibrary.saveSettings({
+          ...settingsDraft, backendPath, configPath,
+        });
+        setSettings(saved);
+        setSettingsDraft(saved);
+      }
+      const snapshot = await window.audioLibrary.readBackendConfiguration();
+      setConfigurationSnapshot(snapshot);
+      setConfigurationDraft(snapshot.configuration);
+      const textValues: Record<string, string> = {};
+      for (const key of complexConfigurationKeys) {
+        textValues[key] = JSON.stringify(snapshot.configuration[key] ?? null, null, 2);
+      }
+      setConfigurationText(textValues);
+      const configuredOutput = typeof snapshot.configuration.OutDirectory === "string"
+        ? snapshot.configuration.OutDirectory : "";
+      setConfiguredOutputDirectory(configuredOutput);
+      setOutputDirectory(configuredOutput);
+      const configuredLibrary = mediaLibraryPath(snapshot.configuration);
+      const savedLibrary = settingsDraft.libraryPath;
+      if (configuredLibrary || savedLibrary) {
+        const libraryPath = configuredLibrary || savedLibrary;
+        setSettingsDraft((current) => ({ ...current, libraryPath }));
+        setInputPath(libraryPath);
+      }
+      setConfigurationMessage(snapshot.exists
+        ? `Loaded backend configuration from ${snapshot.path}.`
+        : `No backend file exists at ${snapshot.path}. Defaults are available but have not been saved.`);
+      if (!snapshot.exists) setScreen("settings");
+    } catch (error) {
+      setConfigurationSnapshot(null);
+      setConfigurationMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function createDefaultBackendConfiguration() {
+    if (!settingsDraft.backendPath.trim()) {
+      setConfigurationMessage("Choose or discover the backend executable first.");
+      return;
+    }
+    setConfigurationMessage("");
+    try {
+      const saved = await window.audioLibrary.saveSettings(settingsDraft);
+      setSettings(saved);
+      setSettingsDraft(saved);
+      const created = await window.audioLibrary.createDefaultBackendConfiguration();
+      setConfigurationSnapshot(created);
+      setConfigurationDraft(created.configuration);
+      const output = typeof created.configuration.OutDirectory === "string"
+        ? created.configuration.OutDirectory : "";
+      setConfiguredOutputDirectory(output);
+      setOutputDirectory(output);
+      setConfigurationMessage(`Created backend configuration at ${created.path}.`);
+    } catch (error) {
+      setConfigurationMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function saveBackendConfiguration() {
+    if (!configurationSnapshot) return;
+    setConfigurationMessage("");
+    try {
+      const patch: Record<string, unknown> = {};
+      for (const key of Object.keys(configurationDraft)) {
+        const value = complexConfigurationKeys.has(key)
+          ? JSON.parse(configurationText[key] ?? "null") as unknown
+          : configurationDraft[key];
+        if (JSON.stringify(value) !== JSON.stringify(configurationSnapshot.configuration[key])) {
+          patch[key] = value;
+        }
+      }
+      if (Object.keys(patch).length === 0) {
+        setConfigurationMessage("No backend settings have changed.");
+        return;
+      }
+      await window.audioLibrary.validateBackendConfiguration(configurationSnapshot.revision, patch);
+      const saved = await window.audioLibrary.saveBackendConfiguration(configurationSnapshot.revision, patch);
+      setConfigurationSnapshot(saved);
+      setConfigurationDraft(saved.configuration);
+      setConfigurationMessage(`Saved backend configuration to ${saved.path}.`);
+      const output = typeof saved.configuration.OutDirectory === "string"
+        ? saved.configuration.OutDirectory : "";
+      setConfiguredOutputDirectory(output);
+      setOutputDirectory(output);
+      const library = mediaLibraryPath(saved.configuration);
+      if (library) {
+        setInputPath(library);
+        setSettingsDraft((current) => ({ ...current, libraryPath: library }));
+      }
+    } catch (error) {
+      setConfigurationMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  function setConfigurationValue(key: string, value: unknown) {
+    setConfigurationDraft((current) => ({ ...current, [key]: value }));
+  }
+
   async function saveSettings() {
     setSettingsMessage("");
     try {
       const saved = await window.audioLibrary.saveSettings(settingsDraft);
       setSettings(saved);
-      setOutputDirectory(saved.outputDirectory);
+      if (!configurationSnapshot) setOutputDirectory(saved.outputDirectory);
       setSettingsMessage("Settings saved.");
+      if (saved.backendPath) {
+        await loadBackendConfiguration(saved.backendPath, saved.configPath, false);
+      }
     } catch (error) {
       setSettingsMessage(error instanceof Error ? error.message : String(error));
     }
   }
 
   async function createBackendConfiguration() {
-    if (!settingsDraft.backendPath.trim() || !settingsDraft.outputDirectory.trim() ||
-        !settingsDraft.libraryPath.trim()) {
-      setSettingsMessage("Choose the backend, output directory, and source library before setup.");
-      return;
-    }
     if (!window.confirm(
-      "Create a new backend configuration?\n\n" +
-      "The configuration file will not overwrite an existing file. It will save the output directory and source library.")) {
-      return;
-    }
-    setSettingsMessage("");
-    setErrorMessage("");
-    try {
-      const saved = await window.audioLibrary.saveSettings(settingsDraft);
-      setSettings(saved);
-      setSettingsDraft(saved);
-      setOutputDirectory(saved.outputDirectory);
-      const requestId = crypto.randomUUID();
-      activeRequestRef.current = requestId;
-      activeModeRef.current = "run";
-      setActiveRequest(requestId);
-      setRunOutput("");
-      setRunState("running");
-      setRunMessage("Creating the backend configuration…");
-      await window.audioLibrary.startOperation({
-        requestId,
-        operation: "initializeConfig",
-        parameters: {
-          libraryPath: saved.libraryPath,
-          outputDirectory: saved.outputDirectory,
-          ...(saved.configPath.trim() ? { configPath: saved.configPath.trim() } : {}),
-        },
-      });
-    } catch (error) {
-      activeRequestRef.current = "";
-      activeModeRef.current = "run";
-      activeOperationRef.current = null;
-      setActiveRequest("");
-      setRunState("failed");
-      setRunMessage(error instanceof Error ? error.message : String(error));
-      setSettingsMessage(error instanceof Error ? error.message : String(error));
-    }
+      "Create the backend configuration using its built-in defaults?\n\n" +
+      "An existing configuration will never be overwritten.")) return;
+    await createDefaultBackendConfiguration();
   }
 
   async function startOperation() {
@@ -365,8 +558,10 @@ export function App() {
       setErrorMessage("Choose an input directory before starting.");
       return;
     }
+    const outputOverride = outputDirectory.trim() === configuredOutputDirectory.trim()
+      ? "" : outputDirectory.trim();
     const parameters = operationParameters(
-      selectedOperation, inputPath.trim(), outputDirectory.trim(), options, tagIssueResolutions,
+      selectedOperation, inputPath.trim(), outputOverride, options, tagIssueResolutions,
       selectedQuarantinePaths);
     const previewable = selectedOperation === "convert" || selectedOperation === "repair";
     const mode = previewable && !previewReady ? "preview" : "run";
@@ -378,7 +573,6 @@ export function App() {
       if (!accepted) return;
     }
     setErrorMessage("");
-    setRunOutput("");
     setRunState("running");
     setRunMessage(mode === "preview" ? "Preparing a backend preview…" : "Starting the backend worker…");
     const requestId = crypto.randomUUID();
@@ -397,12 +591,13 @@ export function App() {
         parameters,
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       activeRequestRef.current = "";
       activeModeRef.current = "run";
       activeOperationRef.current = null;
       setActiveRequest("");
       setRunState("failed");
-      setRunMessage(error instanceof Error ? error.message : String(error));
+      setRunMessage(message);
     }
   }
 
@@ -436,7 +631,6 @@ export function App() {
       return;
     }
     setErrorMessage("");
-    setRunOutput("");
     setRunState("running");
     setRunMessage("Starting duplicate review…");
     const requestId = crypto.randomUUID();
@@ -452,11 +646,13 @@ export function App() {
         operation: "duplicates",
         parameters: {
           jsonDirectory: inputPath.trim(),
-          outputDirectory: outputDirectory.trim(),
+          ...(outputDirectory.trim() !== configuredOutputDirectory.trim()
+            ? { outputDirectory: outputDirectory.trim() } : {}),
           duplicateQuarantinePaths: [...selectedQuarantinePaths],
         },
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       activeRequestRef.current = "";
       activeModeRef.current = "run";
       activeOperationRef.current = null;
@@ -464,7 +660,7 @@ export function App() {
       activeQuarantinePathsRef.current = [];
       setActiveRequest("");
       setRunState("failed");
-      setRunMessage(error instanceof Error ? error.message : String(error));
+      setRunMessage(message);
     }
   }
 
@@ -516,6 +712,37 @@ export function App() {
       </aside>
 
       <main className="workbench">
+        <section className="run-status" aria-label="Operation status">
+          <span className={`status-mark mark-${runState}`} aria-hidden="true">
+            {runState === "succeeded" ? "✓" : runState === "failed" ? "!" : runState === "cancelled" ? "–" : runState === "running" ? "…" : "·"}
+          </span>
+          <div className="run-status-copy" role="status">
+            <h2>Run status</h2>
+            <p>{runMessage}</p>
+            {latestOutput && (
+              <p className="run-status-detail" title={latestOutput}>{latestOutput}</p>
+            )}
+          </div>
+          {isRunning && (
+            <button className="quiet-button danger-text" onClick={() => void cancelOperation()} type="button">
+              Stop worker
+            </button>
+          )}
+          <button
+            ref={viewLogsButtonRef}
+            className={`quiet-button ${runState === "failed" ? "attention-button" : ""}`}
+            aria-haspopup="dialog"
+            onClick={() => setLogsOpen(true)}
+            type="button"
+          >
+            View logs
+          </button>
+          {isRunning && (
+            <div className={`progress-track ${progressPercent === null ? "indeterminate" : ""}`}>
+              <span style={progressPercent === null ? undefined : { transform: `scaleX(${progressPercent / 100})` }} />
+            </div>
+          )}
+        </section>
         <header className="page-head">
           <div>
             <div className="breadcrumb">AUDIO LIBRARY / {screen === "settings" ? "SETTINGS" : "WORKSPACE"}</div>
@@ -540,57 +767,117 @@ export function App() {
         {screen === "settings" ? (
           <section className="settings-page">
             <div className="section-heading">
-              <h2>Backend connection</h2>
-              <p>The desktop app launches the C++ worker as a separate process. No DLL or C++ ABI is shared.</p>
+              <h2>Application settings</h2>
+              <p>The desktop keeps its connection preferences separately. Backend settings are read and edited in place.</p>
             </div>
-            <PathField
-              label="AudioLibraryToolkit executable"
-              value={settingsDraft.backendPath}
-              placeholder="Select AudioLibraryToolkit.exe or the Linux executable"
-              onChange={(value) => setSettingsDraft((current) => ({ ...current, backendPath: value }))}
-              onBrowse={() => pickFile("backend", (value) => {
-                setSettingsDraft((current) => ({ ...current, backendPath: value }));
-              })}
-              browseLabel="Choose file"
-            />
-            <PathField
-              label="Optional configuration file"
-              value={settingsDraft.configPath}
-              placeholder="Uses the backend's per-user config when blank"
-              onChange={(value) => setSettingsDraft((current) => ({ ...current, configPath: value }))}
-              onBrowse={() => pickFile("config", (value) => {
-                setSettingsDraft((current) => ({ ...current, configPath: value }));
-              })}
-              browseLabel="Choose file"
-            />
-            <PathField
-              label="Default output root"
-              value={settingsDraft.outputDirectory}
-              placeholder="Choose a destination outside the source library"
-              onChange={(value) => setSettingsDraft((current) => ({ ...current, outputDirectory: value }))}
-              onBrowse={() => pickDirectory((value) => {
-                setSettingsDraft((current) => ({ ...current, outputDirectory: value }));
-              })}
-              browseLabel="Browse"
-            />
-            <PathField
-              label="Initial source library"
-              value={settingsDraft.libraryPath}
-              placeholder="Choose an existing audio library folder"
-              onChange={(value) => setSettingsDraft((current) => ({ ...current, libraryPath: value }))}
-              onBrowse={() => pickDirectory((value) => {
-                setSettingsDraft((current) => ({ ...current, libraryPath: value }));
-              })}
-              browseLabel="Browse"
-            />
-            <div className="settings-foot">
-              <p>FFmpeg remains a backend prerequisite; this UI installer does not bundle it.</p>
-              <button className="quiet-button" onClick={() => void createBackendConfiguration()} type="button">
-                Create backend configuration
-              </button>
-              <button className="primary-button" onClick={() => void saveSettings()} type="button">Save settings</button>
+            <div className="settings-tabs" role="tablist" aria-label="Settings groups">
+              {["Backend connection", ...Object.keys(configurationGroups)].map((tab) => (
+                <button
+                  aria-selected={configurationTab === tab}
+                  className={configurationTab === tab ? "active" : ""}
+                  key={tab}
+                  onClick={() => setConfigurationTab(tab)}
+                  role="tab"
+                  type="button"
+                >
+                  {tab}
+                </button>
+              ))}
             </div>
-            {settingsMessage && <p className="inline-message" role="status">{settingsMessage}</p>}
+            {configurationTab === "Backend connection" ? (
+              <div className="configuration-panel">
+                <p className="configuration-note">
+                  The desktop launches the headless C++ worker as a separate process. FFmpeg remains a backend prerequisite.
+                </p>
+                <div className="path-field">
+                  <PathField
+                    label="AudioLibraryToolkit executable"
+                    value={settingsDraft.backendPath}
+                    placeholder="Select AudioLibraryToolkit.exe or the Linux executable"
+                    onChange={(value) => setSettingsDraft((current) => ({ ...current, backendPath: value }))}
+                    onBrowse={() => pickFile("backend", (value) => {
+                      setSettingsDraft((current) => ({ ...current, backendPath: value }));
+                    })}
+                    browseLabel="Choose file"
+                  />
+                  <button
+                    className="quiet-button"
+                    disabled={discoveringBackend}
+                    onClick={() => void discoverBackend()}
+                    type="button"
+                  >
+                    {discoveringBackend ? "Searching…" : "Discover executable"}
+                  </button>
+                </div>
+                <PathField
+                  label="Optional configuration file"
+                  value={settingsDraft.configPath}
+                  placeholder="Blank uses the backend's per-user config.json"
+                  onChange={(value) => setSettingsDraft((current) => ({ ...current, configPath: value }))}
+                  onBrowse={() => pickFile("config", (value) => {
+                    setSettingsDraft((current) => ({ ...current, configPath: value }));
+                  })}
+                  browseLabel="Choose file"
+                />
+                <div className="configuration-actions">
+                  <button
+                    className="quiet-button"
+                    onClick={() => void loadBackendConfiguration()}
+                    type="button"
+                  >
+                    Use existing configuration
+                  </button>
+                  <button
+                    className="quiet-button"
+                    onClick={() => void createBackendConfiguration()}
+                    type="button"
+                  >
+                    Create with backend defaults
+                  </button>
+                  <button className="primary-button" onClick={() => void saveSettings()} type="button">
+                    Save desktop settings
+                  </button>
+                </div>
+                {configurationSnapshot && (
+                  <p className="configuration-location">
+                    {configurationSnapshot.exists ? "Using" : "No file exists yet at"}{" "}
+                    <code>{configurationSnapshot.path}</code>
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="configuration-panel" role="tabpanel">
+                <div className="section-heading">
+                  <h3>{configurationTab}</h3>
+                  <p>These values are validated by the backend before any file is changed.</p>
+                </div>
+                {configurationSnapshot ? (
+                  <>
+                    {configurationGroups[configurationTab].map((key) => (
+                      <ConfigurationField
+                        key={key}
+                        name={key}
+                        value={configurationDraft[key]}
+                        textValue={configurationText[key] ?? ""}
+                        onValueChange={(value) => setConfigurationValue(key, value)}
+                        onTextChange={(value) => setConfigurationText((current) => ({ ...current, [key]: value }))}
+                      />
+                    ))}
+                    <div className="configuration-actions">
+                      <button className="primary-button" onClick={() => void saveBackendConfiguration()} type="button">
+                        Validate and save backend settings
+                      </button>
+                      <span className="safety-note">Comments and unknown keys in the file are preserved.</span>
+                    </div>
+                  </>
+                ) : (
+                  <p className="configuration-note">Choose a backend and use its existing configuration, or create one from defaults.</p>
+                )}
+              </div>
+            )}
+            {(configurationMessage || settingsMessage) && (
+              <p className="inline-message" role="status">{configurationMessage || settingsMessage}</p>
+            )}
           </section>
         ) : (
           <div className="workspace-grid">
@@ -789,32 +1076,29 @@ export function App() {
                     ? "Preview operation"
                     : metadata?.verb ?? "Start operation"}
                 </button>
-                {isRunning && <button className="quiet-button danger-text" onClick={() => void cancelOperation()} type="button">Stop worker</button>}
                 <span className="safety-note">
                   {previewReady ? "Preview complete. The backend checks the plan again before writing." :
                     "The backend owns validation and file-safety checks."}
                 </span>
               </div>
             </section>
-
-            <aside className="run-panel" aria-label="Operation status">
-              <div className="run-panel-head">
-                <div><h2>Run status</h2><p>{runState === "idle" ? "No operation started" : runMessage}</p></div>
-                <span className={`status-mark mark-${runState}`} aria-hidden="true">{runState === "succeeded" ? "✓" : runState === "failed" ? "!" : runState === "cancelled" ? "–" : runState === "running" ? "…" : "·"}</span>
-              </div>
-              {isRunning && <div className={`progress-track ${progressPercent === null ? "indeterminate" : ""}`}><span style={progressPercent === null ? undefined : { transform: `scaleX(${progressPercent / 100})` }} /></div>}
-              <div className="run-copy">
-                <div className="run-copy-head"><span>Worker output</span><span>{settings.backendPath ? "Connected by process" : "Backend required"}</span></div>
-                <pre aria-live="polite">{runOutput || "Progress and operation output will appear here."}</pre>
-              </div>
-              <div className="run-footer">
-                <span className={`state-dot ${settings.backendPath ? "online" : ""}`} />
-                <span>{settings.backendPath || "Set the backend executable in Settings"}</span>
-              </div>
-            </aside>
           </div>
         )}
       </main>
+      {logsOpen && (
+        <div
+          className="log-overlay"
+          onMouseDown={(event) => { if (event.target === event.currentTarget) setLogsOpen(false); }}
+        >
+          <section ref={logSheetRef} className="log-sheet" role="dialog" aria-modal="true" aria-labelledby="log-title">
+            <LogViewer
+              text={runOutput}
+              onClose={() => setLogsOpen(false)}
+              onOpenWindow={() => void openLogWindow()}
+            />
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -836,6 +1120,55 @@ function PathField({ label, value, placeholder, onChange, onBrowse, browseLabel 
         <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
         <button className="browse-button" onClick={onBrowse} type="button">{browseLabel}</button>
       </div>
+    </label>
+  );
+}
+
+function ConfigurationField({
+  name, value, textValue, onValueChange, onTextChange,
+}: {
+  name: string;
+  value: unknown;
+  textValue: string;
+  onValueChange: (value: unknown) => void;
+  onTextChange: (value: string) => void;
+}) {
+  if (complexConfigurationKeys.has(name)) {
+    return (
+      <label className="field configuration-field">
+        <span>{name}</span>
+        <textarea
+          spellCheck={false}
+          value={textValue}
+          onChange={(event) => onTextChange(event.target.value)}
+        />
+      </label>
+    );
+  }
+  if (typeof value === "boolean") {
+    return (
+      <CheckField label={name} checked={value} onChange={(checked) => onValueChange(checked)} />
+    );
+  }
+  if (typeof value === "number") {
+    return (
+      <label className="field configuration-field">
+        <span>{name}</span>
+        <input
+          type="number"
+          value={Number.isFinite(value) ? value : ""}
+          onChange={(event) => onValueChange(event.target.value === "" ? "" : event.target.valueAsNumber)}
+        />
+      </label>
+    );
+  }
+  return (
+    <label className="field configuration-field">
+      <span>{name}</span>
+      <input
+        value={typeof value === "string" ? value : ""}
+        onChange={(event) => onValueChange(event.target.value)}
+      />
     </label>
   );
 }

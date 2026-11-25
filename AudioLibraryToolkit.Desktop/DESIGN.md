@@ -30,9 +30,15 @@ relative backend source/build location. The client package imports Node APIs, no
 
 ## Interaction contracts
 
-Settings persist in Electron's user-data directory as `ui-settings.json`, separately from backend configuration.
-First-run setup sends selected output/library paths through `initializeConfig`. Older preferences missing
-`libraryPath` remain readable.
+Desktop connection preferences persist in Electron's user-data directory as `ui-settings.json`, separately from
+backend configuration. A one-time migration preserves the previous `@audio-library/desktop` settings location.
+First-run Settings can discover a compatible executable by its worker handshake, load an existing backend config,
+or explicitly create one from backend defaults. Blank config path means the backend's default per-user `config.json`.
+Backend settings are read/validated/saved through the worker in place; missing files are not created by reading,
+and revision conflicts require a reload. Grouped tabs expose all backend-serialized settings. The backend preserves
+comments and unknown keys and remains responsible for validation and safe file replacement.
+Source-library and output-root operation defaults come from backend configuration; catalog JSON inputs remain
+separate from audio-library inputs. Only an explicit operation-form override is sent to the backend.
 
 Conversion/repair first request `preview`, display the textual summary, then require execution confirmation.
 Execution sends a fresh request; a preview is not a persisted plan or authorization to bypass backend preflight.
@@ -44,6 +50,13 @@ The UI does not choose a preferred edition or authorize unspecified paths. Backe
 
 Worker startup/version/parse failures and termination without completion must not look successful. Cancellation
 terminates the worker; already installed outputs may remain. Do not imply transactional rollback.
+
+Run status, progress and the stop action live in a compact status strip independent of raw worker output.
+No log panel is docked in the workspace. A sticky status strip shows the run message, progress, the latest output
+line and **View logs**, plus **Stop worker** while an operation runs. **View logs** opens a same-window overlay (Escape or the backdrop closes it)
+with copy, follow-latest and **Open in new window**. The main process keeps a bounded log buffer for the current
+operation (the latest 200,000 characters) and streams it to both views. The single auxiliary window closes with the
+main window. Logs never open automatically; previews and failures direct users to them through the status message.
 
 ## Independent build and delivery
 

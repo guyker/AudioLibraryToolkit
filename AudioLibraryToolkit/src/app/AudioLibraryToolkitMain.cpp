@@ -3617,6 +3617,10 @@ const char* workerOperationName(CommandAction action)
     case CommandAction::Scan: return "scan";
     case CommandAction::Duplicates: return "duplicates";
     case CommandAction::DatabaseImport: return "db import";
+    case CommandAction::InitializeDefaultConfig: return "initialize default config";
+    case CommandAction::ReadConfiguration: return "read configuration";
+    case CommandAction::ValidateConfiguration: return "validate configuration";
+    case CommandAction::SaveConfiguration: return "save configuration";
     default: return "unknown";
     }
 }

@@ -41,6 +41,15 @@ archives independently of conversion `MetadataSidecars`; menu and CLI choices ca
 `JsonBatchTargetBytes` is a non-negative integer, default `0` (disabled); a positive value sets a hard JSON batch
 size limit. Large albums split into track fragments; a track that cannot fit fails the scan.
 
+The worker configuration API reads the same per-user file or explicit `configPath`. Read and validate operations
+return defaults for a missing file without creating it. A save applies only supplied top-level keys, validates the
+merged JSONC with backend rules, and requires the unchanged content revision returned by the last read. A conflict
+requires reloading rather than overwriting external edits. Saves preserve comments and unknown keys, create a
+`<config>.bak` recovery copy, and atomically replace the file. Desktop code does not write backend config files
+directly. The explicit worker `initializeDefaultConfig` operation creates a blank editable config from the shipped
+commented template when valid, or built-in defaults otherwise; it never presets library/output paths or overwrites
+an existing file.
+
 ## Entry points
 - `app/AppSettings.cpp#AppSettingsJson::LoadForCommandLine` (CLI), `app/AppSettings.cpp#AppSettingsJson::AppSetting` (menu),
   both through `app/AppSettings.cpp#AppSettingsJson::LoadWithDefaults`
@@ -80,6 +89,10 @@ size limit. Large albums split into track fragments; a track that cannot fit fai
 - [ ] `MetadataSidecars.Format: "xml"` is rejected; `--no-metadata-sidecar` fails when the target policy is
       `required` and succeeds without a sidecar when it is `optional`.
 - [ ] `mediaName` containing a path separator is rejected by scan/import.
+- [x] Worker reads of a missing config return defaults without creating a file; explicit save creates it.
+- [x] `initializeDefaultConfig` creates a blank config from the shipped template/defaults and refuses overwrite.
+- [ ] Worker config validation rejects invalid values without changing the existing file.
+- [ ] Config saves preserve JSON comments and unknown keys, create a recovery backup, and reject stale revisions.
 
 ## Known limitations
 - `DatabaseFileName`, `resultPath`, `dbPath` and most `FLACSettings` strings are read but unused.

@@ -4,13 +4,17 @@ Status: experimental
 
 ## Behaviour
 External applications and automation launch the executable with `--worker` and exchange versioned UTF-8 JSON Lines.
-The toolkit supports conversion, scan, duplicate detection/quarantine, SQLite import, repair and configuration
-initialization. It validates requests and remains authoritative for filesystem safety, audio verification and output
+The toolkit supports conversion, scan, duplicate detection/quarantine, SQLite import, repair, template-based default
+configuration initialization, and revision-checked configuration read/validate/save. It validates requests and remains
+authoritative for filesystem safety, audio verification and output
 installation. It has no graphical, client-source or JavaScript runtime dependency.
 
 Worker requests and CLI commands share typed application-service dispatch. Conversion and repair offer non-mutating
 previews; execution re-prepares before writing. Clients supply explicit MP3 tag choices and album paths for quarantine.
-Configuration initialization uses supplied paths and refuses to overwrite an existing config.
+Configuration initialization uses supplied paths or creates an editable blank config from its shipped template and
+refuses to overwrite an existing config. Configuration
+snapshots do not create missing files; patches are validated by the backend, preserve comments and unknown keys,
+reject stale revisions, and are saved atomically with a recovery backup.
 
 ## Entry points
 - `AudioLibraryToolkit --worker` → `AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp#RunWithArguments`
@@ -30,6 +34,9 @@ Configuration initialization uses supplied paths and refuses to overwrite an exi
       return an explicit request error.
 - [x] Windows CTest's `worker-protocol` test verifies request validation, initial config creation/refusal to overwrite,
       and successful dry-run repair.
+- [x] Worker configuration read/validate/save verifies missing-file defaults without creation, validation failures,
+      comment/unknown-key preservation, backup creation and stale-revision refusal.
+- [x] Default configuration initialization preserves the shipped comments, leaves paths unset, and refuses overwrite.
 - [x] Conversion and repair expose non-mutating previews; execution rebuilds its plan before writing.
 - [x] Only explicitly selected album folders are quarantined through worker requests.
 - [x] Windows conversion integration verifies tag resolution, preview non-mutation, and selected duplicate quarantine.

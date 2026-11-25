@@ -10,10 +10,18 @@
 #include <string>
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <map>
+#include <sstream>
+#include <thread>
+#include <vector>
 #include <set>
 #include <system_error>
 #include <iterator>
 #include <regex>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include <spdlog/spdlog.h>
 
@@ -89,6 +97,313 @@ std::string replaceSingleMatch(const std::string& text, const std::regex& patter
     const auto match = singleMatch(text, pattern);
     if (!match) return {};
     return text.substr(0, match->position(0)) + replacement + text.substr(match->position(0) + match->length(0));
+}
+
+bool skipJsonTrivia(const std::string& text, std::size_t& position)
+{
+    for (;;) {
+        while (position < text.size() &&
+            std::isspace(static_cast<unsigned char>(text[position])) != 0) ++position;
+        if (position + 1 >= text.size() || text[position] != '/') return true;
+        if (text[position + 1] == '/') {
+            position += 2;
+            while (position < text.size() && text[position] != '\n') ++position;
+        }
+        else if (text[position + 1] == '*') {
+            const auto end = text.find("*/", position + 2);
+            if (end == std::string::npos) return false;
+            position = end + 2;
+        }
+        else return true;
+    }
+}
+
+bool scanJsonString(const std::string& text, std::size_t& position)
+{
+    if (position >= text.size() || text[position] != '"') return false;
+    ++position;
+    while (position < text.size()) {
+        if (text[position] == '"') {
+            ++position;
+            return true;
+        }
+        if (text[position] == '\\') {
+            if (++position >= text.size()) return false;
+        }
+        ++position;
+    }
+    return false;
+}
+
+bool scanJsonValue(const std::string& text, std::size_t& position, std::size_t& end)
+{
+    if (!skipJsonTrivia(text, position) || position >= text.size()) return false;
+    if (text[position] != '{' && text[position] != '[') {
+        if (text[position] == '"') {
+            if (!scanJsonString(text, position)) return false;
+            end = position;
+            return true;
+        }
+        const auto start = position;
+        while (position < text.size() && text[position] != ',' && text[position] != '}' &&
+            std::isspace(static_cast<unsigned char>(text[position])) == 0) {
+            if (text[position] == '/' && position + 1 < text.size() &&
+                (text[position + 1] == '/' || text[position + 1] == '*')) break;
+            ++position;
+        }
+        end = position;
+        return end > start;
+    }
+
+    std::vector<char> closers{ text[position] == '{' ? '}' : ']' };
+    ++position;
+    while (position < text.size() && !closers.empty()) {
+        if (!skipJsonTrivia(text, position) || position >= text.size()) return false;
+        if (text[position] == '"') {
+            if (!scanJsonString(text, position)) return false;
+            continue;
+        }
+        if (text[position] == '{') closers.push_back('}');
+        else if (text[position] == '[') closers.push_back(']');
+        else if (text[position] == '}' || text[position] == ']') {
+            if (closers.back() != text[position]) return false;
+            closers.pop_back();
+        }
+        ++position;
+    }
+    if (!closers.empty()) return false;
+    end = position;
+    return true;
+}
+
+bool patchJsonObject(const std::string& source, const std::map<std::string, std::string>& patch,
+    std::string& result)
+{
+    struct MemberSpan {
+        std::string key;
+        std::size_t valueStart;
+        std::size_t valueEnd;
+    };
+    std::size_t position = 0;
+    if (!skipJsonTrivia(source, position) || position >= source.size() || source[position] != '{') return false;
+    const auto objectStart = position++;
+    std::vector<MemberSpan> members;
+    std::set<std::string> seenKeys;
+    std::size_t objectEnd = std::string::npos;
+    for (;;) {
+        if (!skipJsonTrivia(source, position) || position >= source.size()) return false;
+        if (source[position] == '}') {
+            objectEnd = position;
+            break;
+        }
+        const auto keyStart = position;
+        if (!scanJsonString(source, position)) return false;
+        rapidjson::Document keyDocument;
+        keyDocument.Parse(source.data() + keyStart, position - keyStart);
+        if (keyDocument.HasParseError() || !keyDocument.IsString()) return false;
+        std::string key(keyDocument.GetString(), keyDocument.GetStringLength());
+        if (!seenKeys.insert(key).second) return false;
+        if (!skipJsonTrivia(source, position) || position >= source.size() || source[position++] != ':')
+            return false;
+        if (!skipJsonTrivia(source, position)) return false;
+        const auto valueStart = position;
+        std::size_t valueEnd = valueStart;
+        if (!scanJsonValue(source, position, valueEnd)) return false;
+        members.push_back({ std::move(key), valueStart, valueEnd });
+        position = valueEnd;
+        if (!skipJsonTrivia(source, position) || position >= source.size()) return false;
+        if (source[position] == ',') {
+            ++position;
+            continue;
+        }
+        if (source[position] == '}') {
+            objectEnd = position;
+            break;
+        }
+        return false;
+    }
+    if (objectEnd == std::string::npos) return false;
+
+    std::map<std::string, std::string> remaining = patch;
+    std::vector<MemberSpan> replacements;
+    for (const auto& member : members) {
+        if (remaining.erase(member.key) != 0)
+            replacements.push_back({ member.key, member.valueStart, member.valueEnd });
+    }
+    std::sort(replacements.begin(), replacements.end(),
+        [](const MemberSpan& left, const MemberSpan& right) { return left.valueStart > right.valueStart; });
+    result = source;
+    if (!remaining.empty()) {
+        std::string addition;
+        for (const auto& [key, value] : remaining) {
+            rapidjson::StringBuffer keyBuffer;
+            rapidjson::Writer<rapidjson::StringBuffer> keyWriter(keyBuffer);
+            keyWriter.String(key.data(), static_cast<rapidjson::SizeType>(key.size()));
+            addition += members.empty() && addition.empty() ? "\n  " : ",\n  ";
+            addition += keyBuffer.GetString();
+            addition += ": ";
+            addition += value;
+        }
+        addition += "\n";
+        result.insert(objectEnd, addition);
+    }
+    for (const auto& member : replacements) {
+        result.replace(member.valueStart, member.valueEnd - member.valueStart, patch.at(member.key));
+    }
+    return objectStart < objectEnd;
+}
+
+bool validateConfigurationText(const std::string& content, AppSettingsJson& settings, std::string& error)
+{
+    if (!settings.loadFromJsonText(content)) {
+        error = "Configuration is invalid; correct the field values and try again.";
+        return false;
+    }
+    if (settings.LogLevel < 0 || settings.LogLevel > 6) {
+        error = "LogLevel must be an integer from 0 through 6.";
+        return false;
+    }
+    if (settings.AlbumsSplitThreshold <= 0) {
+        error = "AlbumsSplitThreshold must be greater than zero.";
+        return false;
+    }
+    return true;
+}
+
+std::string configRevisionFor(const std::string& content)
+{
+    std::uint64_t hash = 14695981039346656037ull;
+    for (const unsigned char byte : content) {
+        hash ^= byte;
+        hash *= 1099511628211ull;
+    }
+    std::ostringstream stream;
+    stream << std::hex << hash;
+    return stream.str();
+}
+
+bool readConfigText(const fs::path& path, bool& exists, std::string& content, std::string& error)
+{
+    std::error_code ec;
+    exists = fs::exists(pathForInspection(path), ec);
+    if (ec) {
+        error = "Cannot inspect configuration file: " + ec.message();
+        return false;
+    }
+    if (!exists) return true;
+    if (!fs::is_regular_file(pathForInspection(path), ec) || ec) {
+        error = "Configuration path is not a readable regular file.";
+        return false;
+    }
+    std::ifstream input(pathForInspection(path), std::ios::binary);
+    if (!input) {
+        error = "Configuration file cannot be opened for reading.";
+        return false;
+    }
+    content.assign(std::istreambuf_iterator<char>(input), {});
+    if (input.bad()) {
+        error = "Configuration file could not be read completely.";
+        return false;
+    }
+    if (content.starts_with("\xEF\xBB\xBF")) content.erase(0, 3);
+    return true;
+}
+
+std::string snapshotJson(const fs::path& path, bool exists, const std::string& revision,
+    const AppSettingsJson& settings)
+{
+    rapidjson::Document configuration;
+    const auto json = settings.toJsonString();
+    configuration.Parse(json.c_str(), json.size());
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    writer.StartObject();
+    writer.Key("schemaVersion"); writer.Int(1);
+    const auto utf8Path = CommonUtils::path_to_utf8(path);
+    writer.Key("path"); writer.String(utf8Path.data(), static_cast<rapidjson::SizeType>(utf8Path.size()));
+    writer.Key("exists"); writer.Bool(exists);
+    writer.Key("revision"); writer.String(revision.data(), static_cast<rapidjson::SizeType>(revision.size()));
+    writer.Key("configuration"); configuration.Accept(writer);
+    writer.EndObject();
+    return buffer.GetString();
+}
+
+bool saveConfigText(const fs::path& path, const std::string& content,
+    const std::string& expectedRevision, std::string& error)
+{
+    std::error_code ec;
+    fs::create_directories(pathForInspection(path).parent_path(), ec);
+    if (ec) {
+        error = "Cannot create configuration directory: " + ec.message();
+        return false;
+    }
+    auto lockPath = path;
+    lockPath += ".lock";
+    if (!fs::create_directory(pathForInspection(lockPath), ec)) {
+        error = ec ? "Cannot acquire configuration save lock: " + ec.message()
+            : "Configuration is being edited by another process; retry after it completes.";
+        return false;
+    }
+    struct LockCleanup {
+        fs::path path;
+        ~LockCleanup()
+        {
+            std::error_code ignored;
+            fs::remove(pathForInspection(path), ignored);
+        }
+    } lockCleanup{ lockPath };
+
+    bool currentExists = false;
+    std::string currentContent;
+    if (!readConfigText(path, currentExists, currentContent, error)) return false;
+    const auto currentRevision = currentExists ? configRevisionFor(currentContent) : "missing";
+    if (currentRevision != expectedRevision) {
+        error = "Configuration changed before the save could be committed. Reload it before applying edits.";
+        return false;
+    }
+    const auto suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
+        "." + std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+    auto temporary = path;
+    temporary += ".tmp." + suffix;
+    auto backup = path;
+    backup += ".bak";
+    {
+        std::ofstream output(pathForInspection(temporary), std::ios::binary | std::ios::trunc);
+        output.write(content.data(), static_cast<std::streamsize>(content.size()));
+        output.flush();
+        if (!output) {
+            error = "Cannot write temporary configuration file.";
+            fs::remove(pathForInspection(temporary), ec);
+            return false;
+        }
+    }
+    if (currentExists) {
+        fs::copy_file(pathForInspection(path), pathForInspection(backup),
+            fs::copy_options::overwrite_existing, ec);
+        if (ec) {
+            error = "Cannot create configuration backup: " + ec.message();
+            fs::remove(pathForInspection(temporary), ec);
+            return false;
+        }
+    }
+#ifdef _WIN32
+    if (!MoveFileExW(PlatformUtils::WindowsLongPath(temporary).c_str(),
+            PlatformUtils::WindowsLongPath(path).c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        error = "Cannot atomically replace configuration: " +
+            std::error_code(static_cast<int>(GetLastError()), std::system_category()).message();
+        fs::remove(pathForInspection(temporary), ec);
+        return false;
+    }
+#else
+    fs::rename(pathForInspection(temporary), pathForInspection(path), ec);
+    if (ec) {
+        error = "Cannot atomically replace configuration: " + ec.message();
+        fs::remove(pathForInspection(temporary), ec);
+        return false;
+    }
+#endif
+    return true;
 }
 
 // Fills the setup answers into the template so its comments and layout are preserved.
@@ -196,7 +511,8 @@ bool AppSettingsJson::CreateInitialConfiguration(const fs::path& configPath,
 
 bool AppSettingsJson::CreateInitialConfiguration(const fs::path& configPath,
     const std::optional<fs::path>& templatePath,
-    bool interactive, std::istream& input, std::ostream& output, std::string& errorMessage)
+    bool interactive, std::istream& input, std::ostream& output, std::string& errorMessage,
+    bool allowIncomplete)
 {
     std::optional<std::string> templateText;
     if (templatePath.has_value()) {
@@ -285,15 +601,24 @@ bool AppSettingsJson::CreateInitialConfiguration(const fs::path& configPath,
             "': " + ec.message() + ". Existing files are not overwritten; check for an incomplete file.";
         return false;
     }
-    if (!completed) {
+    if (!completed && !allowIncomplete) {
         errorMessage = "Initial configuration created at '" + CommonUtils::path_to_utf8(configPath) +
             "'. Open and edit it to set OutDirectory and at least one active MediaDirectoryList "
             "entry with a mediaPath, then run the application again.";
         return false;
     }
-    output << "Configuration saved. You can open and edit it at "
+    output << (completed ? "Configuration saved. You can open and edit it at "
+        : "Default configuration created. You can open and edit it at ")
         << CommonUtils::path_to_utf8(configPath) << ".\n";
     return true;
+}
+
+bool AppSettingsJson::CreateDefaultConfiguration(const fs::path& configPath, std::string& errorMessage)
+{
+    std::istringstream input;
+    std::ostringstream output;
+    return CreateInitialConfiguration(configPath, FindDefaultConfigTemplate(), false,
+        input, output, errorMessage, true);
 }
 
 std::shared_ptr<AppSettingsJson> AppSettingsJson::LoadForCommandLine(
@@ -362,6 +687,98 @@ std::shared_ptr<AppSettingsJson> AppSettingsJson::LoadWithDefaults(
         return nullptr;
     }
     return settings;
+}
+
+fs::path AppSettingsJson::ResolveConfigPath(
+    const std::optional<fs::path>& explicitConfigPath, std::string& errorMessage)
+{
+    fs::path path;
+    if (explicitConfigPath) {
+        path = *explicitConfigPath;
+    }
+    else {
+        path = userConfigPath(errorMessage);
+        if (path.empty()) return {};
+    }
+    std::error_code ec;
+    path = fs::absolute(path, ec).lexically_normal();
+    if (ec) {
+        errorMessage = "Cannot resolve configuration path: " + ec.message();
+        return {};
+    }
+    return path;
+}
+
+bool AppSettingsJson::ReadConfigurationSnapshot(
+    const std::optional<fs::path>& explicitConfigPath, std::string& snapshot,
+    std::string& errorMessage)
+{
+    const auto path = ResolveConfigPath(explicitConfigPath, errorMessage);
+    if (path.empty()) return false;
+    bool exists = false;
+    std::string content;
+    if (!readConfigText(path, exists, content, errorMessage)) return false;
+    auto settings = GetDefaultSettings();
+    if (exists && !validateConfigurationText(content, settings, errorMessage)) return false;
+    const auto revision = exists ? configRevisionFor(content) : "missing";
+    snapshot = snapshotJson(path, exists, revision, settings);
+    return true;
+}
+
+bool AppSettingsJson::ApplyConfigurationPatch(
+    const std::optional<fs::path>& explicitConfigPath, const std::string& expectedRevision,
+    const std::string& patchJson, bool persist, std::string& snapshot, std::string& errorMessage)
+{
+    const auto path = ResolveConfigPath(explicitConfigPath, errorMessage);
+    if (path.empty()) return false;
+    bool exists = false;
+    std::string original;
+    if (!readConfigText(path, exists, original, errorMessage)) return false;
+    const auto currentRevision = exists ? configRevisionFor(original) : "missing";
+    if (expectedRevision != currentRevision) {
+        errorMessage = "Configuration changed since it was loaded. Reload it before applying edits.";
+        return false;
+    }
+
+    rapidjson::Document patchDocument;
+    patchDocument.Parse<rapidjson::kParseCommentsFlag>(patchJson.c_str(), patchJson.size());
+    if (patchDocument.HasParseError() || !patchDocument.IsObject()) {
+        errorMessage = "Configuration patch must be a valid JSON object.";
+        return false;
+    }
+    std::map<std::string, std::string> values;
+    for (auto member = patchDocument.MemberBegin(); member != patchDocument.MemberEnd(); ++member) {
+        const auto key = std::string(member->name.GetString(), member->name.GetStringLength());
+        if (values.contains(key)) {
+            errorMessage = "Configuration patch contains a duplicate setting key.";
+            return false;
+        }
+        rapidjson::StringBuffer valueBuffer;
+        rapidjson::Writer<rapidjson::StringBuffer> valueWriter(valueBuffer);
+        member->value.Accept(valueWriter);
+        values.emplace(key, valueBuffer.GetString());
+    }
+    if (values.empty()) {
+        errorMessage = "Configuration patch contains no settings.";
+        return false;
+    }
+
+    const auto base = exists ? original : GetDefaultSettings().toJsonString();
+    std::string candidate;
+    if (!patchJsonObject(base, values, candidate)) {
+        errorMessage = "Configuration could not be safely updated; the original file was not changed.";
+        return false;
+    }
+    auto settings = GetDefaultSettings();
+    if (!validateConfigurationText(candidate, settings, errorMessage)) return false;
+    if (persist) {
+        if (!saveConfigText(path, candidate + "\n", currentRevision, errorMessage)) return false;
+        snapshot = snapshotJson(path, true, configRevisionFor(candidate + "\n"), settings);
+    }
+    else {
+        snapshot = snapshotJson(path, exists, currentRevision, settings);
+    }
+    return true;
 }
 
 // Convert UTF-8 string to wide string

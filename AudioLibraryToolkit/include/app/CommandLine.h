@@ -14,7 +14,11 @@ enum class CommandAction
     Scan,
     Duplicates,
     DatabaseImport,
-    InitializeConfig
+    InitializeConfig,
+    InitializeDefaultConfig,
+    ReadConfiguration,
+    ValidateConfiguration,
+    SaveConfiguration
 };
 
 struct CommandLineOptions
@@ -23,6 +27,8 @@ struct CommandLineOptions
     std::string inputPath;
     std::string outputDirectory;
     std::string configPath;
+    std::string configRevision;
+    std::string configurationPatch;
     std::string logLevel;
     std::string reportPath;
     std::set<std::string> repairRules;

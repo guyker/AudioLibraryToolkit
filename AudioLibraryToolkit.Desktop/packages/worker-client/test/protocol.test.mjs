@@ -12,10 +12,10 @@ test("parses a compatible ready event and its advertised operations", () => {
     protocolVersion: WORKER_PROTOCOL_VERSION,
     requestId: "",
     type: "ready",
-    capabilities: ["convert", "scan"],
+    capabilities: ["convert", "scan", "initializeDefaultConfig"],
   }));
   assert.equal(event.type, "ready");
-  assert.deepEqual(event.capabilities, ["convert", "scan"]);
+  assert.deepEqual(event.capabilities, ["convert", "scan", "initializeDefaultConfig"]);
 });
 
 test("rejects malformed, incompatible, and unknown events", () => {

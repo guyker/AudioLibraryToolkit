@@ -191,10 +191,21 @@ struct AppSettingsJson
 	// Creates configPath from templatePath when it is a valid template, otherwise from built-in defaults.
 	static bool CreateInitialConfiguration(const std::filesystem::path& configPath,
 		const std::optional<std::filesystem::path>& templatePath,
-		bool interactive, std::istream& input, std::ostream& output, std::string& errorMessage);
+		bool interactive, std::istream& input, std::ostream& output, std::string& errorMessage,
+		bool allowIncomplete = false);
+	// Creates an editable, empty backend config from the shipped template or built-in defaults.
+	static bool CreateDefaultConfiguration(const std::filesystem::path& configPath,
+		std::string& errorMessage);
 	// Built-in defaults are overlaid by configPath (when not empty) and validated.
 	static std::shared_ptr<AppSettingsJson> LoadWithDefaults(
 		const std::filesystem::path& configPath, std::string& errorMessage);
+	static std::filesystem::path ResolveConfigPath(
+		const std::optional<std::filesystem::path>& explicitConfigPath, std::string& errorMessage);
+	static bool ReadConfigurationSnapshot(const std::optional<std::filesystem::path>& explicitConfigPath,
+		std::string& snapshotJson, std::string& errorMessage);
+	static bool ApplyConfigurationPatch(const std::optional<std::filesystem::path>& explicitConfigPath,
+		const std::string& expectedRevision, const std::string& patchJson, bool persist,
+		std::string& snapshotJson, std::string& errorMessage);
 
 	static AppSettingsJson GetDefaultSettings()
 	{

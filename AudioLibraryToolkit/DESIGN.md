@@ -109,10 +109,14 @@ the ready handshake, progress, captured command output, and completion/error eve
 the per-user session log. The worker validates typed operation requests and maps them to `CommandLineOptions`; CLI
 and worker requests share `ApplicationServices::Run`. Worker preview requests for conversion and repair prepare
 textual summaries without writing; execution re-prepares the operation before writing rather than trusting a stale
-plan. The worker can create a new default configuration from supplied paths and accepts explicit duplicate quarantine
-selections; current matches and move safety are revalidated by the backend. Unspecified MP3 tag choices retain the
-configured `TagIssueResolution` policy. Quarantine requires active source library roots in `MediaDirectoryList` and
-does not update catalog JSON or databases.
+plan. The worker can initialize, read, validate and save backend configuration. The explicit `initializeDefaultConfig`
+operation creates a blank editable file from the shipped commented template when valid, or built-in defaults otherwise,
+and refuses to overwrite an existing file. Configuration snapshots return built-in defaults without creating a missing file; writes require the snapshot revision, patch only supplied
+top-level keys, validate through `AppSettingsJson`, preserve JSON comments and unknown keys, create a `.bak`
+recovery copy, and atomically replace the file. A stale revision or locked save fails without overwriting newer
+configuration. The worker also accepts explicit duplicate quarantine selections; current matches and move safety are
+revalidated by the backend. Unspecified MP3 tag choices retain the configured `TagIssueResolution` policy.
+Quarantine requires active source library roots in `MediaDirectoryList` and does not update catalog JSON or databases.
 
 All worker operations are application capabilities independent of any client implementation. The native build,
 tests and installation require no client source, graphical environment or JavaScript runtime. The toolkit does not

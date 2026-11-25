@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "npm run dev --workspace @audio-library/desktop",
     "build": "npm run build --workspace @audio-library/worker-client && npm run build --workspace @audio-library/desktop",
-    "test": "npm run test --workspace @audio-library/worker-client",
+    "test": "npm run test --workspace @audio-library/worker-client && npm run test --workspace @audio-library/desktop",
     "package:dir": "npm run build && npm run package:dir --workspace @audio-library/desktop",
     "package:win": "npm run build && npm run package:win --workspace @audio-library/desktop",
     "package:linux": "npm run build && npm run package:linux --workspace @audio-library/desktop"

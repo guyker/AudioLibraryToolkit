@@ -1,13 +1,67 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { lstat, readFile, mkdir, writeFile } from "node:fs/promises";
+import { lstat, readFile, mkdir, writeFile, copyFile } from "node:fs/promises";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
+app.setName("AudioLibraryToolkit Desktop");
 const runningOperations = new Map();
 let operationStarting = false;
 let WorkerClient;
+const logLimit = 200_000;
+let operationLog = "";
+let operationLogRevision = 0;
+let mainWindow = null;
+let logWindow = null;
+
+function publishLog(text, reset = false) {
+  operationLog = (reset ? text : operationLog + text).slice(-logLimit);
+  const update = { revision: ++operationLogRevision, reset, text };
+  for (const window of [mainWindow, logWindow]) {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send("logs:update", update);
+    }
+  }
+}
+
+function loadRenderer(window, hash) {
+  if (process.env.VITE_DEV_SERVER_URL) {
+    const url = new URL(process.env.VITE_DEV_SERVER_URL);
+    if (hash) url.hash = hash;
+    void window.loadURL(url.href);
+  } else {
+    void window.loadFile(path.join(currentDirectory, "../build/renderer/index.html"), hash ? { hash } : {});
+  }
+}
+
+const rendererPreferences = () => ({
+  preload: path.join(currentDirectory, "preload.cjs"),
+  contextIsolation: true,
+  nodeIntegration: false,
+  sandbox: true,
+});
+
+function openLogWindow() {
+  if (logWindow && !logWindow.isDestroyed()) {
+    if (logWindow.isMinimized()) logWindow.restore();
+    logWindow.focus();
+    return;
+  }
+  logWindow = new BrowserWindow({
+    width: 1040,
+    height: 680,
+    minWidth: 760,
+    minHeight: 360,
+    backgroundColor: "#132126",
+    title: "AudioLibraryToolkit logs",
+    webPreferences: rendererPreferences(),
+  });
+  logWindow.on("closed", () => { logWindow = null; });
+  loadRenderer(logWindow, "logs");
+}
 
 async function loadWorkerClient() {
   const moduleUrl = app.isPackaged
@@ -20,10 +74,20 @@ function settingsFile() {
   return path.join(app.getPath("userData"), "ui-settings.json");
 }
 
+async function migrateLegacySettings() {
+  const file = settingsFile();
+  if (existsSync(file)) return;
+  const legacy = path.join(app.getPath("appData"), "@audio-library", "desktop", "ui-settings.json");
+  if (!existsSync(legacy)) return;
+  await mkdir(path.dirname(file), { recursive: true });
+  await copyFile(legacy, file);
+}
+
 async function getSettings() {
+  await migrateLegacySettings();
   const file = settingsFile();
   if (!existsSync(file)) {
-    return { backendPath: "", configPath: "", outputDirectory: "" };
+    return { backendPath: "", configPath: "", outputDirectory: "", libraryPath: "" };
   }
   const parsed = JSON.parse(await readFile(file, "utf8"));
   if (typeof parsed !== "object" || parsed === null ||
@@ -33,6 +97,113 @@ async function getSettings() {
     throw new Error("The desktop settings file is invalid. Remove or repair ui-settings.json.");
   }
   return { ...parsed, libraryPath: typeof parsed.libraryPath === "string" ? parsed.libraryPath : "" };
+}
+
+function workerCandidates() {
+  const executableName = process.platform === "win32" ? "AudioLibraryToolkit.exe" : "AudioLibraryToolkit";
+  const buildPreset = process.platform === "win32" ? "windows-debug" : "linux-debug";
+  const candidates = [
+    path.join(path.dirname(process.execPath), executableName),
+    path.join(process.resourcesPath, executableName),
+    path.resolve(currentDirectory, "..", "..", "..", "..", "out", "build", buildPreset,
+      "AudioLibraryToolkit", executableName),
+    path.resolve(process.cwd(), executableName),
+    ...(process.env.PATH ?? "").split(path.delimiter)
+      .filter(Boolean).slice(0, 64).map((directory) => path.join(directory, executableName)),
+  ];
+  return [...new Set(candidates.map((candidate) => path.resolve(candidate)))];
+}
+
+async function probeBackend(candidate) {
+  if (!existsSync(candidate)) return false;
+  return new Promise((resolve) => {
+    const child = spawn(candidate, ["--worker"], {
+      stdio: ["pipe", "pipe", "ignore"],
+      windowsHide: true,
+    });
+    const lines = createInterface({ input: child.stdout });
+    let compatible = false;
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      lines.close();
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      child.kill();
+      finish(false);
+    }, 5000);
+    lines.on("line", (line) => {
+      try {
+        const event = JSON.parse(line);
+        if (event.type !== "ready" || event.protocolVersion !== 1 ||
+            !Array.isArray(event.capabilities) || !event.capabilities.includes("readConfiguration")) {
+          finish(false);
+          child.kill();
+          return;
+        }
+        compatible = true;
+        child.stdin.end();
+      } catch {
+        finish(false);
+        child.kill();
+      }
+    });
+    child.on("error", () => finish(false));
+    child.on("close", (code) => finish(compatible && code === 0));
+  });
+}
+
+async function discoverBackend() {
+  for (const candidate of workerCandidates()) {
+    try {
+      if (await probeBackend(candidate)) return candidate;
+    } catch {
+      // A candidate is selected only when it answers the worker protocol.
+    }
+  }
+  return null;
+}
+
+async function runConfigurationOperation(operation, revision, patch) {
+  const settings = await getSettings();
+  if (!settings.backendPath) throw new Error("Choose or discover the AudioLibraryToolkit executable first.");
+  if (!["readConfiguration", "validateConfiguration", "saveConfiguration"].includes(operation)) {
+    throw new TypeError("Unsupported configuration operation.");
+  }
+  const parameters = {
+    ...(settings.configPath.trim() ? { configPath: settings.configPath.trim() } : {}),
+  };
+  if (operation !== "readConfiguration") {
+    if (typeof revision !== "string" || !revision ||
+        typeof patch !== "object" || patch === null || Array.isArray(patch)) {
+      throw new TypeError("A configuration revision and settings object are required.");
+    }
+    parameters.configRevision = revision;
+    parameters.configurationPatch = JSON.stringify(patch);
+  }
+  const result = await new WorkerClient(settings.backendPath).run({ operation, parameters });
+  if (result.status !== "succeeded") {
+    throw new Error(result.stderr.trim() || "Backend configuration operation failed.");
+  }
+  const snapshot = JSON.parse(result.stdout);
+  return snapshot;
+}
+
+async function createDefaultBackendConfiguration() {
+  const settings = await getSettings();
+  if (!settings.backendPath) throw new Error("Choose or discover the AudioLibraryToolkit executable first.");
+  const parameters = settings.configPath.trim() ? { configPath: settings.configPath.trim() } : {};
+  const result = await new WorkerClient(settings.backendPath).run({
+    operation: "initializeDefaultConfig",
+    parameters,
+  });
+  if (result.status !== "succeeded") {
+    throw new Error(result.stderr.trim() || "Backend configuration creation failed.");
+  }
+  return runConfigurationOperation("readConfiguration");
 }
 
 async function saveSettings(value) {
@@ -105,30 +276,32 @@ function isOperationRequest(value) {
 }
 
 function createWindow() {
-  const window = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1440,
     height: 920,
     minWidth: 980,
     minHeight: 680,
     backgroundColor: "#17252a",
     title: "AudioLibraryToolkit",
-    webPreferences: {
-      preload: path.join(currentDirectory, "preload.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
+    webPreferences: rendererPreferences(),
   });
-
-  if (process.env.VITE_DEV_SERVER_URL) {
-    void window.loadURL(process.env.VITE_DEV_SERVER_URL);
-  } else {
-    void window.loadFile(path.join(currentDirectory, "../build/renderer/index.html"));
-  }
+  // The log window is auxiliary; it must not keep the application alive.
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+    if (logWindow && !logWindow.isDestroyed()) logWindow.close();
+  });
+  loadRenderer(mainWindow, "");
 }
 
 ipcMain.handle("settings:get", getSettings);
 ipcMain.handle("settings:save", (_event, value) => saveSettings(value));
+ipcMain.handle("backend:discover", discoverBackend);
+ipcMain.handle("backend:configuration:read", () => runConfigurationOperation("readConfiguration"));
+ipcMain.handle("backend:configuration:validate", (_event, revision, patch) =>
+  runConfigurationOperation("validateConfiguration", revision, patch));
+ipcMain.handle("backend:configuration:save", (_event, revision, patch) =>
+  runConfigurationOperation("saveConfiguration", revision, patch));
+ipcMain.handle("backend:configuration:create-default", createDefaultBackendConfiguration);
 ipcMain.handle("dialog:directory", async () => {
   const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
   return result.canceled ? null : result.filePaths[0];
@@ -151,6 +324,8 @@ ipcMain.handle("dialog:save-duplicate-report", async () => {
   return result.canceled ? null : result.filePath;
 });
 ipcMain.handle("duplicates:read-report", (_event, reportPath) => readDuplicateReport(reportPath));
+ipcMain.handle("logs:get", () => ({ revision: operationLogRevision, text: operationLog }));
+ipcMain.handle("logs:open-window", () => openLogWindow());
 ipcMain.handle("operation:start", async (event, request) => {
   if (!isOperationRequest(request) || typeof request.requestId !== "string" ||
       request.requestId.length === 0) {
@@ -161,9 +336,17 @@ ipcMain.handle("operation:start", async (event, request) => {
   }
   operationStarting = true;
   const requestId = request.requestId;
+  publishLog("", true);
   try {
-    const settings = await getSettings();
-    if (!settings.backendPath) throw new Error("Choose the AudioLibraryToolkit backend executable in Settings.");
+    const settings = await getSettings().catch((error) => {
+      publishLog(String(error instanceof Error ? error.message : error));
+      throw error;
+    });
+    if (!settings.backendPath) {
+      const message = "Choose the AudioLibraryToolkit backend executable in Settings.";
+      publishLog(message);
+      throw new Error(message);
+    }
 
     const controller = new AbortController();
     runningOperations.set(requestId, controller);
@@ -180,23 +363,25 @@ ipcMain.handle("operation:start", async (event, request) => {
             requestId,
             signal: controller.signal,
             onEvent: (workerEvent) => {
+              if (workerEvent.type === "output") publishLog(workerEvent.text);
               if (!event.sender.isDestroyed()) {
                 event.sender.send("operation:event", { requestId, event: workerEvent });
               }
             },
           },
         );
+        if (result.stderr) publishLog("\n" + result.stderr);
         if (!event.sender.isDestroyed()) event.sender.send("operation:result", result);
       } catch (error) {
-        if (!event.sender.isDestroyed()) {
-          event.sender.send("operation:error", {
-            requestId,
-            message: error instanceof Error ? error.message : String(error),
-            diagnostics: error && typeof error === "object" && "diagnostics" in error
-              ? String(error.diagnostics)
-              : "",
-          });
-        }
+        const failure = {
+          requestId,
+          message: error instanceof Error ? error.message : String(error),
+          diagnostics: error && typeof error === "object" && "diagnostics" in error
+            ? String(error.diagnostics)
+            : "",
+        };
+        publishLog("\n" + failure.message + "\n" + failure.diagnostics);
+        if (!event.sender.isDestroyed()) event.sender.send("operation:error", failure);
       } finally {
         runningOperations.delete(requestId);
       }

@@ -22,6 +22,10 @@ checks, collision handling, and output safety rules remain authoritative.
 | `databaseImport` | `jsonDirectory` | `outputDirectory`, `configPath` |
 | `repair` | `inputPath` | `overwrite`, `dryRun`, `removeId3v1`, `jobs` (1-16), `rules` (string array), `outputDirectory`, `configPath` |
 | `initializeConfig` | `libraryPath`, `outputDirectory` | `configPath` |
+| `initializeDefaultConfig` | none | `configPath` |
+| `readConfiguration` | none | `configPath` |
+| `validateConfiguration` | `configRevision`, `configurationPatch` (JSON object encoded as a string) | `configPath` |
+| `saveConfiguration` | `configRevision`, `configurationPatch` (JSON object encoded as a string) | `configPath` |
 
 Example:
 
@@ -37,6 +41,17 @@ subject to the choices supported by that issue type. Unspecified detected issues
 `initializeConfig` creates a new configuration from the backend defaults/template using the selected output and
 library paths. It refuses to overwrite an existing file; when `configPath` is omitted, the backend's per-user
 configuration path is used.
+`initializeDefaultConfig` creates an editable configuration without preset library/output paths, using the shipped
+commented template when valid and built-in defaults otherwise. It also refuses to overwrite an existing file.
+
+Configuration operations target that same per-user file unless `configPath` selects another path. A read returns
+`schemaVersion`, the resolved absolute path, `exists`, a content `revision`, and the parsed configuration. A missing
+file returns built-in defaults with revision `"missing"` and is not created by reading or validation. Patches contain
+only top-level setting values. Validation applies the patch to the loaded JSONC file and runs backend validation
+without writing. Saving requires the exact revision returned by the latest read; changed files fail with a conflict
+and must be reloaded. Successful saves preserve comments and unknown keys, keep unchanged text, atomically replace
+the file, and retain the prior file as `<config>.bak`. The backend owns the serialization and validation; clients
+should not write the file directly.
 
 Duplicate review is a two-request flow: run `duplicates` with a new `reportPath`, inspect the schema-v1 report, then
 send selected album paths in `duplicateQuarantinePaths`. The backend recomputes the groups and validates the choices
@@ -66,5 +81,5 @@ Clients must treat termination without a `completed` event as cancelled/indeterm
 ## Compatibility
 
 Clients must check `protocolVersion` and capabilities at worker startup. Unsupported versions, malformed messages,
-launch failures, and exits without a completion event are errors. Protocol v1 is not a C++ ABI and exposes no
+launch failures, stale configuration revisions, and exits without a completion event are errors. Protocol v1 is not a C++ ABI and exposes no
 backend implementation headers.

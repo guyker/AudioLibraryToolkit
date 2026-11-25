@@ -11,7 +11,8 @@ export type WorkerOperation =
   | "databaseImport"
   | "repair";
 
-export type WorkerRequestOperation = WorkerOperation | "initializeConfig";
+export type WorkerRequestOperation = WorkerOperation | "initializeConfig" | "initializeDefaultConfig" |
+  "readConfiguration" | "validateConfiguration" | "saveConfiguration";
 
 export type TagIssueKind =
   | "emptyValues"
@@ -62,6 +63,8 @@ export interface WorkerOperationParameters {
   openFolders?: boolean;
   reportPath?: string;
   duplicateQuarantinePaths?: string[];
+  configRevision?: string;
+  configurationPatch?: string;
 }
 
 export interface WorkerOperationRequest {

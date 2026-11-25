@@ -144,6 +144,18 @@ bool makeOptions(const rapidjson::Value& request, CommandLineOptions& options,
         options.action = CommandAction::Convert;
         inputKey = "inputPath";
     }
+    else if (operation == "readConfiguration") {
+        options.action = CommandAction::ReadConfiguration;
+    }
+    else if (operation == "validateConfiguration") {
+        options.action = CommandAction::ValidateConfiguration;
+    }
+    else if (operation == "saveConfiguration") {
+        options.action = CommandAction::SaveConfiguration;
+    }
+    else if (operation == "initializeDefaultConfig") {
+        options.action = CommandAction::InitializeDefaultConfig;
+    }
     else if (operation == "repair") {
         options.action = CommandAction::Repair;
         inputKey = "inputPath";
@@ -169,7 +181,8 @@ bool makeOptions(const rapidjson::Value& request, CommandLineOptions& options,
         return false;
     }
 
-    if (!getString(params, inputKey.c_str(), options.inputPath, true, error)) return false;
+    if (!inputKey.empty() && !getString(params, inputKey.c_str(), options.inputPath, true, error))
+        return false;
     if (params.HasMember("outputDirectory")) {
         if (!getString(params, "outputDirectory", options.outputDirectory, true, error)) return false;
         options.outputDirectorySpecified = true;
@@ -177,6 +190,11 @@ bool makeOptions(const rapidjson::Value& request, CommandLineOptions& options,
     if (params.HasMember("configPath")) {
         if (!getString(params, "configPath", options.configPath, true, error)) return false;
         options.configPathSpecified = true;
+    }
+    if (options.action == CommandAction::ValidateConfiguration ||
+        options.action == CommandAction::SaveConfiguration) {
+        if (!getString(params, "configRevision", options.configRevision, true, error) ||
+            !getString(params, "configurationPatch", options.configurationPatch, true, error)) return false;
     }
 
     if (operation == "convert") {
@@ -298,7 +316,9 @@ int WorkerProtocol::Run(std::istream& input, std::ostream& output, const Operati
         writer.Key("capabilities");
         writer.StartArray();
         for (const auto* capability : std::array{
-                "convert", "scan", "duplicates", "databaseImport", "repair", "initializeConfig" }) {
+                "convert", "scan", "duplicates", "databaseImport", "repair", "initializeConfig",
+                "initializeDefaultConfig", "readConfiguration", "validateConfiguration",
+                "saveConfiguration" }) {
             writer.String(capability);
         }
         writer.EndArray();
