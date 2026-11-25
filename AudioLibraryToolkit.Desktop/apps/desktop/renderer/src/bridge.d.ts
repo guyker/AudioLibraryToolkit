@@ -30,6 +30,10 @@ interface OperationError {
 interface AudioLibraryBridge {
   getSettings(): Promise<DesktopSettings>;
   saveSettings(settings: DesktopSettings): Promise<DesktopSettings>;
+  getOperationPaths(libraryPath: string, outputDirectory: string): Promise<{
+    catalogDirectory: string;
+    reportPath: string;
+  }>;
   pickDirectory(): Promise<string | null>;
   pickFile(kind: "backend" | "config"): Promise<string | null>;
   discoverBackend(): Promise<string | null>;

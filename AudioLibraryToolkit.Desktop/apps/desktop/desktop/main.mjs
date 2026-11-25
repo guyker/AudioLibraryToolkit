@@ -5,6 +5,7 @@ import { lstat, readFile, mkdir, writeFile, copyFile } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { getOperationPaths } from "./operation-paths.mjs";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 app.setName("AudioLibraryToolkit Desktop");
@@ -295,6 +296,8 @@ function createWindow() {
 
 ipcMain.handle("settings:get", getSettings);
 ipcMain.handle("settings:save", (_event, value) => saveSettings(value));
+ipcMain.handle("operation:paths", (_event, libraryPath, outputDirectory) =>
+  getOperationPaths(libraryPath, outputDirectory));
 ipcMain.handle("backend:discover", discoverBackend);
 ipcMain.handle("backend:configuration:read", () => runConfigurationOperation("readConfiguration"));
 ipcMain.handle("backend:configuration:validate", (_event, revision, patch) =>

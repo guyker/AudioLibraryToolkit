@@ -9,8 +9,12 @@ configuration or create an editable configuration from the backend's shipped tem
 per-user or explicitly selected configuration file. Grouped settings edit backend-serialized values through
 revision-checked worker operations; the backend preserves comments/unknown keys and atomically saves validated
 changes. Operation forms use backend library/output defaults without sending them as overrides, and catalog inputs
-remain distinct from audio-library paths. Conversion/repair display previews and require confirmation;
-MP3 offers per-issue tag choices. Duplicate reports expose individual album selection and a quarantine confirmation.
+remain distinct from audio-library paths. Duplicate review and SQLite import prefill the catalog directory produced
+by a worker scan of the selected source.
+Duplicate review also suggests a fresh report filename under the output root for each run. Manual path edits are
+preserved; suggesting paths writes nothing.
+Conversion/repair display previews and require confirmation; MP3 offers per-issue tag choices.
+Duplicate reports expose individual album selection and a quarantine confirmation.
 Progress, the latest output line, **View logs** and the stop action (while running) stay in a compact status strip.
 Logs open on demand in a same-window overlay or a separate log window; long lines scroll horizontally at a readable
 monospace size. Both views show the latest 200,000 characters for the current or most recent operation.
@@ -36,6 +40,8 @@ Logs never open automatically; previews and failures point to them from the stat
 - [ ] Default creation uses the backend template, leaves library/output paths unset, and refuses to overwrite a file.
 - [ ] Invalid edits and stale revisions leave the backend configuration unchanged; comments and unknown keys survive saves.
 - [ ] Backend settings are grouped and validated by the worker; catalog and audio-library source paths stay separate.
+- [x] Duplicate/import catalog inputs default to the selected source's scan output; duplicate reports get unique
+      output-root filenames without creating files. Refreshing defaults does not replace manually edited paths.
 - [ ] Conversion/repair require preview then execute; quarantine sends only confirmed selected album paths.
 - [ ] Stopping/failed work never displays unverified success or promises rollback.
 - [x] No docked console; the status strip shows progress, the latest output line, **View logs** and **Stop worker**.

@@ -39,6 +39,11 @@ and revision conflicts require a reload. Grouped tabs expose all backend-seriali
 comments and unknown keys and remains responsible for validation and safe file replacement.
 Source-library and output-root operation defaults come from backend configuration; catalog JSON inputs remain
 separate from audio-library inputs. Only an explicit operation-form override is sent to the backend.
+Duplicate and import forms default their catalog input to `<output-root>/catalog-json/<source-folder-name>`, matching
+worker scan output. Duplicate reports default to a unique JSON file in the output root, refreshed after each attempt
+so another run does not overwrite the previous report. Manual catalog/report choices (including cleared fields) are
+preserved when defaults refresh. Configuration loading updates audio inputs, never catalog inputs with audio paths.
+Computing defaults creates no files or directories; backend path validation remains authoritative.
 
 Conversion/repair first request `preview`, display the textual summary, then require execution confirmation.
 Execution sends a fresh request; a preview is not a persisted plan or authorization to bypass backend preflight.

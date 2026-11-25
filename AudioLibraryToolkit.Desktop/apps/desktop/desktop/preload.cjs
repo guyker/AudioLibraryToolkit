@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("audioLibrary", {
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
+  getOperationPaths: (libraryPath, outputDirectory) =>
+    ipcRenderer.invoke("operation:paths", libraryPath, outputDirectory),
   pickDirectory: () => ipcRenderer.invoke("dialog:directory"),
   pickFile: (kind) => ipcRenderer.invoke("dialog:file", kind),
   discoverBackend: () => ipcRenderer.invoke("backend:discover"),

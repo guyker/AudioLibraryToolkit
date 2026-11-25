@@ -208,7 +208,9 @@ export function App() {
   const [settingsDraft, setSettingsDraft] = useState<Settings>(emptySettings);
   const [settingsMessage, setSettingsMessage] = useState("");
   const [audioInputPath, setAudioInputPath] = useState("");
-  const [catalogInputPath, setCatalogInputPath] = useState("");
+  const [catalogInputPath, setCatalogInputPath] = useState<string | null>(null);
+  const [operationPaths, setOperationPaths] = useState({ catalogDirectory: "", reportPath: "" });
+  const [reportRevision, setReportRevision] = useState(0);
   const [outputDirectory, setOutputDirectory] = useState("");
   const [configuredOutputDirectory, setConfiguredOutputDirectory] = useState("");
   const [configurationSnapshot, setConfigurationSnapshot] =
@@ -245,7 +247,8 @@ export function App() {
 
   const selectedOperation = screen === "settings" ? null : screen;
   const usesCatalogInput = selectedOperation === "duplicates" || selectedOperation === "databaseImport";
-  const inputPath = usesCatalogInput ? catalogInputPath : audioInputPath;
+  const inputPath = usesCatalogInput ? catalogInputPath ?? operationPaths.catalogDirectory : audioInputPath;
+  const reportPath = typeof options.reportPath === "string" ? options.reportPath : operationPaths.reportPath;
   const metadata = selectedOperation ? operationInfo[selectedOperation] : null;
   const inputLabel = usesCatalogInput
     ? "Catalog JSON directory" : "Source library";
@@ -279,6 +282,21 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    void window.audioLibrary.getOperationPaths(audioInputPath, outputDirectory)
+      .then((paths) => {
+        if (active) setOperationPaths(paths);
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setOperationPaths({ catalogDirectory: "", reportPath: "" });
+          setErrorMessage(error instanceof Error ? error.message : String(error));
+        }
+      });
+    return () => { active = false; };
+  }, [audioInputPath, outputDirectory, reportRevision]);
+
+  useEffect(() => {
     const unsubscribeEvent = window.audioLibrary.onOperationEvent(({ requestId, event }) => {
       if (requestId !== activeRequestRef.current) return;
       if (event.type !== "output" && event.type !== "ready") {
@@ -305,6 +323,9 @@ export function App() {
             });
         }
       }
+      if (activeOperationRef.current === "duplicates") {
+        setReportRevision((current) => current + 1);
+      }
       setRunState(result.status);
       setRunMessage(result.status === "cancelled"
         ? "Stopped. Completed outputs are retained; inspect the destination for partial work."
@@ -321,6 +342,9 @@ export function App() {
     });
     const unsubscribeError = window.audioLibrary.onOperationError((failure) => {
       if (failure.requestId !== activeRequestRef.current) return;
+      if (activeOperationRef.current === "duplicates") {
+        setReportRevision((current) => current + 1);
+      }
       setRunState("failed");
       setRunMessage(failure.message);
       setErrorMessage(failure.message);
@@ -456,7 +480,7 @@ export function App() {
       if (configuredLibrary || savedLibrary) {
         const libraryPath = configuredLibrary || savedLibrary;
         setSettingsDraft((current) => ({ ...current, libraryPath }));
-        setInputPath(libraryPath);
+        setAudioInputPath(libraryPath);
       }
       setConfigurationMessage(snapshot.exists
         ? `Loaded backend configuration from ${snapshot.path}.`
@@ -519,7 +543,7 @@ export function App() {
       setOutputDirectory(output);
       const library = mediaLibraryPath(saved.configuration);
       if (library) {
-        setInputPath(library);
+        setAudioInputPath(library);
         setSettingsDraft((current) => ({ ...current, libraryPath: library }));
       }
     } catch (error) {
@@ -561,7 +585,7 @@ export function App() {
     const outputOverride = outputDirectory.trim() === configuredOutputDirectory.trim()
       ? "" : outputDirectory.trim();
     const parameters = operationParameters(
-      selectedOperation, inputPath.trim(), outputOverride, options, tagIssueResolutions,
+      selectedOperation, inputPath.trim(), outputOverride, { ...options, reportPath }, tagIssueResolutions,
       selectedQuarantinePaths);
     const previewable = selectedOperation === "convert" || selectedOperation === "repair";
     const mode = previewable && !previewReady ? "preview" : "run";
@@ -980,7 +1004,7 @@ export function App() {
                   <label className="field field-wide">
                     <span>New JSON report path (required to review groups)</span>
                     <div className="path-control">
-                      <input value={String(options.reportPath ?? "")} onChange={(event) => setOption("reportPath", event.target.value)} placeholder="Choose a new report file; existing files are not overwritten" />
+                      <input value={reportPath} onChange={(event) => setOption("reportPath", event.target.value)} placeholder="Choose a new report file; existing files are not overwritten" />
                       <button className="browse-button" onClick={() => void chooseDuplicateReportPath()} type="button">Choose file</button>
                     </div>
                   </label>
