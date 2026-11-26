@@ -6,7 +6,7 @@ area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-005]
 created: 2026-11-18
-reviewed: 2026-11-24
+reviewed: 2026-11-26
 cites:
   - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: installGeneratedFiles

@@ -145,14 +145,15 @@ Linux uses `linux-debug`; release presets use `windows-release` and
 Presets must match build directories/configurations for configure, build and test.
 Local developer paths stay out of committed presets.
 
-Add standard `cmake --install` support with `GNUInstallDirs` and `--prefix`.
-Linux initially uses system runtime dependencies; Windows stages the executable
-and its required runtime components. Do not copy the Windows-path sample
-configuration into an automatically active Linux config: explicit commands work
-with defaults, and examples should remain opt-in.
+Standard `cmake --install` support using `GNUInstallDirs` and `--prefix` is
+implemented. Linux installs the executable, commented configuration template and
+license files, relying on system runtime dependencies. Windows also stages the
+selected FFmpeg runtime DLLs and license when available. The Windows-path sample
+configuration is not copied into an automatically active Linux config: explicit
+commands work with defaults, and examples remain opt-in.
 
-Install/staging support is in scope. Installers, `.deb`/`.rpm`, AppImage,
-cross-compilation and fully self-contained release bundles are separate work.
+Install/staging support is implemented. Installers, `.deb`/`.rpm`, AppImage,
+cross-compilation and fully self-contained release bundles remain separate work.
 
 ## Implementation status and gates
 

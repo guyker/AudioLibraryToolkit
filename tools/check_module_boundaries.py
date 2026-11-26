@@ -23,6 +23,7 @@ RENDERER_IMPORT = re.compile(
     r"""(?:from\s*|import\s*(?:\(\s*)?|require\s*\(\s*)['"](?:electron|react)(?:/|['"])""",
 )
 MARKDOWN_LINK = re.compile(r"\[[^\]\n]+\]\(([^)\s]+)(?:\s+[^)]*)?\)")
+HISTORICAL_KNOWLEDGE = re.compile(r"\b(?:superseded|historical|archived|archive|fixed|retired)\b", re.IGNORECASE)
 
 
 def backend_errors(path: str, text: str, *, documentation: bool = False) -> list[str]:
@@ -48,6 +49,48 @@ def link_errors(path: Path) -> list[str]:
     return errors
 
 
+def module_link_errors(path: Path, module: Path) -> list[str]:
+    errors = []
+    module_root = module.resolve()
+    for match in MARKDOWN_LINK.finditer(path.read_text(encoding="utf-8-sig")):
+        target = match.group(1).split("#", 1)[0]
+        if not target or re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", target) or "<" in target:
+            continue
+        resolved = (path.parent / target).resolve()
+        try:
+            resolved.relative_to(module_root)
+        except ValueError:
+            errors.append(f"{path}: module-owned documentation links outside {module.name}: {target}")
+    return errors
+
+
+def inactive_knowledge_link_errors(path: Path) -> list[str]:
+    text = path.read_text(encoding="utf-8-sig")
+    source_status = re.search(r"(?m)^status:\s*([^\s#]+)", text)
+    if source_status and source_status.group(1).lower() != "active":
+        return []
+    errors = []
+    for match in MARKDOWN_LINK.finditer(text):
+        target = match.group(1).split("#", 1)[0]
+        if not target or re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", target) or "<" in target:
+            continue
+        resolved = (path.parent / target).resolve()
+        if "knowledge" not in {part.lower() for part in resolved.parts} or not resolved.is_file():
+            continue
+        target_text = resolved.read_text(encoding="utf-8-sig")
+        target_status = re.search(r"(?m)^status:\s*([^\s#]+)", target_text)
+        if not target_status or target_status.group(1).lower() == "active":
+            continue
+        line_start = text.rfind("\n", 0, match.start()) + 1
+        line_end = text.find("\n", match.end())
+        line = text[line_start:] if line_end < 0 else text[line_start:line_end]
+        if not HISTORICAL_KNOWLEDGE.search(line):
+            errors.append(
+                f"{path}: knowledge link to non-active entry needs an explicit historical label: {target}"
+            )
+    return errors
+
+
 def check(root: Path) -> list[str]:
     errors: list[str] = []
     backend_inputs = [root / "CMakeLists.txt", root / "CMakePresets.json"]
@@ -63,8 +106,7 @@ def check(root: Path) -> list[str]:
         errors.extend(backend_errors(str(path.relative_to(root)), path.read_text(encoding="utf-8-sig")))
 
     backend_docs = [root / "AudioLibraryToolkit" / name for name in ("README.md", "DESIGN.md")]
-    for area in ("api", "features", "knowledge"):
-        backend_docs.extend((root / "docs" / area).glob("*.md"))
+    backend_docs.extend(p for p in (root / "docs").rglob("*.md") if "archive" not in p.parts)
     for path in backend_docs:
         errors.extend(backend_errors(str(path.relative_to(root)), path.read_text(encoding="utf-8-sig"),
                                      documentation=True))
@@ -74,16 +116,25 @@ def check(root: Path) -> list[str]:
                  "docs/knowledge/README.md", "docs/knowledge/kb.config.json", "docs/knowledge/index.md"):
         if not (module / name).is_file():
             errors.append(f"{DESKTOP}: missing module-owned {name}")
-    for area in ("apps/desktop/desktop", "apps/desktop/renderer/src", "packages/worker-client/src"):
+    for area in ("apps/desktop/desktop", "apps/desktop/renderer/src", "apps/desktop/test",
+                 "packages/worker-client/src", "packages/worker-client/test"):
         for path in (module / area).rglob("*"):
             if path.suffix in {".mjs", ".cjs", ".ts", ".tsx"}:
                 errors.extend(client_errors(str(path.relative_to(root)), path.read_text(encoding="utf-8-sig"),
                                             sdk=area.startswith("packages/")))
+    for path in module.rglob("package.json"):
+        if "node_modules" not in path.parts and "build" not in path.parts:
+            errors.extend(client_errors(str(path.relative_to(root)), path.read_text(encoding="utf-8-sig")))
     desktop_docs = [module / "README.md", module / "DESIGN.md", module / "AGENTS.md"]
     desktop_docs.extend(p for p in (module / "docs").rglob("*.md") if "archive" not in p.parts)
-    for path in [root / "README.md", *backend_docs, *desktop_docs]:
+    repository_docs = [root / "README.md", *backend_docs, *desktop_docs]
+    for path in repository_docs:
         if path.is_file():
             errors.extend(link_errors(path))
+            errors.extend(inactive_knowledge_link_errors(path))
+    for path in desktop_docs:
+        if path.is_file():
+            errors.extend(module_link_errors(path, module))
     for path in (module / "docs/knowledge").glob("UI-K-*.md"):
         text = path.read_text(encoding="utf-8-sig")
         for citation in re.findall(r"^\s+- path:\s*(.+)$", text, re.MULTILINE):

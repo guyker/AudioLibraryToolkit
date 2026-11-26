@@ -6,7 +6,7 @@ area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-037]
 created: 2026-11-12
-reviewed: 2026-11-24
+reviewed: 2026-11-26
 cites:
   - path: AudioLibraryToolkit/include/app/AppSettings.h
     symbol: MetadataSidecarSettings

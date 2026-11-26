@@ -20,7 +20,7 @@ CODE_REFERENCE = re.compile(
     r"\.(?:cpp|cc|cxx|c|h|hpp))#[\w:~.]+",
     re.IGNORECASE,
 )
-TEST_REFERENCE = re.compile(r"(?<![\w./-])(tests/[A-Za-z0-9_.-]+\.(?:py|cpp|h))")
+FILE_REFERENCE = re.compile(r"(?<![\w./-])(tests/[\w.-]+\.(?:py|cpp|h)|docs/api/[\w.-]+\.md)\b")
 KNOWLEDGE_REFERENCE = re.compile(r"\bK-\d{3,}\b")
 FEATURE_SECTIONS = (
     "Behaviour",
@@ -105,6 +105,7 @@ def changed_paths(root: Path, staged: bool, base: str | None) -> set[str]:
 def relevant(path: str) -> bool:
     return (
         path.startswith(("tests/", "external/"))
+        or (path.startswith("docs/api/") and path.endswith(".md"))
         or any(path.startswith(f"{root}/{folder}/") for root in SOURCE_ROOTS for folder in ("src", "include"))
         or path in {"CMakeLists.txt", "CMakePresets.json"}
         or any(path in {f"{root}/config.default.json", f"{root}/CMakeLists.txt"} for root in SOURCE_ROOTS)
@@ -194,9 +195,9 @@ def feature_entries(snapshot: Snapshot, warnings: list[str]) -> dict[str, dict]:
         }:
             warnings.append(f"{path}: missing or unrecognised status")
         refs = {source_reference(value) for value in CODE_REFERENCE.findall(text.replace("\\", "/"))}
-        refs.update(TEST_REFERENCE.findall(text.replace("\\", "/")))
         if not refs:
             warnings.append(f"{path}: no source path#Symbol references found")
+        refs.update(FILE_REFERENCE.findall(text.replace("\\", "/")))
         entries[feature_id] = {
             "path": path,
             "refs": refs,
@@ -294,7 +295,7 @@ def report(root: Path, staged: bool, base: str | None, details: bool) -> None:
 
     if not details:
         if production_changes:
-            print("Documentation reminder: assess whether this code changes important behaviour, "
+            print("Documentation reminder: assess whether these changes affect important behaviour, "
                   "design, contracts or risks; update documentation only when needed.")
         if warnings:
             print(f"WARNING: {len(warnings)} documentation structure or reference issue(s) need review.")
@@ -307,7 +308,7 @@ def report(root: Path, staged: bool, base: str | None, details: bool) -> None:
     print("# Documentation impact reminder")
     print(f"Scope: {scope}. This report is advisory; it does not determine whether documentation is accurate.")
     if relevant_changes:
-        print("\nChanged application, dependency, build or test paths:")
+        print("\nChanged toolkit application, public contract, dependency, build or test paths:")
         for path in relevant_changes:
             print(f"- {label(path)}")
         if snapshot.design_path not in snapshot.paths:
@@ -354,7 +355,7 @@ def report(root: Path, staged: bool, base: str | None, details: bool) -> None:
         if not found:
             print("- None identified from existing citations; check for new decisions or risks.")
     else:
-        print("\nNo application, dependency, build or test paths changed in this scope.")
+        print("\nNo toolkit application, public contract, dependency, build or test paths changed in this scope.")
 
     if warnings:
         print("\nDocumentation structure warnings:")

@@ -12,30 +12,33 @@ installation. It has no graphical, client-source or JavaScript runtime dependenc
 Worker requests and CLI commands share typed application-service dispatch. Conversion and repair offer non-mutating
 previews; execution re-prepares before writing. Clients supply explicit MP3 tag choices and album paths for quarantine.
 Configuration initialization uses supplied paths or creates an editable blank config from its shipped template and
-refuses to overwrite an existing config. Configuration
-snapshots do not create missing files; patches are validated by the backend, preserve comments and unknown keys,
-reject stale revisions, and are saved atomically with a recovery backup.
+refuses to overwrite an existing config. Configuration snapshots and validation do not create missing files. Saving
+edits from a missing snapshot creates a file from built-in defaults without a backup; explicit default initialization
+instead uses the shipped commented template when valid and refuses to overwrite. Patches are validated by the backend,
+merge object settings member by member (lists are replaced whole), preserve comments and unknown keys outside replaced
+values, reject stale revisions, and atomically replace the file. Replacing an existing file retains a recovery backup.
 
 ## Entry points
 - `AudioLibraryToolkit --worker` → `AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp#RunWithArguments`
-- `WorkerProtocol::Run` → `AudioLibraryToolkit/src/app/WorkerProtocol.cpp`
-- `ApplicationServices::Run` → `AudioLibraryToolkit/src/app/ApplicationServices.cpp`
+- Request validation and events → `AudioLibraryToolkit/src/app/WorkerProtocol.cpp#WorkerProtocol::Run`
+- Shared CLI/worker dispatch → `AudioLibraryToolkit/src/app/ApplicationServices.cpp#ApplicationServices::Run`
 
 ## Design and knowledge
 - DESIGN: `AudioLibraryToolkit/DESIGN.md` → Headless worker boundary; Threading and process lifetime
-- Protocol: `docs/api/worker-protocol-v1.md`
+- Protocol: `docs/api/worker-protocol-v1.md`; duplicate reports: `docs/schemas/duplicate-report-v1.schema.json`
 - Configuration: F-007; conversion and tag decisions: F-002; duplicate review: F-005
 
 ## Acceptance checks
-- [x] The worker announces protocol version 1 and supported operations; malformed requests and incompatible versions
-      return explicit errors without starting work.
+- [x] The worker announces protocol version 1 and supported operations; clients reject unadvertised operations before
+      sending requests. Malformed requests and incompatible versions return explicit errors without starting work.
 - [x] Worker requests and CLI commands use the same typed application-service dispatch without synthesizing CLI arguments.
 - [x] MP3 worker conversion validates explicit tag-issue choices; supported choices are applied, while invalid values
       return an explicit request error.
-- [x] Windows CTest's `worker-protocol` test verifies request validation, initial config creation/refusal to overwrite,
+- [x] CTest `worker-protocol` (`tests/worker_protocol.py`) verifies request validation, initial config creation/refusal to overwrite,
       and successful dry-run repair.
 - [x] Worker configuration read/validate/save verifies missing-file defaults without creation, validation failures,
-      comment/unknown-key preservation, backup creation and stale-revision refusal.
+      comment/unknown-key preservation (including inside merged nested objects), backup creation when replacing an
+      existing file, and stale-revision refusal.
 - [x] Default configuration initialization preserves the shipped comments, leaves paths unset, and refuses overwrite.
 - [x] Conversion and repair expose non-mutating previews; execution rebuilds its plan before writing.
 - [x] Only explicitly selected album folders are quarantined through worker requests.

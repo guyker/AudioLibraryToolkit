@@ -6,7 +6,7 @@ area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-025, K-026, K-031]
 created: 2026-11-23
-reviewed: 2026-11-24
+reviewed: 2026-11-26
 cites:
   - path: AudioLibraryToolkit/include/common/OutputLayout.h
     symbol: "OutputLayout::Catalog"
@@ -30,4 +30,4 @@ while falling back from a corrupt current catalog could silently process stale d
 **Rejected:** Removing operation grouping mixes different outputs. Menu-number folder names couple stored data to
 UI numbering. Automatically renaming old outputs or migrating old databases mutates existing data; merging catalogs
 or silently choosing an older valid scan hides current errors. Per-run timestamps for ordinary output would bypass
-the existing destination-conflict workflow; only quarantine retains its existing unique move-directory policy.
+the existing destination-conflict workflow; only quarantine retains its unique per-album destination policy.

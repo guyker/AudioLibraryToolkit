@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -149,6 +150,85 @@ def main():
         }
         _, stale_completed = call_config(stale_request)
         assert stale_completed["status"] == "failed", stale_completed
+
+        def read_snapshot(path, request_id):
+            snapshot_events, snapshot_completed = call_config({
+                "protocolVersion": 1, "requestId": request_id, "type": "run",
+                "operation": "readConfiguration", "parameters": {"configPath": str(path)},
+            })
+            assert snapshot_completed["status"] == "succeeded", snapshot_events
+            return json.loads("".join(item.get("text", "") for item in snapshot_events
+                                      if item.get("type") == "output"))
+
+        def save_patch(path, revision, patch, request_id):
+            return call_config({
+                "protocolVersion": 1, "requestId": request_id, "type": "run",
+                "operation": "saveConfiguration",
+                "parameters": {"configPath": str(path), "configRevision": revision,
+                               "configurationPatch": json.dumps(patch)},
+            })
+
+        # A nested object in a patch is merged member by member: comments and unknown keys inside the
+        # existing object survive, and members the patch does not name keep their file values.
+        nested_config = root / "nested.json"
+        nested_config.write_text(
+            '{\n  "OutDirectory": "old-output",\n'
+            '  "FLACSettings": {\n'
+            '    "ffmpeg_exe_name": "ffmpeg", // keep this note\n'
+            '    "UnknownFlacKey": [1, 2]\n'
+            '  },\n'
+            '  "MetadataSidecars": {\n'
+            '    // nested explanation\n'
+            '    "Format": "binary",\n'
+            '    "UnknownNested": { "keep": true } // trailing note\n'
+            '  }\n}\n',
+            encoding="utf-8")
+        nested_snapshot = read_snapshot(nested_config, "nested-read")
+        nested_events, nested_saved = save_patch(nested_config, nested_snapshot["revision"], {
+            "FLACSettings": {"ffmpeg_exe_name": "ffmpeg-custom", "ffmpeg_get_metadata_tags": "-hide_banner"},
+            "MetadataSidecars": {"Format": "json", "ConvertToFlac": "optional", "ConvertToMp3": "disabled"},
+        }, "nested-save")
+        assert nested_saved["status"] == "succeeded", nested_events
+        nested_raw = nested_config.read_text(encoding="utf-8")
+        for kept in ("// keep this note", '"UnknownFlacKey": [1, 2]', "// nested explanation",
+                     '"UnknownNested": { "keep": true }, // trailing note'):
+            assert kept in nested_raw, nested_raw
+        assert not re.search(r"\n\s*,", nested_raw), nested_raw
+        assert nested_raw.endswith("}\n") and not nested_raw.endswith("\n\n"), repr(nested_raw)
+        nested_after = read_snapshot(nested_config, "nested-read-after")
+        assert nested_after["configuration"]["MetadataSidecars"] == {
+            "Format": "json", "ConvertToFlac": "optional", "ConvertToMp3": "disabled"}, nested_after
+        assert nested_after["configuration"]["FLACSettings"]["ffmpeg_exe_name"] == "ffmpeg-custom", nested_after
+        assert nested_after["configuration"]["FLACSettings"]["ffmpeg_get_metadata_tags"] == "-hide_banner"
+
+        _, partial_saved = save_patch(nested_config, nested_after["revision"],
+                                      {"MetadataSidecars": {"Format": "binary"}}, "nested-partial")
+        assert partial_saved["status"] == "succeeded", partial_saved
+        partial_after = read_snapshot(nested_config, "nested-partial-after")
+        assert partial_after["configuration"]["MetadataSidecars"] == {
+            "Format": "binary", "ConvertToFlac": "optional", "ConvertToMp3": "disabled"}, partial_after
+        partial_raw = nested_config.read_text(encoding="utf-8")
+        assert "// nested explanation" in partial_raw
+        assert partial_raw.endswith("}\n") and not partial_raw.endswith("\n\n"), repr(partial_raw)
+
+        before_invalid = nested_config.read_text(encoding="utf-8")
+        _, nested_invalid = save_patch(nested_config, partial_after["revision"],
+                                       {"MetadataSidecars": {"Format": "xml"}}, "nested-invalid")
+        assert nested_invalid["status"] == "failed", nested_invalid
+        assert nested_config.read_text(encoding="utf-8") == before_invalid
+
+        # Members and objects missing from the file are added with the file's own layout.
+        sparse_config = root / "sparse.json"
+        sparse_config.write_text('{ "OutDirectory": "old-output" }\n', encoding="utf-8")
+        sparse_snapshot = read_snapshot(sparse_config, "sparse-read")
+        _, sparse_saved = save_patch(sparse_config, sparse_snapshot["revision"],
+                                     {"LogLevel": 2, "MetadataSidecars": {"Format": "json"}}, "sparse-save")
+        assert sparse_saved["status"] == "succeeded", sparse_saved
+        sparse_after = read_snapshot(sparse_config, "sparse-read-after")
+        assert sparse_after["configuration"]["LogLevel"] == 2, sparse_after
+        assert sparse_after["configuration"]["MetadataSidecars"]["Format"] == "json", sparse_after
+        assert sparse_config.read_text(encoding="utf-8") == (
+            '{ "OutDirectory": "old-output",\n  "LogLevel": 2,\n  "MetadataSidecars": {"Format":"json"}\n}\n')
 
         missing_config = root / "missing-config" / "config.json"
         missing_read = {

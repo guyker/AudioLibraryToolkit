@@ -149,6 +149,26 @@ class DocumentationImpactTests(unittest.TestCase):
         self.assertIn("FlacConvert/src/New feature.cpp", result.stdout)
         self.assertIn("Paths without a feature citation", result.stdout)
 
+    def test_worker_contract_alone_and_its_implementation_find_the_real_worker_feature(self):
+        entry = "docs/features/F-012-worker-interface.md"
+        self.write(entry, (ROOT / entry).read_text(encoding="utf-8"))
+        self.write("docs/features/index.md", (self.repo / "docs/features/index.md").read_text()
+                   + "\n[F-012](F-012-worker-interface.md)\n")
+        self.git("add", "docs/features")
+        self.git("commit", "--quiet", "-m", "Index worker feature")
+        protocol = "docs/api/worker-protocol-v1.md"
+        self.write(protocol, "Changed public contract.\n")
+        self.assertIn("Documentation reminder", self.report().stdout)
+        paths = ("AudioLibraryToolkit/src/app/WorkerProtocol.cpp",
+                 "AudioLibraryToolkit/src/app/ApplicationServices.cpp", "tests/worker_protocol.py")
+        for path in paths:
+            self.write(path, "fixture\n")
+        result = self.report("--details")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        worker = next(line for line in result.stdout.splitlines() if line.startswith("- F-012:"))
+        for path in (protocol, *paths):
+            self.assertIn(f'"{path}"', worker)
+
     def test_staged_snapshot_ignores_unstaged_document_edits(self):
         self.write("FlacConvert/src/Audio.cpp", "int Run() { return 3; }\n")
         self.git("add", "FlacConvert/src/Audio.cpp")
@@ -261,7 +281,8 @@ class DocumentationImpactTests(unittest.TestCase):
     def test_structure_and_inactive_knowledge_are_warned_without_writes(self):
         feature = self.repo / "docs" / "features" / "F-001-convert.md"
         feature.write_text(
-            feature.read_text(encoding="utf-8").replace("## Acceptance checks", "## Old checks"),
+            feature.read_text(encoding="utf-8").replace("## Acceptance checks", "## Old checks")
+            .replace("FlacConvert/src/Audio.cpp#Run", "docs/api/worker-protocol-v1.md"),
             encoding="utf-8",
         )
         knowledge = self.repo / "docs" / "knowledge" / "K-001-source-safety.md"
@@ -275,6 +296,7 @@ class DocumentationImpactTests(unittest.TestCase):
         self.assertNotIn("F-001", brief.stdout)
         details = self.report("--details")
         self.assertIn("missing sections: Acceptance checks", details.stdout)
+        self.assertIn("no source path#Symbol references found", details.stdout)
         self.assertIn("K-001 is superseded, not active", details.stdout)
         self.assertEqual(self.git("status", "--porcelain"), before)
 

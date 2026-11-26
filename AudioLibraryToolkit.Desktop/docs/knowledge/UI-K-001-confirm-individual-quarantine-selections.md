@@ -5,7 +5,7 @@ title: "Confirm individual quarantine selections"
 area: [Desktop]
 status: active
 created: 2026-11-24
-reviewed: 2026-11-24
+reviewed: 2026-11-26
 cites:
   - path: apps/desktop/renderer/src/App.tsx
     symbol: quarantineSelectedAlbums

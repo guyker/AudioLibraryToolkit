@@ -81,7 +81,7 @@ interface WorkerEventBase {
 
 export interface WorkerReadyEvent extends WorkerEventBase {
   type: "ready";
-  capabilities: WorkerRequestOperation[];
+  capabilities: string[];
 }
 
 export interface WorkerStartedEvent extends WorkerEventBase {
@@ -192,6 +192,7 @@ export class WorkerClient {
   constructor(
     private readonly executablePath: string,
     private readonly baseEnvironment: NodeJS.ProcessEnv = process.env,
+    private readonly spawnWorker: typeof spawn = spawn,
   ) {
     if (!executablePath.trim()) throw new TypeError("Backend executable path is required.");
   }
@@ -202,7 +203,7 @@ export class WorkerClient {
   ): Promise<WorkerResult> {
     const requestId = options.requestId ?? randomUUID();
     const signal = options.signal;
-    const child = spawn(this.executablePath, ["--worker"], {
+    const child = this.spawnWorker(this.executablePath, ["--worker"], {
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
       detached: process.platform !== "win32",
@@ -261,6 +262,12 @@ export class WorkerClient {
           if (event.type === "ready") {
             if (ready) throw new WorkerClientError("Backend sent more than one ready event.", stderr);
             ready = true;
+            if (!event.capabilities.includes(request.operation)) {
+              throw new WorkerClientError(
+                `Backend does not advertise support for operation "${request.operation}".`,
+                stderr,
+              );
+            }
             if (cancelled) {
               child.stdin.end();
               stopWorker();

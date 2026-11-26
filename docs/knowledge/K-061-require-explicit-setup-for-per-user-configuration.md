@@ -6,7 +6,7 @@ area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-007, K-060]
 created: 2026-11-22
-reviewed: 2026-11-24
+reviewed: 2026-11-26
 cites:
   - path: AudioLibraryToolkit/src/app/AppSettings.cpp
     symbol: "AppSettingsJson::CreateInitialConfiguration"

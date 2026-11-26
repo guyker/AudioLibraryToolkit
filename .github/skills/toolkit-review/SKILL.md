@@ -1,19 +1,20 @@
 ---
-name: code-review
-description: Repository-specific review of changes in AudioLibraryToolkit (C++ FFmpeg/SQLite code, docs). Use when asked to review a diff, PR, branch or files in this repository. Runs in addition to the global code-review skill and overrides its naming/style rules.
+name: toolkit-review
+description: Review the native AudioLibraryToolkit part of a diff or PR for repository-specific conversion, filesystem, catalog and worker contracts. Supplements general C++ review; not for desktop-only changes.
 ---
 
 # Code review (AudioLibraryToolkit)
 
-Run the global **code-review** skill for general C++ correctness. This skill adds the repository contract and
+Use the global **code-review** skill when available for general C++ correctness; if unavailable, review the diff
+directly. This checklist adds the repository contract and
 **overrides** the global style guide: repo names are PascalCase types/methods, `_camelCase` members, camelCase
 locals; do not flag them. Ignore C#/WPF guidance.
 
 ## Read first
 
-1. The diff (`git --no-pager diff` / PR files)
+1. The requested PR or working changes, including staged and new files when in scope
 2. `AudioLibraryToolkit/DESIGN.md` sections for every touched component
-3. `kb.ps1 related -Path <each changed file>`; live K-entries are constraints the diff must respect
+3. Look up affected contracts per the knowledge protocol; inspect active entries relevant to the diff, not the history of every caller
 4. Affected `docs/features/F-xxx` entries
 5. `.github/instructions/audio-cpp.instructions.md`
 
@@ -44,7 +45,9 @@ locals; do not flag them. Ignore C#/WPF guidance.
 - [ ] Generated JSON still replaced via staging (`installGeneratedFiles`).
 
 **Behaviour and docs**
-- [ ] CLI and menu stay consistent; previews and summaries report confirmed counts only.
+- [ ] Trace affected CLI, menu and worker callers; check shared defaults, previews and failure paths.
+- [ ] For wire changes, compare the exact field/event to `docs/api/worker-protocol-v1.md` and `tests/worker_protocol.py`.
+      Use the root router for consumer review; a passing worker test does not exercise the client.
 - [ ] DESIGN.md, the F-entry and README match materially changed behaviour; `kb.ps1 affected` entries handled.
       Do not require documentation churn for behaviour-preserving edits.
 - [ ] Validation evidence uses generated fixtures; the CMake preset build and `ctest --preset <preset>` pass.

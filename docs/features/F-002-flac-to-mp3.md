@@ -44,6 +44,7 @@ discard FLAC-only blocks, keep ReplayGain); every type can also skip the affecte
 - `AudioLibraryToolkit convert <input> --to mp3 [--mp3-quality N] [--downmix-to-stereo] [--overwrite]` →
   `app/AudioLibraryToolkitMain.cpp#RunWithArguments`
 - Menu option 6 → `app/AudioLibraryToolkitMain.cpp#ConvertFLACToMP3` (prompts in `app/AudioLibraryToolkitMain.cpp#ConfigureManualMp3`)
+- Worker `convert` with `target: "mp3"` → `app/WorkerProtocol.cpp#makeOptions` → `app/ApplicationServices.cpp#ApplicationServices::Run` (F-012).
 - `include/conversion/ConversionOptions.h#ConversionOptions`, `conversion/MediaConversionTask.cpp#conversionArguments`,
   `metadata/FlacMetadata.cpp#FlacMetadata::Save`, `metadata/Mp3TagMetadata.cpp#Mp3TagMetadata::WriteFromFlac`,
   `metadata/Mp3TagMetadata.cpp#Mp3TagMetadata::Read`, `metadata/Mp3TagIssues.cpp#Mp3TagIssues::Detect`,
@@ -52,7 +53,7 @@ discard FLAC-only blocks, keep ReplayGain); every type can also skip the affecte
 
 ## Design and knowledge
 - DESIGN: `AudioLibraryToolkit/DESIGN.md` → Conversion; Files and schemas (sidecar)
-- K-038 metadata sidecar policy, K-016 channel policy, K-017 MP3 encoding settings, K-065 output layout and retained menu defaults,
+- K-038 metadata sidecar policy, K-016 MP3 quality and channel policy, K-017 FLAC-only CD profile, K-065 output layout and retained menu defaults,
   K-029 preservation audit, K-066 skipped audio folders without FLAC, K-067 TagLib MP3 tag writing and verification
 
 ## Acceptance checks

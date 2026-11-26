@@ -19,7 +19,8 @@ contracts rather than backend private source. No sensitive data or media-library
 The [archive](archive/legacy-K-073-treat-explicit-desktop-album-selections-as-quarantine.md) retains the original
 mixed-scope repository K-073 fact with repository-relative citations and lifecycle metadata as migration provenance
 only. Its historical `K-055` relationship refers to the
-[toolkit record](../../../docs/knowledge/K-055-keep-duplicate-review-groups-directly-connected-when-moving.md),
-not this module's ID namespace. Its backend guarantees now belong to
-[toolkit K-074](../../../docs/knowledge/K-074-preserve-explicit-quarantine-selections-and-connected.md);
-desktop confirmation belongs to [UI-K-001](UI-K-001-confirm-individual-quarantine-selections.md).
+[historical toolkit record](https://github.com/guyker/AudioLibraryToolkit/blob/main/docs/knowledge/K-055-keep-duplicate-review-groups-directly-connected-when-moving.md),
+not this module's ID namespace. Current backend guarantees belong to
+[toolkit K-077](https://github.com/guyker/AudioLibraryToolkit/blob/main/docs/knowledge/K-077-quarantine-only-explicitly-selected-albums-while-keeping.md),
+which supersedes K-074; desktop confirmation belongs to
+[UI-K-001](UI-K-001-confirm-individual-quarantine-selections.md).

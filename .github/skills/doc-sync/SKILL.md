@@ -21,6 +21,9 @@ description: Detect and fix drift between AudioLibraryToolkit code, AudioLibrary
    - F-entries citing it: behaviour, entry points, acceptance checks, limitations;
    - `AudioLibraryToolkit/README.md`: CLI options, menu text, config keys, output layout.
    Look especially for new CLI options, config keys, output files, audit fields, album JSON v2 / `catalog-v2.sqlite` schema fields (`docs/schemas/media-catalog-v2.schema.json`, `CatalogDatabase::Import`), menu options.
+   For wire changes compare F-012 and `docs/api/worker-protocol-v1.md` against the request/event implementation.
+   The impact report uses toolkit file citations, not a call graph or a desktop impact check. Route consumer-side
+   changes independently per root `AGENTS.md`.
 5. **Fix** – update the document that owns each materially changed fact (what → DESIGN, user value/checks → F-entry,
    why → K-entry, rule → instructions). Remove duplicates rather than syncing two copies. Record no per-change
    history and do not manufacture documentation edits when nothing important changed.

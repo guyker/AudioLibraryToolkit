@@ -34,6 +34,38 @@ class ModuleBoundaryTests(unittest.TestCase):
             (root / "api.md").write_text("# API\n", encoding="utf-8")
             self.assertFalse(boundaries.link_errors(guide))
 
+    def test_desktop_documentation_cannot_link_outside_its_module(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            module = root / "AudioLibraryToolkit.Desktop"
+            docs = module / "docs"
+            docs.mkdir(parents=True)
+            (root / "worker-protocol.md").write_text("# Protocol\n", encoding="utf-8")
+            guide = docs / "setup.md"
+            guide.write_text(
+                "[Local](inside.md)\n[External file](../../worker-protocol.md)\n"
+                "[Published](https://example.com/protocol)\n",
+                encoding="utf-8",
+            )
+            (docs / "inside.md").write_text("# Local\n", encoding="utf-8")
+            self.assertEqual(1, len(boundaries.module_link_errors(guide, module)))
+
+    def test_inactive_knowledge_links_require_historical_context(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            knowledge = root / "docs" / "knowledge"
+            knowledge.mkdir(parents=True)
+            old_entry = knowledge / "K-001-old.md"
+            old_entry.write_text("---\nstatus: superseded\n---\n", encoding="utf-8")
+            guide = root / "docs" / "guide.md"
+            guide.write_text("[Current policy](knowledge/K-001-old.md)\n", encoding="utf-8")
+            self.assertEqual(1, len(boundaries.inactive_knowledge_link_errors(guide)))
+            guide.write_text(
+                "[Historical superseded policy](knowledge/K-001-old.md)\n",
+                encoding="utf-8",
+            )
+            self.assertFalse(boundaries.inactive_knowledge_link_errors(guide))
+
 
 if __name__ == "__main__":
     unittest.main()

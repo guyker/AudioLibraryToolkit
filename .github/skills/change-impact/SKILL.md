@@ -1,6 +1,6 @@
 ---
 name: change-impact
-description: Answer "how does X work", "where is Y", "what breaks if I change Z", or onboard to AudioLibraryToolkit. Use for read-only questions about conversion, scan, duplicates, SQLite import, configuration, menu or platform code before any change is planned.
+description: Trace native AudioLibraryToolkit behaviour and change impact from CLI, menu or worker entry points into code, contracts, consumers and tests. For desktop-only questions use the desktop module guide.
 ---
 
 # Change impact and onboarding (AudioLibraryToolkit)
@@ -16,10 +16,14 @@ Answer from the documentation first, then confirm in code. Read-only: do not edi
 3. **Confirm in code** – go to the cited `path#Symbol` (LSP `goToDefinition`, `findReferences`, `incomingCalls`).
    Code is current behaviour; if docs disagree, report the drift.
 4. **Impact** (for "what breaks") – list:
-   - callers and both entry modes (CLI and menu) reaching the symbol;
+   - applicable callers: CLI, menu and `--worker` are distinct entry modes (DESIGN → Entry points);
+     check `WorkerProtocol.cpp#makeOptions` and the shared `ApplicationServices::Run` for CLI/worker dispatch.
+     For a wire field, search its literal name in `docs/api/worker-protocol-v1.md` and the producer/consumer;
+     use the repository router for cross-module questions;
    - DESIGN contracts and K-entries the change would touch;
    - output files/schemas affected (audit report, sidecar, album JSON v2, `catalog-v2.sqlite`) and their readers;
-   - platform branches (`_WIN32` / POSIX) and tests (`tests/`) covering it;
+   - relevant platform branches and exact CTest names from `tests/CMakeLists.txt`; distinguish what the
+     test asserts from paths that lack coverage;
    - F-entry acceptance checks that must be re-run.
 
 ## Answer format

@@ -46,22 +46,31 @@ commented template when valid and built-in defaults otherwise. It also refuses t
 
 Configuration operations target that same per-user file unless `configPath` selects another path. A read returns
 `schemaVersion`, the resolved absolute path, `exists`, a content `revision`, and the parsed configuration. A missing
-file returns built-in defaults with revision `"missing"` and is not created by reading or validation. Patches contain
-only top-level setting values. Validation applies the patch to the loaded JSONC file and runs backend validation
-without writing. Saving requires the exact revision returned by the latest read; changed files fail with a conflict
-and must be reloaded. Successful saves preserve comments and unknown keys, keep unchanged text, atomically replace
-the file, and retain the prior file as `<config>.bak`. The backend owns the serialization and validation; clients
-should not write the file directly.
+file returns built-in defaults with revision `"missing"` and is not created by reading or validation. A patch is a JSON
+object of top-level setting names. An object value (`FLACSettings`, `MetadataSidecars`) is merged member by member into
+the object in the file, so members the patch omits and unknown members keep their text and comments. Any other value,
+including the lists `MediaDirectoryList` and `CatalogExtensions`, replaces the existing value as a whole, so comments and
+unknown entries inside a replaced list are not kept. Validation applies the patch to the loaded JSONC file and runs backend validation without writing. Saving requires the
+exact revision returned by the latest read; changed files fail with a conflict and must be reloaded. Saving from a
+missing snapshot creates a file from built-in defaults plus the patch and has no prior file to back up. An explicit
+`initializeDefaultConfig` instead creates the editable file from the shipped commented template when valid (built-in
+defaults otherwise) and refuses to overwrite an existing file. Replacing an existing file preserves other comments and
+unknown keys, keeps unchanged text, atomically replaces the file, and retains the prior file as `<config>.bak`. The
+backend owns the serialization and validation; clients should not write the file directly.
 
 Duplicate review is a two-request flow: run `duplicates` with a new `reportPath`, inspect the schema-v1 report, then
 send selected album paths in `duplicateQuarantinePaths`. The backend recomputes the groups and validates the choices
 against the current scan. Quarantine requires `outputDirectory` (or configured `OutDirectory`) and at least one active
 source library in `MediaDirectoryList`. Quarantine is copy-only: albums are copied and verified, and source libraries
 are never modified or deleted (`movedAlbum(s)` result names are historical). Catalog JSON and databases are not updated.
+The report shape is defined by the [duplicate-report v1 JSON Schema](../schemas/duplicate-report-v1.schema.json).
 
 ## Events
 
-The worker first emits a `ready` event with `protocolVersion` and supported operation names. For each accepted request
+The worker first emits a `ready` event with `protocolVersion` and the supported operation names in `capabilities`:
+`convert`, `scan`, `duplicates`, `databaseImport`, `repair`, `initializeConfig`, `initializeDefaultConfig`,
+`readConfiguration`, `validateConfiguration`, and `saveConfiguration`. Clients must check that the requested operation
+is advertised before writing its request; a v1 worker may support only a subset. For each accepted request
 it emits `started`, zero or more `progress` and `output` events, then `completed`. Invalid or unsupported requests
 emit `error` with a message and do not start an operation. Every subsequent event carries the request's `requestId`.
 `completed.status` is `succeeded` or `failed`, with the command's `exitCode`.
@@ -72,8 +81,9 @@ session log.
 
 ## Cancellation and safety
 
-Clients can stop a worker process. The worker is contained with its FFmpeg child process (Windows Job Object or POSIX
-process group), so process termination also stops the child encoder. Cancellation may leave already-installed,
+On POSIX, the worker creates a process group containing its FFmpeg child; clients must signal the process group
+(negative worker PID), not only the worker PID, to stop the encoder as well. On Windows, the worker and encoder share
+a kill-on-close Job Object, so terminating the worker stops its child. Cancellation may leave already-installed,
 verified outputs and crash-marker/temporary artifacts for inspection; it does not roll back completed work. The
 backend remains responsible for source protection, validation, destination conflicts, and install-after-verification.
 Clients must treat termination without a `completed` event as cancelled/indeterminate, never as success.

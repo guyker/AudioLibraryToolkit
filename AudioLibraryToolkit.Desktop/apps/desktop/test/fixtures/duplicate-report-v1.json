@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "status": "completed",
+  "statistics": {
+    "albumsLoaded": 2,
+    "aliasesExcluded": 0,
+    "emptyAlbumsExcluded": 0,
+    "albumsConsidered": 2,
+    "candidatePairsEvaluated": 1,
+    "pairsReported": 1,
+    "exact": 1,
+    "strong": 0,
+    "probable": 0,
+    "partial": 0,
+    "groups": 1,
+    "skippedMd5Buckets": 0
+  },
+  "aliases": [],
+  "groups": [
+    {
+      "albums": [
+        "C:\\generated-fixture\\library\\first",
+        "C:\\generated-fixture\\library\\second"
+      ],
+      "pairs": [
+        {
+          "album1": "C:\\generated-fixture\\library\\first",
+          "album2": "C:\\generated-fixture\\library\\second",
+          "confidence": "exact",
+          "evidence": [
+            "same album name",
+            "artists match",
+            "1/1 tracks matched",
+            "1 tracks with equal stored FLAC MD5"
+          ],
+          "trackPairs": [
+            {
+              "track1": "C:\\generated-fixture\\library\\first\\track.flac",
+              "track2": "C:\\generated-fixture\\library\\second\\track.flac",
+              "method": "flac-md5"
+            }
+          ],
+          "unmatchedTracks": []
+        }
+      ]
+    }
+  ]
+}

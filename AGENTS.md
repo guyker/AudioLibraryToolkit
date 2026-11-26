@@ -34,10 +34,17 @@ output tree or system temp. See `.github/instructions/audio-cpp.instructions.md`
 
 | Task | Repo skill |
 |---|---|
-| New feature or behaviour change | `.github/skills/feature-development` |
-| Review a diff or PR | `.github/skills/code-review` (with the global code-review skill) |
-| "How does X work / what breaks if I change Y" | `.github/skills/change-impact` |
-| Check docs after a change | `.github/skills/doc-sync` |
+| Toolkit feature or fix | `.github/skills/feature-development` |
+| Toolkit diff or PR review | Global `code-review` for C++; `.github/skills/toolkit-review` adds repository contracts |
+| Trace toolkit behaviour or impact | `.github/skills/change-impact` |
+| Check toolkit docs after a change | `.github/skills/doc-sync` |
+| Desktop feature, fix or review | [Desktop router](AudioLibraryToolkit.Desktop/AGENTS.md); no C++ checklist |
+
+For a change crossing the worker boundary, start with the affected operation/field/event in the
+[public protocol](docs/api/worker-protocol-v1.md). Trace its producer and consumer separately using their own
+routers, knowledge roots and tests. Search the literal wire name as well as symbol references: JSON and IPC calls
+do not form a single static call graph. A change inside one module does not by itself require changing the other.
+Use `python tools\check_module_boundaries.py` from the root to check dependency direction, not wire compatibility.
 
 ## Build and test
 

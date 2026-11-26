@@ -12,7 +12,8 @@ Use the global **project-memory** skill for every knowledge-base step (`kb.ps1`)
 1. `AGENTS.md`, `.github/instructions/audio-cpp.instructions.md`, `.github/instructions/knowledge-protocol.instructions.md`
 2. `AudioLibraryToolkit/DESIGN.md` – the component, flow and contract you will touch
 3. `docs/features/index.md` and the affected `F-xxx` entry (or the template for a new one)
-4. `kb.ps1 related -Path <each file you will touch>` and `kb.ps1 search <concept>`; read every live K-entry returned
+4. Use the knowledge protocol's `related` and concept search; read the active entries bearing on the behaviour or
+   risk, not every hit on a shared file. Fixed/superseded entries are not current requirements.
 
 If a live K-entry or a DESIGN contract conflicts with the request, stop and tell the user before coding.
 If intent is still ambiguous, ask one question (ask_user).
@@ -20,8 +21,8 @@ If intent is still ambiguous, ask one question (ask_user).
 ## Plan
 
 Write a short plan covering:
-- user-visible behaviour (CLI and menu), defaults, and what happens on failure;
-- entry points (`path#Symbol`) and which DESIGN flow/contract changes;
+- the applicable CLI, menu and worker entry points (`path#Symbol`), shared implementation, affected readers,
+  defaults and failure paths (DESIGN → Entry points and the owning flow);
 - source-safety and install-after-success impact; temporary names; overwrite semantics;
 - platform impact (`_WIN32` branches, long paths, UTF-8);
 - validation fixtures (generated, never the user's library).
@@ -30,9 +31,10 @@ Write a short plan covering:
 
 - Follow existing naming: PascalCase types/methods, `_camelCase` members, camelCase locals; int/bool returns logged
   with spdlog. Repo conventions override the global code-review style guide.
-- Add options to `include/conversion/ConversionOptions.h#ConversionOptions`, `app/CommandLine.cpp#ParseCommandLine` and
-  `app/AudioLibraryToolkitMain.cpp#ConfigureManualMp3` together so CLI and menu stay consistent. For a new output target or
-  option, walk every site in DESIGN.md → Extension points.
+- For conversion options, use DESIGN → Extension points. For other operations follow their own typed options and
+  applicable entry points, not the MP3 menu. For worker-exposed options, trace the wire name from the public
+  protocol through `app/WorkerProtocol.cpp#makeOptions` and `app/ApplicationServices.cpp#ApplicationServices::Run`.
+  Do not expose a new option on every surface without a requirement.
 - New FFmpeg arguments go into the argument vector (`conversion/MediaConversionTask.cpp#conversionArguments`); never a shell string.
 - New outputs go through a temporary + verification + `installFile`; never write into the source tree.
 

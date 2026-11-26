@@ -45,7 +45,8 @@ metadata archives separately for each input directory before matching across all
 Split album fragments are validated and reassembled before matching; incomplete or
 inconsistent fragments fail the operation. Legacy batches without a manifest ID remain readable. With `--open` (CLI)
 or once for the current group in the menu, the folders are opened in the file manager. `--report <file>` writes a
-new JSON report with statistics, aliases, groups, evidence and track pairings; an existing file is never overwritten.
+[version 1 JSON report](../schemas/duplicate-report-v1.schema.json) with statistics, aliases, groups, evidence and
+track pairings; an existing file is never overwritten.
 The report must be outside every source library. Legacy input without trusted library-root metadata cannot be reported.
 
 Menu JSON inputs come from `OutDirectory/catalog-json/<mediaName>`. If that library directory is absent, the menu

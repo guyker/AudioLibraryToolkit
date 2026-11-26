@@ -5,7 +5,7 @@ title: "Keep FLAC scan metadata archives opt-in"
 area: [AudioLibraryToolkit]
 status: active
 created: 2026-11-19
-reviewed: 2026-11-24
+reviewed: 2026-11-26
 cites:
   - path: AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp
     symbol: ScanFolderAndCreateJSON

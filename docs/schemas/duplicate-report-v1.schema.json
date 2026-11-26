@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AudioLibraryToolkit duplicate report v1",
+  "description": "Schema for the report written by the duplicates operation.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "status",
+    "statistics",
+    "aliases",
+    "groups"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "status": {
+      "enum": ["completed", "stopped", "failed"]
+    },
+    "statistics": {
+      "type": "object",
+      "required": [
+        "albumsLoaded",
+        "aliasesExcluded",
+        "emptyAlbumsExcluded",
+        "albumsConsidered",
+        "candidatePairsEvaluated",
+        "pairsReported",
+        "exact",
+        "strong",
+        "probable",
+        "partial",
+        "groups",
+        "skippedMd5Buckets"
+      ],
+      "properties": {
+        "albumsLoaded": { "type": "integer", "minimum": 0 },
+        "aliasesExcluded": { "type": "integer", "minimum": 0 },
+        "emptyAlbumsExcluded": { "type": "integer", "minimum": 0 },
+        "albumsConsidered": { "type": "integer", "minimum": 0 },
+        "candidatePairsEvaluated": { "type": "integer", "minimum": 0 },
+        "pairsReported": { "type": "integer", "minimum": 0 },
+        "exact": { "type": "integer", "minimum": 0 },
+        "strong": { "type": "integer", "minimum": 0 },
+        "probable": { "type": "integer", "minimum": 0 },
+        "partial": { "type": "integer", "minimum": 0 },
+        "groups": { "type": "integer", "minimum": 0 },
+        "skippedMd5Buckets": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "aliases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["excluded", "kept", "contentDiffers"],
+        "properties": {
+          "excluded": { "type": "string", "minLength": 1 },
+          "kept": { "type": "string", "minLength": 1 },
+          "contentDiffers": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["albums", "pairs"],
+        "properties": {
+          "albums": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "pairs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "album1",
+                "album2",
+                "confidence",
+                "evidence",
+                "trackPairs",
+                "unmatchedTracks"
+              ],
+              "properties": {
+                "album1": { "type": "string", "minLength": 1 },
+                "album2": { "type": "string", "minLength": 1 },
+                "confidence": {
+                  "enum": ["exact", "strong", "probable", "partial"]
+                },
+                "evidence": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "trackPairs": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["track1", "track2", "method"],
+                    "properties": {
+                      "track1": { "type": "string", "minLength": 1 },
+                      "track2": { "type": "string", "minLength": 1 },
+                      "method": { "type": "string", "minLength": 1 }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "unmatchedTracks": {
+                  "type": "array",
+                  "items": { "type": "string", "minLength": 1 }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

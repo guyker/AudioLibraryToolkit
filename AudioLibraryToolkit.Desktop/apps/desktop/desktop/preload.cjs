@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld("audioLibrary", {
     ipcRenderer.invoke("backend:configuration:create-default"),
   saveDuplicateReportPath: () => ipcRenderer.invoke("dialog:save-duplicate-report"),
   readDuplicateReport: (reportPath) => ipcRenderer.invoke("duplicates:read-report", reportPath),
+  openAlbumFolder: (albumPath) => ipcRenderer.invoke("duplicates:open-album-folder", albumPath),
   startOperation: (request) => ipcRenderer.invoke("operation:start", request),
   cancelOperation: (requestId) => ipcRenderer.invoke("operation:cancel", requestId),
   getLogs: () => ipcRenderer.invoke("logs:get"),

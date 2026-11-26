@@ -49,6 +49,7 @@ interface AudioLibraryBridge {
   createDefaultBackendConfiguration(): Promise<BackendConfigurationSnapshot>;
   saveDuplicateReportPath(): Promise<string | null>;
   readDuplicateReport(reportPath: string): Promise<DuplicateReport>;
+  openAlbumFolder(albumPath: string): Promise<void>;
   startOperation(request: {
     requestId: string;
     operation: WorkerOperation | "initializeConfig";

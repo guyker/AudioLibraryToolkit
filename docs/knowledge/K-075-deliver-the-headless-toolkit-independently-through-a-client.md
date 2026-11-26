@@ -5,7 +5,7 @@ title: "Deliver the headless toolkit independently through a client-neutral proc
 area: [AudioLibraryToolkit]
 status: active
 created: 2026-11-24
-reviewed: 2026-11-24
+reviewed: 2026-11-26
 cites:
   - path: AudioLibraryToolkit/src/app/WorkerProtocol.cpp
     symbol: "WorkerProtocol::Run"

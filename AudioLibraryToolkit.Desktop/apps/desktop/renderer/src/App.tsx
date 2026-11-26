@@ -9,6 +9,18 @@ import type {
 } from "@audio-library/worker-client";
 import type { BackendConfigurationSnapshot } from "./bridge";
 import { LogViewer, latestLogLine } from "./LogViewer";
+import {
+  buildConfigurationPatch,
+  complexConfigurationKeys,
+  configurationEditorState,
+} from "./configurationEditor.mjs";
+import {
+  canSelectAlbum,
+  duplicateFindParameters,
+  duplicateQuarantineParameters,
+  quarantineFolder,
+  toggleAlbumSelection,
+} from "./duplicateReview.mjs";
 import { subscribeToLogs } from "./logStream.mjs";
 
 type Screen = WorkerOperation | "settings";
@@ -109,10 +121,6 @@ const configurationGroups: Record<string, string[]> = {
   Advanced: ["Version", "LogLevel"],
 };
 
-const complexConfigurationKeys = new Set([
-  "MediaDirectoryList", "CatalogExtensions", "FLACSettings", "MetadataSidecars",
-]);
-
 function mediaLibraryPath(configuration: Record<string, unknown>): string {
   const entries = configuration.MediaDirectoryList;
   if (!Array.isArray(entries)) return "";
@@ -134,7 +142,6 @@ function operationParameters(
   outputDirectory: string,
   options: Record<string, string | boolean | number>,
   tagIssueResolutions: Partial<Record<TagIssueKind, TagIssueAction>>,
-  duplicateQuarantinePaths: string[] = [],
 ): WorkerOperationParameters {
   const output = outputDirectory ? { outputDirectory } : {};
   switch (screen) {
@@ -160,14 +167,11 @@ function operationParameters(
         archiveFlacMetadata: options.archiveFlacMetadata === true,
       };
     case "duplicates":
-      return {
-        jsonDirectory: inputPath,
-        openFolders: options.openFolders === true,
-        ...(typeof options.reportPath === "string" && options.reportPath.trim()
-          ? { reportPath: options.reportPath.trim() }
-          : {}),
-        ...(duplicateQuarantinePaths.length > 0 ? { duplicateQuarantinePaths } : {}),
-      };
+      return duplicateFindParameters({
+        catalogDirectory: inputPath,
+        reportPath: options.reportPath,
+        openFolders: options.openFolders,
+      });
     case "databaseImport":
       return { jsonDirectory: inputPath, ...output };
     case "repair":
@@ -230,6 +234,7 @@ export function App() {
     useState<Partial<Record<TagIssueKind, TagIssueAction>>>({});
   const [duplicateReport, setDuplicateReport] = useState<DuplicateReport | null>(null);
   const [selectedQuarantinePaths, setSelectedQuarantinePaths] = useState<string[]>([]);
+  const [quarantinedAlbums, setQuarantinedAlbums] = useState<string[]>([]);
   const [runState, setRunState] = useState<RunState>("idle");
   const [runMessage, setRunMessage] = useState("Choose an operation to begin.");
   const [runOutput, setRunOutput] = useState("");
@@ -308,15 +313,21 @@ export function App() {
       if (activeModeRef.current === "preview" && result.status === "succeeded") {
         setPreviewReady(true);
       }
+      const quarantined = activeQuarantinePathsRef.current;
       if (activeOperationRef.current === "duplicates" && result.status === "succeeded") {
-        if (activeQuarantinePathsRef.current.length > 0) {
-          setDuplicateReport(null);
+        if (quarantined.length > 0) {
+          // The report stays on screen so the user can still open and manually delete the originals.
+          setQuarantinedAlbums((current) => [
+            ...current,
+            ...quarantined.filter((album) => !current.includes(album)),
+          ]);
           setSelectedQuarantinePaths([]);
         } else if (activeReportPathRef.current) {
           void window.audioLibrary.readDuplicateReport(activeReportPathRef.current)
             .then((report) => {
               setDuplicateReport(report);
               setSelectedQuarantinePaths([]);
+              setQuarantinedAlbums([]);
             })
             .catch((error: unknown) => {
               setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -326,13 +337,19 @@ export function App() {
       if (activeOperationRef.current === "duplicates") {
         setReportRevision((current) => current + 1);
       }
+      const duplicateNote = activeOperationRef.current !== "duplicates" ? ""
+        : quarantined.length > 0
+          ? `Copied ${quarantined.length} album(s) to quarantine. Originals are unchanged; ` +
+            "delete the ones you no longer want yourself, then rebuild the catalog."
+          : activeReportPathRef.current ? ""
+            : "Completed. No report path was set, so the matches are only in the logs.";
       setRunState(result.status);
       setRunMessage(result.status === "cancelled"
         ? "Stopped. Completed outputs are retained; inspect the destination for partial work."
         : result.status === "failed" ? "Operation failed. Open the logs for details."
           : activeModeRef.current === "preview"
             ? "Preview complete. Review the planned changes in the logs, then run the operation."
-            : "Operation completed.");
+            : duplicateNote || "Operation completed.");
       activeRequestRef.current = "";
       activeModeRef.current = "run";
       activeOperationRef.current = null;
@@ -369,6 +386,7 @@ export function App() {
   useEffect(() => {
     setDuplicateReport(null);
     setSelectedQuarantinePaths([]);
+    setQuarantinedAlbums([]);
   }, [inputPath, options.reportPath]);
 
   const isRunning = runState === "running" && activeRequest.length > 0;
@@ -448,6 +466,13 @@ export function App() {
     }
   }
 
+  function showConfigurationSnapshot(snapshot: BackendConfigurationSnapshot) {
+    const editor = configurationEditorState(snapshot.configuration);
+    setConfigurationSnapshot(snapshot);
+    setConfigurationDraft(editor.draft);
+    setConfigurationText(editor.text);
+  }
+
   async function loadBackendConfiguration(
     backendPath = settingsDraft.backendPath,
     configPath = settingsDraft.configPath,
@@ -464,13 +489,7 @@ export function App() {
         setSettingsDraft(saved);
       }
       const snapshot = await window.audioLibrary.readBackendConfiguration();
-      setConfigurationSnapshot(snapshot);
-      setConfigurationDraft(snapshot.configuration);
-      const textValues: Record<string, string> = {};
-      for (const key of complexConfigurationKeys) {
-        textValues[key] = JSON.stringify(snapshot.configuration[key] ?? null, null, 2);
-      }
-      setConfigurationText(textValues);
+      showConfigurationSnapshot(snapshot);
       const configuredOutput = typeof snapshot.configuration.OutDirectory === "string"
         ? snapshot.configuration.OutDirectory : "";
       setConfiguredOutputDirectory(configuredOutput);
@@ -503,8 +522,7 @@ export function App() {
       setSettings(saved);
       setSettingsDraft(saved);
       const created = await window.audioLibrary.createDefaultBackendConfiguration();
-      setConfigurationSnapshot(created);
-      setConfigurationDraft(created.configuration);
+      showConfigurationSnapshot(created);
       const output = typeof created.configuration.OutDirectory === "string"
         ? created.configuration.OutDirectory : "";
       setConfiguredOutputDirectory(output);
@@ -519,23 +537,16 @@ export function App() {
     if (!configurationSnapshot) return;
     setConfigurationMessage("");
     try {
-      const patch: Record<string, unknown> = {};
-      for (const key of Object.keys(configurationDraft)) {
-        const value = complexConfigurationKeys.has(key)
-          ? JSON.parse(configurationText[key] ?? "null") as unknown
-          : configurationDraft[key];
-        if (JSON.stringify(value) !== JSON.stringify(configurationSnapshot.configuration[key])) {
-          patch[key] = value;
-        }
-      }
+      const patch = buildConfigurationPatch(
+        configurationSnapshot.configuration, configurationDraft, configurationText,
+      );
       if (Object.keys(patch).length === 0) {
         setConfigurationMessage("No backend settings have changed.");
         return;
       }
       await window.audioLibrary.validateBackendConfiguration(configurationSnapshot.revision, patch);
       const saved = await window.audioLibrary.saveBackendConfiguration(configurationSnapshot.revision, patch);
-      setConfigurationSnapshot(saved);
-      setConfigurationDraft(saved.configuration);
+      showConfigurationSnapshot(saved);
       setConfigurationMessage(`Saved backend configuration to ${saved.path}.`);
       const output = typeof saved.configuration.OutDirectory === "string"
         ? saved.configuration.OutDirectory : "";
@@ -585,15 +596,19 @@ export function App() {
     const outputOverride = outputDirectory.trim() === configuredOutputDirectory.trim()
       ? "" : outputDirectory.trim();
     const parameters = operationParameters(
-      selectedOperation, inputPath.trim(), outputOverride, { ...options, reportPath }, tagIssueResolutions,
-      selectedQuarantinePaths);
+      selectedOperation, inputPath.trim(), outputOverride, { ...options, reportPath }, tagIssueResolutions);
     const previewable = selectedOperation === "convert" || selectedOperation === "repair";
     const mode = previewable && !previewReady ? "preview" : "run";
     if (mode === "run" && isMutating(selectedOperation, parameters)) {
       const target = outputDirectory.trim() || "the configured output directory";
-      const accepted = window.confirm(
-        `${metadata?.title}\n\nInput: ${inputPath.trim()}\nOutput root: ${target}\n\n` +
-        "Sources are not intentionally modified. Existing destinations may be rejected unless overwrite is enabled. Continue?");
+      const accepted = window.confirm(selectedOperation === "duplicates"
+        ? `${metadata?.title}\n\nCatalog JSON: ${inputPath.trim()}\nNew report: ${parameters.reportPath}\n\n` +
+          "This compares the catalog data and writes only the new report file. " +
+          "No album is copied, moved or deleted." +
+          (parameters.openFolders ? "\nEvery matching album folder will also be opened during the search." : "") +
+          "\n\nContinue?"
+        : `${metadata?.title}\n\nInput: ${inputPath.trim()}\nOutput root: ${target}\n\n` +
+          "Sources are not intentionally modified. Existing destinations may be rejected unless overwrite is enabled. Continue?");
       if (!accepted) return;
     }
     setErrorMessage("");
@@ -605,7 +620,7 @@ export function App() {
     activeOperationRef.current = selectedOperation;
     activeReportPathRef.current = selectedOperation === "duplicates" &&
       typeof parameters.reportPath === "string" ? parameters.reportPath : "";
-    activeQuarantinePathsRef.current = parameters.duplicateQuarantinePaths ?? [];
+    activeQuarantinePathsRef.current = [];
     setActiveRequest(requestId);
     try {
       await window.audioLibrary.startOperation({
@@ -635,23 +650,35 @@ export function App() {
   }
 
   function setAlbumSelected(group: DuplicateReport["groups"][number], albumPath: string, checked: boolean) {
-    setSelectedQuarantinePaths((current) => {
-      if (!checked) return current.filter((path) => path !== albumPath);
-      const selectedInGroup = group.albums.filter((path) => current.includes(path)).length;
-      if (selectedInGroup >= group.albums.length - 1) return current;
-      return [...current, albumPath];
-    });
+    setSelectedQuarantinePaths((current) =>
+      toggleAlbumSelection(current, group, albumPath, checked, quarantinedAlbums));
+  }
+
+  async function openAlbumFolders(albums: string[]) {
+    const failures: string[] = [];
+    for (const album of albums) {
+      try {
+        await window.audioLibrary.openAlbumFolder(album);
+      } catch (error) {
+        failures.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    if (failures.length > 0) setErrorMessage(failures.join(" "));
   }
 
   async function quarantineSelectedAlbums() {
-    if (!selectedQuarantinePaths.length || !inputPath.trim() || !outputDirectory.trim()) {
-      setErrorMessage("Select albums to quarantine and set an output root.");
+    if (!selectedQuarantinePaths.length || !inputPath.trim()) {
+      setErrorMessage("Select the albums to quarantine first.");
+      return;
+    }
+    if (!outputDirectory.trim()) {
+      setErrorMessage("Set the output directory (OutDirectory) in Settings > Library & paths; quarantine copies are stored in its quarantine folder.");
       return;
     }
     if (!window.confirm(
       `Quarantine ${selectedQuarantinePaths.length} selected album folder(s)?\n\n` +
-      "The backend creates and verifies a complete copy; originals are never modified or deleted. " +
-      "Catalog JSON and databases are not updated.")) {
+      `The backend creates and verifies a complete copy in ${quarantineFolder(outputDirectory)}; ` +
+      "originals are never modified or deleted. Catalog JSON and databases are not updated.")) {
       return;
     }
     setErrorMessage("");
@@ -668,12 +695,12 @@ export function App() {
       await window.audioLibrary.startOperation({
         requestId,
         operation: "duplicates",
-        parameters: {
-          jsonDirectory: inputPath.trim(),
-          ...(outputDirectory.trim() !== configuredOutputDirectory.trim()
-            ? { outputDirectory: outputDirectory.trim() } : {}),
-          duplicateQuarantinePaths: [...selectedQuarantinePaths],
-        },
+        parameters: duplicateQuarantineParameters({
+          catalogDirectory: inputPath.trim(),
+          outputDirectory,
+          configuredOutputDirectory,
+          albumPaths: selectedQuarantinePaths,
+        }),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -891,7 +918,10 @@ export function App() {
                       <button className="primary-button" onClick={() => void saveBackendConfiguration()} type="button">
                         Validate and save backend settings
                       </button>
-                      <span className="safety-note">Comments and unknown keys in the file are preserved.</span>
+                      <span className="safety-note">
+                        Comments and unknown keys are preserved. An edited list, such as the media directories,
+                        is replaced as a whole, so comments inside that list are lost.
+                      </span>
                     </div>
                   </>
                 ) : (
@@ -1000,7 +1030,7 @@ export function App() {
               )}
               {selectedOperation === "duplicates" && (
                 <div className="field-grid">
-                  <CheckField label="Open matching album folders" checked={options.openFolders === true} onChange={(value) => setOption("openFolders", value)} />
+                  <CheckField label="Also open every matching album folder during the search (can open many windows)" checked={options.openFolders === true} onChange={(value) => setOption("openFolders", value)} />
                   <label className="field field-wide">
                     <span>New JSON report path (required to review groups)</span>
                     <div className="path-control">
@@ -1016,7 +1046,9 @@ export function App() {
                     <h3>Duplicate groups</h3>
                     <p>
                       {duplicateReport.statistics.pairsReported ?? 0} matching pair(s) in {duplicateReport.groups.length} group(s).
-                      Select folders to quarantine; keep at least one album in each group.
+                      Open the folders to compare the editions. This app never deletes albums, so remove the ones you do not
+                      want in your file manager. Quarantine only makes a verified copy of the albums you select; keep at
+                      least one album in each group.
                     </p>
                   </div>
                   {duplicateReport.groups.length === 0 ? (
@@ -1024,51 +1056,73 @@ export function App() {
                   ) : (
                     <>
                       <div className="duplicate-groups">
-                        {duplicateReport.groups.map((group, groupIndex) => {
-                          const selectedInGroup = group.albums.filter((album) =>
-                            selectedQuarantinePaths.includes(album)).length;
-                          return (
-                            <article className="duplicate-group" key={groupIndex}>
+                        {duplicateReport.groups.map((group, groupIndex) => (
+                          <article className="duplicate-group" key={groupIndex}>
+                            <div className="duplicate-group-head">
                               <h4>Group {groupIndex + 1}</h4>
-                              <div className="duplicate-albums">
-                                {group.albums.map((album) => {
-                                  const checked = selectedQuarantinePaths.includes(album);
-                                  return (
-                                    <label className="duplicate-album" key={album}>
-                                      <input
-                                        type="checkbox"
-                                        checked={checked}
-                                        disabled={!checked && selectedInGroup >= group.albums.length - 1}
-                                        onChange={(event) => setAlbumSelected(group, album, event.target.checked)}
-                                      />
-                                      <span>{album}</span>
-                                    </label>
-                                  );
-                                })}
-                              </div>
-                              <div className="duplicate-pairs">
-                                {group.pairs.map((pair, pairIndex) => (
-                                  <div className="duplicate-pair" key={`${pair.album1}-${pair.album2}-${pairIndex}`}>
-                                    <strong>{pair.confidence}</strong>
-                                    <span>{pair.album1} matches {pair.album2}</span>
-                                    {pair.evidence.length > 0 && <small>{pair.evidence.join("; ")}</small>}
+                              <button
+                                className="quiet-button compact-button"
+                                onClick={() => void openAlbumFolders(group.albums)}
+                                type="button"
+                              >
+                                Open all folders
+                              </button>
+                            </div>
+                            <div className="duplicate-albums">
+                              {group.albums.map((album) => (
+                                <div className="duplicate-album" key={album}>
+                                  <label className="duplicate-album-choice">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedQuarantinePaths.includes(album)}
+                                      disabled={isRunning ||
+                                        !canSelectAlbum(group, album, selectedQuarantinePaths, quarantinedAlbums)}
+                                      onChange={(event) => setAlbumSelected(group, album, event.target.checked)}
+                                    />
+                                    <span>{album}</span>
+                                  </label>
+                                  <div className="duplicate-album-actions">
+                                    {quarantinedAlbums.includes(album) && (
+                                      <small className="copied-label">Copied to quarantine</small>
+                                    )}
+                                    <button
+                                      className="quiet-button compact-button"
+                                      aria-label={`Open folder ${album}`}
+                                      onClick={() => void openAlbumFolders([album])}
+                                      type="button"
+                                    >
+                                      Open folder
+                                    </button>
                                   </div>
-                                ))}
-                              </div>
-                            </article>
-                          );
-                        })}
+                                </div>
+                              ))}
+                            </div>
+                            <div className="duplicate-pairs">
+                              {group.pairs.map((pair, pairIndex) => (
+                                <div className="duplicate-pair" key={`${pair.album1}-${pair.album2}-${pairIndex}`}>
+                                  <strong>{pair.confidence}</strong>
+                                  <span>{pair.album1} matches {pair.album2}</span>
+                                  {pair.evidence.length > 0 && <small>{pair.evidence.join("; ")}</small>}
+                                </div>
+                              ))}
+                            </div>
+                          </article>
+                        ))}
                       </div>
                       <div className="form-actions">
                         <button
                           className="primary-button"
-                          disabled={isRunning || selectedQuarantinePaths.length === 0}
+                          disabled={isRunning || selectedQuarantinePaths.length === 0 || !outputDirectory.trim()}
                           onClick={() => void quarantineSelectedAlbums()}
                           type="button"
                         >
                           Quarantine {selectedQuarantinePaths.length} selected
                         </button>
-                        <span className="safety-note">The backend rechecks each group and verifies copies before source removal.</span>
+                        <span className="safety-note">
+                          {outputDirectory.trim()
+                            ? `Copies the selected albums to ${quarantineFolder(outputDirectory)} and verifies each copy. Originals are not changed.`
+                            : "Set the output directory (OutDirectory) in Settings > Library & paths to store quarantine copies."}
+                        </span>
                       </div>
                     </>
                   )}

@@ -176,14 +176,44 @@ bool scanJsonValue(const std::string& text, std::size_t& position, std::size_t& 
     return true;
 }
 
-bool patchJsonObject(const std::string& source, const std::map<std::string, std::string>& patch,
-    std::string& result)
+std::string serializeJsonValue(const rapidjson::Value& value)
+{
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    value.Accept(writer);
+    return std::string(buffer.GetString(), buffer.GetSize());
+}
+
+// The whitespace that starts the line holding `position`, or `fallback` when other text precedes it on that line.
+std::string lineIndent(const std::string& text, std::size_t position, const std::string& fallback)
+{
+    const auto lineBreak = position == 0 ? std::string::npos : text.rfind('\n', position - 1);
+    const auto begin = lineBreak == std::string::npos ? std::size_t{ 0 } : lineBreak + 1;
+    for (auto index = begin; index < position; ++index) {
+        if (text[index] != ' ' && text[index] != '\t') return fallback;
+    }
+    return text.substr(begin, position - begin);
+}
+
+// Applies `patch` to the JSON object in `source` as text edits, so comments, unknown members and unchanged text
+// survive. A patch object over an existing object is merged member by member; any other patch value replaces the
+// existing value as a whole (arrays are not merged). `baseIndent` is the indentation of the line that holds the object
+// and `lineBreak` the file's line-break style, both used only to lay out members the patch adds.
+bool patchObjectText(const std::string& source, const rapidjson::Value& patch, const std::string& baseIndent,
+    const std::string& lineBreak, std::string& result)
 {
     struct MemberSpan {
         std::string key;
+        std::size_t keyStart;
         std::size_t valueStart;
         std::size_t valueEnd;
     };
+    struct TextEdit {
+        std::size_t start;
+        std::size_t end;
+        std::string text;
+    };
+    if (!patch.IsObject()) return false;
     std::size_t position = 0;
     if (!skipJsonTrivia(source, position) || position >= source.size() || source[position] != '{') return false;
     const auto objectStart = position++;
@@ -209,7 +239,7 @@ bool patchJsonObject(const std::string& source, const std::map<std::string, std:
         const auto valueStart = position;
         std::size_t valueEnd = valueStart;
         if (!scanJsonValue(source, position, valueEnd)) return false;
-        members.push_back({ std::move(key), valueStart, valueEnd });
+        members.push_back({ std::move(key), keyStart, valueStart, valueEnd });
         position = valueEnd;
         if (!skipJsonTrivia(source, position) || position >= source.size()) return false;
         if (source[position] == ',') {
@@ -224,33 +254,87 @@ bool patchJsonObject(const std::string& source, const std::map<std::string, std:
     }
     if (objectEnd == std::string::npos) return false;
 
-    std::map<std::string, std::string> remaining = patch;
-    std::vector<MemberSpan> replacements;
-    for (const auto& member : members) {
-        if (remaining.erase(member.key) != 0)
-            replacements.push_back({ member.key, member.valueStart, member.valueEnd });
+    const std::string childIndent = baseIndent + "  ";
+    std::map<std::string, std::size_t> memberByKey;
+    for (std::size_t index = 0; index < members.size(); ++index) memberByKey.emplace(members[index].key, index);
+    std::set<std::string> patchKeys;
+    std::vector<TextEdit> edits;
+    std::vector<std::pair<std::string, const rapidjson::Value*>> additions;
+    for (auto member = patch.MemberBegin(); member != patch.MemberEnd(); ++member) {
+        std::string key(member->name.GetString(), member->name.GetStringLength());
+        if (!patchKeys.insert(key).second) return false;
+        const auto existing = memberByKey.find(key);
+        if (existing == memberByKey.end()) {
+            additions.emplace_back(std::move(key), &member->value);
+            continue;
+        }
+        const auto& span = members[existing->second];
+        std::string replacement;
+        if (member->value.IsObject() && source[span.valueStart] == '{') {
+            if (!patchObjectText(source.substr(span.valueStart, span.valueEnd - span.valueStart), member->value,
+                    lineIndent(source, span.keyStart, childIndent), lineBreak, replacement)) {
+                return false;
+            }
+        }
+        else {
+            replacement = serializeJsonValue(member->value);
+        }
+        edits.push_back({ span.valueStart, span.valueEnd, std::move(replacement) });
     }
-    std::sort(replacements.begin(), replacements.end(),
-        [](const MemberSpan& left, const MemberSpan& right) { return left.valueStart > right.valueStart; });
-    result = source;
-    if (!remaining.empty()) {
-        std::string addition;
-        for (const auto& [key, value] : remaining) {
+
+    if (!additions.empty()) {
+        const auto memberIndent = members.empty() ? childIndent
+            : lineIndent(source, members.back().keyStart, childIndent);
+        std::string insertion;
+        for (std::size_t index = 0; index < additions.size(); ++index) {
             rapidjson::StringBuffer keyBuffer;
             rapidjson::Writer<rapidjson::StringBuffer> keyWriter(keyBuffer);
-            keyWriter.String(key.data(), static_cast<rapidjson::SizeType>(key.size()));
-            addition += members.empty() && addition.empty() ? "\n  " : ",\n  ";
-            addition += keyBuffer.GetString();
-            addition += ": ";
-            addition += value;
+            keyWriter.String(additions[index].first.data(),
+                static_cast<rapidjson::SizeType>(additions[index].first.size()));
+            if (index > 0) insertion += ",";
+            insertion += lineBreak + memberIndent + keyBuffer.GetString() + ": " +
+                serializeJsonValue(*additions[index].second);
         }
-        addition += "\n";
-        result.insert(objectEnd, addition);
+        // New members go after the last member's text, including any trailing comment, and before the closing brace.
+        const auto afterLastMember = members.empty() ? objectStart + 1 : members.back().valueEnd;
+        auto insertAt = objectEnd;
+        while (insertAt > afterLastMember && std::isspace(static_cast<unsigned char>(source[insertAt - 1])) != 0)
+            --insertAt;
+        // A closing brace that shares its line with the last member moves to a line of its own.
+        auto replaceEnd = insertAt;
+        if (source.find('\n', insertAt) >= objectEnd) {
+            insertion += lineBreak + baseIndent;
+            replaceEnd = objectEnd;
+        }
+        if (members.empty()) {
+            edits.push_back({ insertAt, replaceEnd, std::move(insertion) });
+        }
+        else if (insertAt == afterLastMember) {
+            edits.push_back({ afterLastMember, replaceEnd, "," + insertion });
+        }
+        else {
+            edits.push_back({ insertAt, replaceEnd, std::move(insertion) });
+            edits.push_back({ afterLastMember, afterLastMember, "," });
+        }
     }
-    for (const auto& member : replacements) {
-        result.replace(member.valueStart, member.valueEnd - member.valueStart, patch.at(member.key));
-    }
-    return objectStart < objectEnd;
+
+    std::sort(edits.begin(), edits.end(),
+        [](const TextEdit& left, const TextEdit& right) { return left.start > right.start; });
+    result = source;
+    for (const auto& edit : edits) result.replace(edit.start, edit.end - edit.start, edit.text);
+    return true;
+}
+
+bool patchJsonObject(const std::string& source, const rapidjson::Value& patch, std::string& result)
+{
+    const std::string lineBreak = source.find("\r\n") != std::string::npos ? "\r\n" : "\n";
+    return patchObjectText(source, patch, {}, lineBreak, result);
+}
+
+std::string withTrailingNewline(std::string text)
+{
+    if (!text.empty() && text.back() == '\n') return text;
+    return text + (text.find("\r\n") != std::string::npos ? "\r\n" : "\n");
 }
 
 bool validateConfigurationText(const std::string& content, AppSettingsJson& settings, std::string& error)
@@ -746,34 +830,30 @@ bool AppSettingsJson::ApplyConfigurationPatch(
         errorMessage = "Configuration patch must be a valid JSON object.";
         return false;
     }
-    std::map<std::string, std::string> values;
+    std::set<std::string> patchKeys;
     for (auto member = patchDocument.MemberBegin(); member != patchDocument.MemberEnd(); ++member) {
-        const auto key = std::string(member->name.GetString(), member->name.GetStringLength());
-        if (values.contains(key)) {
+        if (!patchKeys.emplace(member->name.GetString(), member->name.GetStringLength()).second) {
             errorMessage = "Configuration patch contains a duplicate setting key.";
             return false;
         }
-        rapidjson::StringBuffer valueBuffer;
-        rapidjson::Writer<rapidjson::StringBuffer> valueWriter(valueBuffer);
-        member->value.Accept(valueWriter);
-        values.emplace(key, valueBuffer.GetString());
     }
-    if (values.empty()) {
+    if (patchKeys.empty()) {
         errorMessage = "Configuration patch contains no settings.";
         return false;
     }
 
     const auto base = exists ? original : GetDefaultSettings().toJsonString();
     std::string candidate;
-    if (!patchJsonObject(base, values, candidate)) {
+    if (!patchJsonObject(base, patchDocument, candidate)) {
         errorMessage = "Configuration could not be safely updated; the original file was not changed.";
         return false;
     }
+    candidate = withTrailingNewline(std::move(candidate));
     auto settings = GetDefaultSettings();
     if (!validateConfigurationText(candidate, settings, errorMessage)) return false;
     if (persist) {
-        if (!saveConfigText(path, candidate + "\n", currentRevision, errorMessage)) return false;
-        snapshot = snapshotJson(path, true, configRevisionFor(candidate + "\n"), settings);
+        if (!saveConfigText(path, candidate, currentRevision, errorMessage)) return false;
+        snapshot = snapshotJson(path, true, configRevisionFor(candidate), settings);
     }
     else {
         snapshot = snapshotJson(path, exists, currentRevision, settings);

@@ -111,10 +111,13 @@ and worker requests share `ApplicationServices::Run`. Worker preview requests fo
 textual summaries without writing; execution re-prepares the operation before writing rather than trusting a stale
 plan. The worker can initialize, read, validate and save backend configuration. The explicit `initializeDefaultConfig`
 operation creates a blank editable file from the shipped commented template when valid, or built-in defaults otherwise,
-and refuses to overwrite an existing file. Configuration snapshots return built-in defaults without creating a missing file; writes require the snapshot revision, patch only supplied
-top-level keys, validate through `AppSettingsJson`, preserve JSON comments and unknown keys, create a `.bak`
-recovery copy, and atomically replace the file. A stale revision or locked save fails without overwriting newer
-configuration. The worker also accepts explicit duplicate quarantine selections; current matches and copy safety are
+and refuses to overwrite an existing file. Configuration snapshots return built-in defaults without creating a missing
+file. Saving from that missing snapshot creates a file from built-in defaults without a backup. Writes require the
+snapshot revision, apply the patch by top-level key (an object value such as
+`MetadataSidecars` is merged member by member; any other value, including a list, replaces the existing value),
+validate through `AppSettingsJson`, preserve JSON comments and unknown keys outside replaced values, create a `.bak`
+recovery copy when replacing an existing file, and atomically replace the file. A stale revision or locked save fails
+without overwriting newer configuration. The worker also accepts explicit duplicate quarantine selections; current matches and copy safety are
 revalidated by the backend. Unspecified MP3 tag choices retain the configured `TagIssueResolution` policy.
 Quarantine requires active source library roots in `MediaDirectoryList` and does not update catalog JSON or databases.
 
@@ -466,8 +469,9 @@ These attributes cannot prove file identity; legacy records lack this check and 
 the scan. Hashes, artwork descriptors and integrity/findings remain explicitly scan-only, never reverified claims.
 The presentation module performs no I/O and changes neither matching nor quarantine policy. Probe errors fail the operation.
 The CLI operation remains noninteractive and read-only; folders are opened only with `--open`.
-`duplicates --report <file>` writes a schema-1 JSON report (status, statistics, aliases, groups, pairs with confidence,
-evidence, track pairings and unmatched tracks) via a sibling `.partial` and atomic no-overwrite publication; an
+`duplicates --report <file>` writes a [schema-1 JSON report](../docs/schemas/duplicate-report-v1.schema.json)
+(status, statistics, aliases, groups, pairs with confidence, evidence, track pairings and unmatched tracks) via a
+sibling `.partial` and atomic no-overwrite publication; an
 existing report or a path inside any source library is refused. Report generation fails for legacy input without a
 trusted library root, and a failed or stopped run still records its status.
 Menu option 3 warns about overlapping active libraries, opens only the current group's folders and calls
@@ -743,6 +747,7 @@ value silently gets FLAC behaviour unless each site is updated:
 | Concern | Site |
 |---|---|
 | CLI choice and option validation | `app/CommandLine.cpp#ParseCommandLine` |
+| Worker request (when exposed) and shared CLI/worker dispatch | `docs/api/worker-protocol-v1.md`, `app/WorkerProtocol.cpp#makeOptions`, `app/ApplicationServices.cpp#ApplicationServices::Run` |
 | Output tree name (`normalized-flac`/`converted-mp3`) | `common/OutputLayout.h#OutputLayout::Conversion` |
 | Menu entry, prompts, preview text | `app/AudioLibraryToolkitMain.cpp#GetUserAction`, `app/AudioLibraryToolkitMain.cpp#ConfigureManualMp3`, `app/AudioLibraryToolkitMain.cpp#ShowConversionPreview` |
 | Accepted inputs, target extension, sidecar decision | `conversion/FolderConvert.cpp#FolderConvert::PrepareConversion` |
@@ -751,8 +756,8 @@ value silently gets FLAC behaviour unless each site is updated:
 | Input gate, sidecar, output verification | `conversion/MediaConversionTask.cpp#MediaConversionTask::ConvertFile` |
 | Metadata preservation rules | `metadata/PreservationAudit.cpp#PreservationAudit::Compare` |
 
-Adding a CLI option: `include/conversion/ConversionOptions.h#ConversionOptions`, `app/CommandLine.cpp#ParseCommandLine`, the menu
-prompt, and `ShowConversionPreview`.
+For a conversion option, follow `include/conversion/ConversionOptions.h#ConversionOptions` through the applicable
+rows above. Other CLI options use their owning command's options, not the conversion menu.
 
 ## Knowledge links
 
