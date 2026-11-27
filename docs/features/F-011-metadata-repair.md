@@ -79,6 +79,8 @@ of terminal control sequences. Phase boundaries are retained in the session log 
 - [ ] Preview and post-repair reports show the same findings by issue (ordered by severity, then album and track) and by album (only albums with findings), mark whole-album versus partial findings and tracks with several issues, and state separate risks for leaving or fixing each issue; JSON distinguishes planned rules from successfully applied rules.
 - [ ] Any source file/directory symlink or reparse point fails preparation; nested output links are rejected before writes.
 - [ ] Existing output is rejected by default; `--overwrite` allows eligible destinations to be replaced.
+- [ ] A retained `.repair-in-progress` marker blocks a run even with `--overwrite`, names the marker path, and leaves
+      the marker, output and sources unchanged.
 - [ ] A clean library publishes JSON (`no-repairs-needed`) and HTML reports, copies no audio, and removes the
       in-progress marker. Windows writer-close timestamp finalization does not cause a false publication failure;
       replaced temporaries and modified content still fail verification.

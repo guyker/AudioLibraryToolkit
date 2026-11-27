@@ -339,7 +339,8 @@ verified staging use bounded parallel workers (four by default;
 CLI `--jobs` accepts 1–16); installation and report updates are ordered, and after the first failure uninstalled
 staged files are cleaned up. Existing destinations fail unless overwrite is enabled. CLI `--dry-run` prints a complete
 schema-2 JSON report with `status: dry-run` and `plannedRules`, without creating repair output; usual session logs
-still apply. An in-progress marker and
+still apply. A retained `.repair-in-progress` marker from an unfinished or failed run blocks preparation even with
+overwrite; the error names the marker and the user must inspect, move or remove it (K-030). An in-progress marker and
 ``repair-report.json` (schema 2) records execution state, enabled rules, findings with rule/count/status and separate
 risk label, unchanged-risk and fix-risk descriptions. Per-file rules are named `plannedRules` until successfully
 installed, then `appliedRules`; installation status and audio/metadata impact are also recorded. After the JSON report is installed, `AudioRepair::Execute`

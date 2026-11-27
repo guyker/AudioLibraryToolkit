@@ -1776,9 +1776,19 @@ int Prepare(const fs::path& input, const fs::path& output, bool overwrite,
         }
     }
     const auto marker = plan.output / markerName;
-    if (!dryRun && (fs::exists(marker, ec) || ec)) {
-        spdlog::error("Repair output has an existing in-progress marker or cannot be inspected.");
-        return -1;
+    if (!dryRun) {
+        const auto markerStatus = fs::symlink_status(marker, ec);
+        if (markerStatus.type() == fs::file_type::not_found) ec.clear();
+        if (ec) {
+            spdlog::error("Cannot inspect repair in-progress marker '{}': {}", utf8(marker), ec.message());
+            return -1;
+        }
+        if (fs::exists(markerStatus)) {
+            spdlog::error("Repair output '{}' contains in-progress marker '{}' from an earlier unfinished or failed "
+                "run. Inspect that output and its repair-report.json, then move the output folder away or remove "
+                "the marker before running again; overwrite does not clear it.", utf8(plan.output), utf8(marker));
+            return -1;
+        }
     }
     planning.Finish();
     return 0;

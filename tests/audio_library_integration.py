@@ -1361,6 +1361,22 @@ class ConversionTests(unittest.TestCase):
         self.assertTrue((existing / ".repair-in-progress").is_dir())
         self.assertFalse((existing / "repair-report.json").exists())
 
+    def test_repair_existing_marker_blocks_run_even_with_overwrite_and_names_marker(self):
+        self.track.write_bytes(add_vorbis_comments(self.repair_fixture.read_bytes(), ["CDTOC=A", "CDTOC=A"]))
+        before = {path.name: path.read_bytes() for path in self.source.iterdir()}
+        existing = self.output / "repaired-metadata" / self.source.name
+        marker = existing / ".repair-in-progress"
+        marker.mkdir(parents=True)
+        result = self.repair(self.source, "--overwrite", "--rules", "flac.duplicate-comments")
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("contains in-progress marker", output)
+        self.assertIn(".repair-in-progress", output)
+        self.assertIn("overwrite does not clear it", output)
+        self.assertTrue(marker.is_dir())
+        self.assertEqual([path.name for path in existing.iterdir()], [".repair-in-progress"])
+        self.assertEqual({path.name: path.read_bytes() for path in self.source.iterdir()}, before)
+
     def test_repair_parallel_workers_match_serial_output(self):
         toc = "CDTOC=A+96+1234"
         data = add_vorbis_comments(self.repair_fixture.read_bytes(), [toc, toc])
