@@ -6,7 +6,7 @@ area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-013]
 created: 2026-11-17
-reviewed: 2026-11-24
+reviewed: 2026-11-26
 cites:
   - test: ConversionTests.test_aac_m4a_at_cd_sample_rate_converts_with_lossy_warning
   - test: ConversionTests.test_aac_m4a_below_cd_sample_rate_is_rejected

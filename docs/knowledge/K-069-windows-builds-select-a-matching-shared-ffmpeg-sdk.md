@@ -3,8 +3,9 @@ id: K-069
 kind: constraint
 title: "Windows builds select a matching shared FFmpeg SDK"
 area: ["External Dependencies"]
-status: active
+status: superseded
 supersedes: [K-043]
+superseded_by: K-078
 created: 2026-11-24
 reviewed: 2026-11-24
 cites:

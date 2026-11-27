@@ -5,7 +5,7 @@ title: "Audit converted resources before installation and retain verified origin
 area: [AudioLibraryToolkit]
 status: active
 created: 2026-10-11
-reviewed: 2026-11-25
+reviewed: 2026-11-26
 cites:
   - path: AudioLibraryToolkit/src/metadata/PreservationAudit.cpp
     symbol: PreservationAudit.Compare

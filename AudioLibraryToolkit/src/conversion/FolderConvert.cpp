@@ -1,5 +1,6 @@
 #include "FolderConvert.h"
 #include "MediaConversionTask.h"
+#include "FFmpegRuntime.h"
 #include "MediaConversionAsyncTask.h"
 #include "FlacMetadata.h"
 #include "PlatformUtils.h"
@@ -872,6 +873,14 @@ int FolderConvert::ExecuteConversion(const FolderConversionPlan& plan, Conversio
     }
     if (progress) progress->actualOutput = plan.output;
     if (plan.audio.empty() && plan.directories.empty()) return 0;
+    fs::path ffmpegExecutable;
+    if (!plan.audio.empty()) {
+        const auto settings = AppSettingsJson::AppSetting();
+        if (!settings || !FFmpegRuntime::ResolveEncoder(
+                settings->FLACSettings.ffmpeg_exe_name, plan.options.target, ffmpegExecutable)) {
+            return -1;
+        }
+    }
     std::vector<FileAudit> files;
     files.reserve(plan.audio.size() + plan.companions.size());
     for (const auto& file : plan.audio) files.push_back({ &file, "audio" });
@@ -1029,7 +1038,7 @@ int FolderConvert::ExecuteConversion(const FolderConversionPlan& plan, Conversio
         auto task = std::make_shared<MediaConversionTask>(
             conversion.source, anchoredOutputPath(relativeTarget, plan.output),
             anchoredOutputPath(relativeTemporary, plan.output),
-            plan.overwrite, plan.options);
+            plan.overwrite, plan.options, ffmpegExecutable);
         const auto trackLabel = fmt::format("Track {}/{} ", current, plan.audio.size());
         const auto trackName = CommonUtils::path_to_utf8(conversion.source.lexically_relative(plan.input));
         task->SetProgressCallback([&](std::optional<double> fraction, std::string_view stage) {

@@ -70,6 +70,7 @@ extern "C" {
 #include "PlatformUtils.h"
 
 #include "FFmpeg.h"
+#include "FFmpegRuntime.h"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -3673,6 +3674,8 @@ int RunWithArguments(const std::vector<const char*>& arguments)
             return 1;
         }
         RunLogging::SetConsoleToStderr(true);
+        spdlog::set_default_logger(spdlog::stderr_color_mt("worker-startup"));
+        if (!FFmpegRuntime::ValidateLibraries()) return 1;
         std::ostream protocolOutput(std::cout.rdbuf());
         return WorkerProtocol::Run(std::cin, protocolOutput, runWorkerOperation);
     }
@@ -3681,6 +3684,10 @@ int RunWithArguments(const std::vector<const char*>& arguments)
         ? "interactive menu" : (arguments[1] == nullptr ? "command line" : arguments[1]);
     RunLogging::Start(operation);
     logConfigurationPath(arguments);
+    if (!FFmpegRuntime::ValidateLibraries()) {
+        RunLogging::Finish(1);
+        return 1;
+    }
     int result = 1;
     try {
         result = RunWithArgumentsImpl(arguments);

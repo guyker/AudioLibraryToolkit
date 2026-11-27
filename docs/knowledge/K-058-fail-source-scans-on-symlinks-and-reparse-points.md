@@ -6,7 +6,7 @@ area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-057]
 created: 2026-11-22
-reviewed: 2026-11-25
+reviewed: 2026-11-26
 cites:
   - path: AudioLibraryToolkit/src/catalog/AlbumCollection.cpp
     symbol: "AlbumCollection::LoadAlbumsCo"

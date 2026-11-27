@@ -80,5 +80,5 @@ discard FLAC-only blocks, keep ReplayGain); every type can also skip the affecte
 - [ ] `--mp3-quality 10` is rejected by the CLI (`app/CommandLine.cpp#ParseCommandLine`).
 
 ## Known limitations
-- Requires an `ffmpeg` build with `libmp3lame`.
+- The bundled encoder supplies `libmp3lame`; absolute external overrides must pass capability preflight (F-013).
 - Only FLAC input; other lossless formats are skipped, not converted.

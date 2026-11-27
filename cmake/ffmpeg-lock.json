@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "build": "N-128227-g4811625b5f",
+  "variant": "gpl-shared",
+  "platforms": {
+    "windows-x64": {
+      "url": "https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-N-128227-g4811625b5f-win64-gpl-shared.zip",
+      "sha256": "3b1a38912999da560d048ccd91590c7e04dc73b75e478300c1053dce8b0689a6"
+    },
+    "linux-x64": {
+      "url": "https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-N-128227-g4811625b5f-linux64-gpl-shared.tar.xz",
+      "sha256": "cf2b9a954ef8f162a94056259a9f20a74a07ba0155778bd14c2f6fbc1641feda"
+    }
+  }
+}

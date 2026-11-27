@@ -1,0 +1,3 @@
+#pragma once
+
+#define AFC_FFMPEG_BUILD "@AFC_FFMPEG_BUILD@"

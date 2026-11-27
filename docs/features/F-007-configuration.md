@@ -41,6 +41,12 @@ archives independently of conversion `MetadataSidecars`; menu and CLI choices ca
 `JsonBatchTargetBytes` is a non-negative integer, default `0` (disabled); a positive value sets a hard JSON batch
 size limit. Large albums split into track fragments; a track that cannot fit fails the scan.
 
+`FLACSettings.ffmpeg_exe_name` defaults to `"bundled"`. Omitted/empty values and legacy `"ffmpeg"` / `"ffmpeg.exe"`
+values select the app-relative encoder, not PATH. Absolute external paths remain supported with a warning;
+other bare names, relative paths, embedded NUL and non-string values fail validation. `FLACSettings` itself must
+be an object. Loaded aliases normalize in memory; existing configuration files are not automatically rewritten.
+The same rules apply to worker read/validate/save (F-013).
+
 The worker configuration API reads the same per-user file or explicit `configPath`. Read and validate operations
 return defaults for a missing file without creating it. A save applies only supplied top-level keys: an object value
 such as `MetadataSidecars` is merged member by member, while any other value, including `MediaDirectoryList` and
@@ -96,6 +102,8 @@ overwrites an existing file.
       without a backup, while `initializeDefaultConfig` uses the shipped template when valid and refuses overwrite.
 - [x] `initializeDefaultConfig` creates a blank config from the shipped template/defaults and refuses overwrite.
 - [ ] Worker config validation rejects invalid values without changing the existing file.
+- [ ] Bundled aliases normalize without changing an existing file; absolute Unicode paths round-trip, while relative
+      paths, non-string values and embedded NUL fail validation.
 - [ ] Config saves preserve JSON comments and unknown keys, including inside a partly patched `FLACSettings` or
       `MetadataSidecars`, create a recovery backup when replacing an existing file, and reject stale revisions.
 

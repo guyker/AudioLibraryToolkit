@@ -8,6 +8,8 @@ The toolkit supports conversion, scan, duplicate detection/quarantine, SQLite im
 configuration initialization, and revision-checked configuration read/validate/save. It validates requests and remains
 authoritative for filesystem safety, audio verification and output
 installation. It has no graphical, client-source or JavaScript runtime dependency.
+The worker uses the same bundled FFmpeg policy as CLI/menu (F-013); startup library diagnostics stay on stderr.
+No protocol fields are added: explicit encoder overrides remain configuration settings subject to F-007 validation.
 
 Worker requests and CLI commands share typed application-service dispatch. Conversion and repair offer non-mutating
 previews; execution re-prepares before writing. Clients supply explicit MP3 tag choices and album paths for quarantine.

@@ -3,6 +3,8 @@
 Status: active
 
 ## Behaviour
+Conversions use the bundled FFmpeg runtime by default, with explicit absolute encoder overrides only (F-013).
+Encoder preflight runs before conversion-output creation; failure never falls back to PATH.
 Converts every supported audio file (`.flac .ape .dsf .dff .dsd .wv .wav .m2ts .m4a`) under a source folder to
 16-bit / 44.1 kHz FLAC with triangular dither, in a separate tree `<root>/normalized-flac/<source folder name>/`. Every written
 folder is complete: other regular files there are copied unchanged, including unsupported audio such as MP3/AAC/Ogg

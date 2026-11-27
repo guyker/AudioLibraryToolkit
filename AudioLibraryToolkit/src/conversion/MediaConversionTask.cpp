@@ -29,6 +29,7 @@
 #include "AppSettings.h"
 #include "CommonUtils.h"
 #include "FFmpeg.h"
+#include "FFmpegRuntime.h"
 #include "PlatformUtils.h"
 #include "FlacMetadata.h"
 #include "MediaTrack.h"
@@ -198,26 +199,6 @@ bool isAtLeastCDQuality(const fs::path& source, const FFprobeOutput& metadata)
     return false;
 }
 
-#ifdef _WIN32
-std::wstring quoteWindowsArgument(const std::wstring& argument)
-{
-    std::wstring quoted = L"\"";
-    std::size_t backslashes = 0;
-    for (const wchar_t character : argument) {
-        if (character == L'\\') {
-            ++backslashes;
-            continue;
-        }
-        quoted.append(character == L'"' ? backslashes * 2 + 1 : backslashes, L'\\');
-        quoted += character;
-        backslashes = 0;
-    }
-    quoted.append(backslashes * 2, L'\\');
-    quoted += L'"';
-    return quoted;
-}
-#endif
-
 fs::path sidecarPath(const fs::path& audio, MetadataSidecarFormat format)
 {
     return FlacMetadata::SidecarPath(audio, format);
@@ -340,11 +321,10 @@ int runFFmpeg(const std::wstring& executable, const fs::path& source, const fs::
         L"-nostats", L"-stats_period", L"0.25", L"-progress", L"pipe:1",
         L"-stats_enc_post:a:0", L"pipe:1", L"-stats_enc_post_fmt:a:0", L"afc_audio_time={t}",
         PlatformUtils::WindowsLongPath(destination) });
-    // The Windows CRT joins spawn arguments into a command line without quoting them.
     std::vector<std::wstring> quotedArguments;
     quotedArguments.reserve(arguments.size());
     for (const auto& argument : arguments) {
-        quotedArguments.push_back(quoteWindowsArgument(argument));
+        quotedArguments.push_back(FFmpegRuntime::QuoteWindowsArgument(argument));
     }
     SECURITY_ATTRIBUTES security{ sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE };
     HANDLE readPipe = nullptr;
@@ -384,7 +364,7 @@ int runFFmpeg(const std::wstring& executable, const fs::path& source, const fs::
     }
     std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
     mutableCommandLine.push_back(L'\0');
-    const BOOL created = CreateProcessW(nullptr, mutableCommandLine.data(),
+    const BOOL created = CreateProcessW(executable.c_str(), mutableCommandLine.data(),
         nullptr, nullptr, TRUE, 0, nullptr, nullptr, &startup, &process);
     const auto createError = created ? ERROR_SUCCESS : GetLastError();
     CloseHandle(writePipe);
@@ -471,7 +451,7 @@ int runFFmpeg(const std::wstring& executable, const fs::path& source, const fs::
             _exit(126);
         }
         close(diagnosticPipe[1]);
-        execvp(executableUtf8.c_str(), pointers.data());
+        execv(executableUtf8.c_str(), pointers.data());
         _exit(errno == ENOENT ? 127 : 126);
     }
 
@@ -524,6 +504,15 @@ int runFFmpeg(const std::wstring& executable, const fs::path& source, const fs::
 
 int MediaConversionTask::ConvertFile()
 {
+    if (_ffmpegExecutable.empty()) {
+        const auto settings = AppSettingsJson::AppSetting();
+        if (!settings || !FFmpegRuntime::ValidateLibraries() ||
+            !FFmpegRuntime::ResolveEncoder(settings->FLACSettings.ffmpeg_exe_name,
+                _options.target, _ffmpegExecutable)) {
+            _status = -1;
+            return _status;
+        }
+    }
     if (_progressCallback) _progressCallback(std::nullopt, "Preparing");
     const auto metadata = FFmpeg::GetFFprobeMetadataAPI(_sourcePath);
     if (!isAtLeastCDQuality(_sourcePath, metadata)) {
@@ -637,11 +626,11 @@ int MediaConversionTask::ConvertFile()
         }
     }
 
-    std::wstring executable{ L"ffmpeg" };
-    const auto settings = AppSettingsJson::AppSetting();
-    if (settings && !settings->FLACSettings.ffmpeg_exe_name.empty()) {
-        executable = settings->FLACSettings.ffmpeg_exe_name;
-    }
+#ifdef _WIN32
+    const auto executable = PlatformUtils::WindowsLongPath(_ffmpegExecutable);
+#else
+    const auto executable = CommonUtils::utf8ToWstring(CommonUtils::path_to_utf8(_ffmpegExecutable));
+#endif
 
     spdlog::debug("Processing: {}", CommonUtils::path_to_utf8(_sourcePath));
     _failureType = "AUDIO";

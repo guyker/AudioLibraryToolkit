@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "build": "N-128227-g4811625b5f",
+  "status": "pending",
+  "reason": "Matching FFmpeg/dependency source, patches and build materials have not yet been independently established. Development packages are not approved for redistribution.",
+  "sourceArchives": []
+}

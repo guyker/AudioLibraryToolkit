@@ -43,7 +43,7 @@ using namespace rapidjson;
 
 struct FLACEncodingSettings
 {
-	std::wstring ffmpeg_exe_name;
+	std::wstring ffmpeg_exe_name{ L"bundled" };
 	std::wstring ffmpeg_convert_24bit_flac;
 	std::wstring ffmpeg_get_metadata_tags;
 };
@@ -228,7 +228,7 @@ struct AppSettingsJson
 			2000, //AlbumsSplitThreshold
 			0, //JsonBatchTargetBytes (disabled)
 			{
-				 L"ffmpeg",
+				 L"bundled",
 				 L"-map 0:a:0 -af aresample=osf=s16:osr=44100:dither_method=triangular -c:a flac -y -v warning -stats",
 				 L"-v quiet -print_format json -show_format -show_streams -show_chapters",
 			},

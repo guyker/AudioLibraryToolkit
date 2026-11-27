@@ -49,18 +49,21 @@ Use `python tools\check_module_boundaries.py` from the root to check dependency 
 ## Build and test
 
 The shared CMake presets use Ninja. Initialize submodules (`git submodule update --init --recursive`) and
-install CMake 3.28+, Ninja, Python 3 and a C++20 toolchain first. Configure, build and run CTest with the
+install CMake 3.28+, Ninja, Python 3.12+ and a C++20 toolchain first. Restore the locked SDK, then configure, build and run CTest with the
 platform preset (`windows-debug`, `windows-release`, `linux-debug` or `linux-release`):
 
 ```text
+python tools\prepare_ffmpeg.py
 cmake --preset windows-debug
 cmake --build --preset windows-debug --parallel
 ctest --preset windows-debug
 ```
 
-Windows requires a matching shared FFmpeg SDK, selected with `FFmpeg_ROOT` (default:
-`external/ffmpeg/ffmpeg-master-latest-win64-gpl-shared/`). Linux uses pkg-config to find the FFmpeg development
-libraries and requires the `ffmpeg`/`ffprobe` tools. SQLite amalgamation, CLI11 and spdlog are supplied in the
+Windows x64 and Ubuntu 24.04 x86_64 use checksum-pinned shared SDKs from `cmake/ffmpeg-lock.json`, restored under
+ignored `external/ffmpeg/<build>/<platform>`. `FFmpeg_ROOT` can select another verified restore location, not
+another FFmpeg version. Linux also requires `patchelf` and pkg-config. Installation bundles the tools and private
+libraries; it does not rely on a host FFmpeg installation. Redistribution remains gated on reviewed matching source
+materials; see `AudioLibraryToolkit/README.md`. SQLite amalgamation, CLI11 and spdlog are supplied in the
 repository/submodules. Build artifacts live under ignored `out/build/`.
 In Visual Studio, use File > Open > Folder on the repository root and pick a Windows preset; there is no `.sln`.
 CTest builds and runs the native regression executables and `tests/audio_library_integration.py` against disposable

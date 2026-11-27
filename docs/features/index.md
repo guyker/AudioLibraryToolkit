@@ -36,6 +36,7 @@ diff and this index. The reports do not write entries or retain a change history
 | [F-010](F-010-session-logging.md) | Per-request session logging | active |
 | [F-011](F-011-metadata-repair.md) | Repair recognized FLAC/MP3 metadata defects | active |
 | [F-012](F-012-worker-interface.md) | Headless worker interface | experimental |
+| [F-013](F-013-bundled-ffmpeg.md) | Bundled FFmpeg runtime and offline packages | experimental |
 
 ## Template
 

@@ -3,7 +3,7 @@ id: K-071
 kind: defect
 title: "Untyped Windows FFmpeg SDK paths can break Ninja builds"
 area: ["External Dependencies"]
-status: active
+status: fixed
 created: 2026-11-24
 reviewed: 2026-11-24
 cites:

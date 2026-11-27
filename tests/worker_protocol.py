@@ -53,6 +53,8 @@ def main():
         ]
         env = os.environ.copy()
         env["LOCALAPPDATA"] = str(root / "local-app-data")
+        env["XDG_CONFIG_HOME"] = str(root / "local-app-data")
+        env["XDG_STATE_HOME"] = str(root / "state")
         result = subprocess.run(
             [str(executable), "--worker"],
             input="".join(json.dumps(item, ensure_ascii=False) + "\n" for item in requests),
@@ -184,8 +186,9 @@ def main():
             '  }\n}\n',
             encoding="utf-8")
         nested_snapshot = read_snapshot(nested_config, "nested-read")
+        custom_encoder = str(root / "ffmpeg-custom")
         nested_events, nested_saved = save_patch(nested_config, nested_snapshot["revision"], {
-            "FLACSettings": {"ffmpeg_exe_name": "ffmpeg-custom", "ffmpeg_get_metadata_tags": "-hide_banner"},
+            "FLACSettings": {"ffmpeg_exe_name": custom_encoder, "ffmpeg_get_metadata_tags": "-hide_banner"},
             "MetadataSidecars": {"Format": "json", "ConvertToFlac": "optional", "ConvertToMp3": "disabled"},
         }, "nested-save")
         assert nested_saved["status"] == "succeeded", nested_events
@@ -198,7 +201,7 @@ def main():
         nested_after = read_snapshot(nested_config, "nested-read-after")
         assert nested_after["configuration"]["MetadataSidecars"] == {
             "Format": "json", "ConvertToFlac": "optional", "ConvertToMp3": "disabled"}, nested_after
-        assert nested_after["configuration"]["FLACSettings"]["ffmpeg_exe_name"] == "ffmpeg-custom", nested_after
+        assert nested_after["configuration"]["FLACSettings"]["ffmpeg_exe_name"] == custom_encoder, nested_after
         assert nested_after["configuration"]["FLACSettings"]["ffmpeg_get_metadata_tags"] == "-hide_banner"
 
         _, partial_saved = save_patch(nested_config, nested_after["revision"],

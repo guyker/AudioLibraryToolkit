@@ -1,6 +1,7 @@
 #include "AppSettings.h"
 #include "AlbumCollection.h"
 #include "PlatformUtils.h"
+#include "FFmpegRuntime.h"
 
 #include <filesystem>
 #include <fstream>
@@ -1100,10 +1101,24 @@ bool AppSettingsJson::loadFromJsonText(const std::string& text) {
         DatabaseFileName = doc["DatabaseFileName"].GetString();
     }
 
-    if (doc.HasMember("FLACSettings") && doc["FLACSettings"].IsObject()) {
+    if (doc.HasMember("FLACSettings") && !doc["FLACSettings"].IsObject()) {
+        spdlog::error("FLACSettings must be an object.");
+        return false;
+    }
+    if (doc.HasMember("FLACSettings")) {
         const auto& flacObj = doc["FLACSettings"];
-        if (flacObj.HasMember("ffmpeg_exe_name") && flacObj["ffmpeg_exe_name"].IsString()) {
-            FLACSettings.ffmpeg_exe_name = UTF8ToWide(flacObj["ffmpeg_exe_name"].GetString());
+        if (flacObj.HasMember("ffmpeg_exe_name")) {
+            const auto& value = flacObj["ffmpeg_exe_name"];
+            if (!value.IsString()) {
+                spdlog::error("FLACSettings.ffmpeg_exe_name must be a string.");
+                return false;
+            }
+            const auto selection = UTF8ToWide(std::string(value.GetString(), value.GetStringLength()));
+            if (!FFmpegRuntime::IsValidSelection(selection)) {
+                spdlog::error("FLACSettings.ffmpeg_exe_name must be bundled or an absolute executable path; PATH lookup is disabled.");
+                return false;
+            }
+            FLACSettings.ffmpeg_exe_name = FFmpegRuntime::IsBundledSelection(selection) ? L"bundled" : selection;
         }
         if (flacObj.HasMember("ffmpeg_convert_24bit_flac") && flacObj["ffmpeg_convert_24bit_flac"].IsString()) {
             FLACSettings.ffmpeg_convert_24bit_flac = UTF8ToWide(flacObj["ffmpeg_convert_24bit_flac"].GetString());

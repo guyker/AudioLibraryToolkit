@@ -23,6 +23,8 @@ are file-only warnings; the audit still records all such differences (F-010).
 If a source tree contains internal conversion temporary files, preparation fails before creating output, with
 guidance to review the recovery artifacts outside the source tree (F-001). Existing artifacts are left untouched;
 no new audit or failure folder is created for this preflight failure.
+Missing, mismatched or incapable encoder selections also fail before output creation, without a new audit/marker
+or failure folder (F-013). Failures after encoding begins retain the normal audit and failure-marking behaviour.
 
 ## Entry points
 - `conversion/FolderConvert.cpp#FolderConvert::ExecuteConversion` (marker, finish, rename), `conversion/FolderConvert.cpp#writeAudit`

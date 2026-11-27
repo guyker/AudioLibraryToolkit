@@ -2,21 +2,6 @@ if(NOT MSVC)
     message(FATAL_ERROR "Windows builds currently require the MSVC C++ toolchain.")
 endif()
 
-if(NOT DEFINED FFmpeg_ROOT)
-    if(DEFINED ENV{FFmpeg_ROOT})
-        set(_ffmpeg_default_root "$ENV{FFmpeg_ROOT}")
-    else()
-        set(_ffmpeg_default_root
-            "${PROJECT_SOURCE_DIR}/external/ffmpeg/ffmpeg-master-latest-win64-gpl-shared")
-    endif()
-    set(FFmpeg_ROOT "${_ffmpeg_default_root}" CACHE PATH
-        "FFmpeg SDK root (Windows); Linux uses pkg-config")
-endif()
-
-set(_ffmpeg_include_dir "${FFmpeg_ROOT}/include")
-set(_ffmpeg_library_dir "${FFmpeg_ROOT}/lib")
-set(_ffmpeg_binary_dir "${FFmpeg_ROOT}/bin")
-
 foreach(_required_path IN ITEMS "${_ffmpeg_include_dir}/libavformat/avformat.h" "${_ffmpeg_library_dir}")
     if(NOT EXISTS "${_required_path}")
         message(FATAL_ERROR
@@ -43,8 +28,6 @@ set_target_properties(FFmpeg::FFmpeg PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${_ffmpeg_include_dir}"
     INTERFACE_LINK_LIBRARIES "${_ffmpeg_libraries}")
 
-find_program(FFMPEG_EXECUTABLE NAMES ffmpeg.exe HINTS "${_ffmpeg_binary_dir}" REQUIRED)
-find_program(FFPROBE_EXECUTABLE NAMES ffprobe.exe HINTS "${_ffmpeg_binary_dir}" REQUIRED)
 find_program(MSVC_MT_EXECUTABLE NAMES mt.exe REQUIRED)
 
 function(afc_copy_windows_ffmpeg_runtime target)

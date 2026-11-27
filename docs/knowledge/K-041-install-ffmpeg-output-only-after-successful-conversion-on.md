@@ -6,7 +6,7 @@ area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-003]
 created: 2026-11-16
-reviewed: 2026-11-24
+reviewed: 2026-11-26
 cites:
   - path: AudioLibraryToolkit/src/conversion/MediaConversionTask.cpp
     symbol: "MediaConversionTask::InstallTemporaryOutput"

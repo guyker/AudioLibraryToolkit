@@ -39,6 +39,7 @@ add_library(AudioLibraryToolkitCore STATIC
     src/metadata/PreservationAudit.cpp
     src/metadata/TagLibReader.cpp
     src/platform/FFmpeg.cpp
+    src/platform/FFmpegRuntime.cpp
     src/platform/PlatformUtils.cpp
     src/repair/AudioRepair.cpp
     src/repair/RepairRules.cpp
@@ -47,6 +48,7 @@ add_library(AudioLibraryToolkitCore STATIC
     src/app/RunLogging.cpp)
 
 target_include_directories(AudioLibraryToolkitCore PUBLIC
+    "${PROJECT_BINARY_DIR}/generated"
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/app"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/catalog"
@@ -65,6 +67,7 @@ target_link_libraries(AudioLibraryToolkitCore
         spdlog_headers
         TagLib::TagLib
         Threads::Threads
+        ${CMAKE_DL_LIBS}
     PRIVATE
         rapidjson_headers)
 
@@ -93,6 +96,6 @@ endforeach()
 if(WIN32)
     target_compile_definitions(AudioLibraryToolkitCore PUBLIC UNICODE _UNICODE SPDLOG_WCHAR_FILENAMES)
     target_link_libraries(AudioLibraryToolkitCore PUBLIC shell32)
-    afc_copy_windows_ffmpeg_runtime(AudioLibraryToolkit)
     afc_embed_windows_manifest(AudioLibraryToolkit)
 endif()
+afc_stage_ffmpeg_runtime(AudioLibraryToolkit)

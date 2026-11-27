@@ -25,11 +25,19 @@ jobs:
             !/AudioLibraryToolkit.Desktop/
           sparse-checkout-cone-mode: false
           persist-credentials: false
-      - name: Install build and FFmpeg dependencies
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes cmake ninja-build g++ pkg-config ffmpeg \
-            libavformat-dev libavcodec-dev libavfilter-dev libavutil-dev libswresample-dev
+          sudo apt-get install --yes cmake ninja-build g++ pkg-config patchelf
+      - uses: actions/cache@v4
+        with:
+          path: external/ffmpeg
+          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('cmake/ffmpeg-lock.json') }}
+      - name: Restore locked FFmpeg SDK
+        run: python tools/prepare_ffmpeg.py
       - name: Configure
         run: cmake --preset linux-${{ matrix.configuration }}
       - name: Build
@@ -38,10 +46,11 @@ jobs:
         run: ctest --preset linux-${{ matrix.configuration }}
       - name: Install
         run: cmake --install out/build/linux-${{ matrix.configuration }}
-      - name: Launch installed executable
-        run: |
-          cd out/install/linux-${{ matrix.configuration }}/bin
-          ./AudioLibraryToolkit --help
+      - name: Verify relocated installed runtime
+        run: python tests/bundled_runtime.py --converter out/install/linux-${{ matrix.configuration }}/bin/AudioLibraryToolkit
+      - name: Create development package
+        if: matrix.configuration == 'release'
+        run: python tools/package_application.py --build-dir out/build/linux-release --development
 
   windows:
     name: Windows ${{ matrix.configuration }}
@@ -62,22 +71,15 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
-      - name: Download pinned FFmpeg SDK
-        shell: pwsh
-        run: |
-          $archive = Join-Path $env:RUNNER_TEMP "ffmpeg-sdk.zip"
-          $destination = Join-Path $env:RUNNER_TEMP "ffmpeg-sdk"
-          Invoke-WebRequest `
-            -Uri "https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-N-128227-g4811625b5f-win64-gpl-shared.zip" `
-            -OutFile $archive
-          $expectedHash = "3b1a38912999da560d048ccd91590c7e04dc73b75e478300c1053dce8b0689a6"
-          $actualHash = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actualHash -ne $expectedHash) {
-            throw "FFmpeg SDK SHA-256 mismatch: $actualHash"
-          }
-          Expand-Archive -Path $archive -DestinationPath $destination
-          $root = Get-ChildItem $destination -Directory | Select-Object -First 1 -ExpandProperty FullName
-          "FFmpeg_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@v4
+        with:
+          path: external/ffmpeg
+          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('cmake/ffmpeg-lock.json') }}
+      - name: Restore locked FFmpeg SDK
+        run: python tools/prepare_ffmpeg.py
       - name: Configure
         run: cmake --preset windows-${{ matrix.configuration }}
       - name: Build
@@ -86,9 +88,8 @@ jobs:
         run: ctest --preset windows-${{ matrix.configuration }}
       - name: Install
         run: cmake --install out/build/windows-${{ matrix.configuration }}
-      - name: Launch installed executable
-        shell: pwsh
-        run: |
-          Push-Location "out/install/windows-${{ matrix.configuration }}/bin"
-          .\AudioLibraryToolkit.exe --help
-          Pop-Location
+      - name: Verify relocated installed runtime
+        run: python tests/bundled_runtime.py --converter out/install/windows-${{ matrix.configuration }}/bin/AudioLibraryToolkit.exe
+      - name: Create development package
+        if: matrix.configuration == 'release'
+        run: python tools/package_application.py --build-dir out/build/windows-release --development

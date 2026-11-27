@@ -1,0 +1,31 @@
+set(_bin "${CMAKE_INSTALL_PREFIX}/@CMAKE_INSTALL_BINDIR@")
+set(_lib "${CMAKE_INSTALL_PREFIX}/lib/AudioLibraryToolkit")
+file(GET_RUNTIME_DEPENDENCIES
+    EXECUTABLES "${_bin}/AudioLibraryToolkit" "${_bin}/ffmpeg" "${_bin}/ffprobe"
+    DIRECTORIES "${_lib}"
+    PRE_EXCLUDE_REGEXES "^linux-vdso" "^ld-linux" "^lib(c|m|dl|pthread|rt|resolv|util)\\.so"
+    RESOLVED_DEPENDENCIES_VAR _resolved
+    UNRESOLVED_DEPENDENCIES_VAR _unresolved)
+if(_unresolved)
+    message(FATAL_ERROR "Unresolved application runtime dependencies: ${_unresolved}")
+endif()
+foreach(_dependency IN LISTS _resolved)
+    string(FIND "${_dependency}" "${_lib}/" _local)
+    if(NOT _local EQUAL 0)
+        file(COPY "${_dependency}" DESTINATION "${_lib}" FOLLOW_SYMLINK_CHAIN)
+    endif()
+endforeach()
+file(GLOB _libraries "${_lib}/*.so*")
+foreach(_library IN LISTS _libraries)
+    if(NOT IS_SYMLINK "${_library}")
+        execute_process(COMMAND "@PATCHELF_EXECUTABLE@" --set-rpath "$ORIGIN" "${_library}"
+            COMMAND_ERROR_IS_FATAL ANY)
+    endif()
+endforeach()
+file(GLOB _compiler_notices "/usr/share/doc/gcc-*-base/copyright")
+foreach(_notice IN LISTS _compiler_notices)
+    get_filename_component(_parent "${_notice}" DIRECTORY)
+    get_filename_component(_package "${_parent}" NAME)
+    file(INSTALL "${_notice}" DESTINATION "${CMAKE_INSTALL_PREFIX}/@CMAKE_INSTALL_DOCDIR@/licenses"
+        RENAME "${_package}.txt")
+endforeach()

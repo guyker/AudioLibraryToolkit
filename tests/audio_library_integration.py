@@ -1730,10 +1730,11 @@ class ConversionTests(unittest.TestCase):
                           for p in self.source.rglob("*") if p.is_file()}, before)
 
     def test_flac_reports_album_before_conversion_failure(self):
+        self.track.write_bytes(b"invalid audio")
+        self.original_hash = hashlib.sha256(self.track.read_bytes()).digest()
         result = self.legacy(
             [{"isActive": True, "mediaPath": str(self.source), "mediaName": "Library"}],
-            "1\nRUN\n", LogLevel=6,
-            FLACSettings={"ffmpeg_exe_name": str(self.work / "missing-ffmpeg.exe")})
+            "1\nRUN\n", LogLevel=6)
         self.assertNotEqual(result.returncode, 0)
         album_message = f"Processing album folder: {self.source}"
         self.assertIn(album_message, result.stdout)
@@ -3737,7 +3738,7 @@ class ConversionTests(unittest.TestCase):
         self.assertFalse(list(self.output.glob(".afc-convert-*")))
         self.assertEqual(hashlib.sha256(self.track.read_bytes()).digest(), self.original_hash)
 
-    def test_ffmpeg_diagnostic_identifies_original_source(self):
+    def test_non_encoder_override_is_rejected_before_conversion(self):
         config = self.work / "diagnostic.json"
         config.write_text(json.dumps({
             "FLACSettings": {"ffmpeg_exe_name": str(ARGS.ffprobe)},
@@ -3747,13 +3748,12 @@ class ConversionTests(unittest.TestCase):
         log_path = Path(next(line.split("Session log: ", 1)[1]
                              for line in result.stdout.splitlines() if "Session log: " in line))
         diagnostic = log_path.read_text(encoding="utf-8")
-        self.assertIn(f"FFmpeg [{self.track}]:", diagnostic)
-        self.assertIn("FFmpeg failed with exit code", diagnostic)
-        self.assertIn("FFmpeg failed with exit code", result.stdout)
-        self.assertNotIn(f"FFmpeg [{self.track}]:", result.stdout + result.stderr)
+        self.assertIn("not an FFmpeg encoder", diagnostic)
+        self.assertIn("not an FFmpeg encoder", result.stdout + result.stderr)
+        self.assertIn(str(ARGS.ffprobe), diagnostic)
         self.assertFalse(self.mp3().exists())
 
-    def test_ffmpeg_executable_found_on_path(self):
+    def test_legacy_ffmpeg_name_selects_bundle(self):
         config = self.work / "path-executable.json"
         config.write_text(json.dumps({
             "FLACSettings": {"ffmpeg_exe_name": Path(ARGS.ffmpeg).name},
@@ -3764,6 +3764,7 @@ class ConversionTests(unittest.TestCase):
         result = run(ARGS.converter, "convert", self.source, "--output-dir", self.output,
                      "--config", config, "--to", "mp3", env=env)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("FFmpeg encoder (bundled)", result.stdout)
         self.assertTrue(self.mp3().is_file())
         self.assertEqual(hashlib.sha256(self.track.read_bytes()).digest(), self.original_hash)
 

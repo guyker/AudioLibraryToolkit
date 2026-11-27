@@ -75,6 +75,7 @@ target_include_directories(tag INTERFACE
 
 find_package(Threads REQUIRED)
 
+include(cmake/FFmpegSDK.cmake)
 if(WIN32)
     include(cmake/platform/Windows.cmake)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -86,12 +87,7 @@ endif()
 add_subdirectory(AudioLibraryToolkit)
 
 find_package(Git QUIET)
-if(WIN32)
-    set(_afc_ffmpeg_include_dir "${_ffmpeg_include_dir}")
-else()
-    find_path(_afc_ffmpeg_include_dir NAMES libavutil/version.h
-        HINTS ${FFmpeg_INCLUDE_DIRS} NO_CACHE)
-endif()
+set(_afc_ffmpeg_include_dir "${_ffmpeg_include_dir}")
 get_directory_property(_afc_utfcpp_found DIRECTORY "${taglib_SOURCE_DIR}" DEFINITION utf8cpp_FOUND)
 get_directory_property(_afc_utfcpp_version DIRECTORY "${taglib_SOURCE_DIR}" DEFINITION utf8cpp_VERSION)
 
@@ -114,6 +110,8 @@ add_custom_target(check_taglib_updates ALL
     VERBATIM)
 add_dependencies(AudioLibraryToolkitCore check_taglib_updates)
 
+# Keep runtime packaging separate from the fetched TagLib development SDK's install rules.
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME AudioLibraryToolkit)
 install(TARGETS AudioLibraryToolkit
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 # The executable finds this template at <bindir>/../share/AudioLibraryToolkit with the default layout.
@@ -140,6 +138,8 @@ if(EXISTS "${taglib_SOURCE_DIR}/3rdparty/utfcpp/LICENSE")
 endif()
 
 if(WIN32)
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    include(InstallRequiredSystemLibraries)
     install(FILES ${_ffmpeg_runtime_dlls}
         DESTINATION "${CMAKE_INSTALL_BINDIR}")
     if(EXISTS "${FFmpeg_ROOT}/LICENSE.txt")
@@ -149,6 +149,22 @@ if(WIN32)
         message(WARNING "The selected FFmpeg SDK has no LICENSE.txt; obtain its licence and redistribution notices separately.")
     endif()
 endif()
+
+install(PROGRAMS
+    "$<TARGET_FILE_DIR:AudioLibraryToolkit>/ffmpeg${_ffmpeg_suffix}"
+    "$<TARGET_FILE_DIR:AudioLibraryToolkit>/ffprobe${_ffmpeg_suffix}"
+    DESTINATION "${CMAKE_INSTALL_BINDIR}")
+if(NOT WIN32)
+    install(DIRECTORY "${PROJECT_BINARY_DIR}/lib/AudioLibraryToolkit/"
+        DESTINATION "lib/AudioLibraryToolkit" USE_SOURCE_PERMISSIONS)
+    install(FILES "${FFmpeg_ROOT}/LICENSE.txt"
+        DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses" RENAME FFmpeg.txt)
+    configure_file(cmake/InstallLinuxRuntime.cmake.in
+        "${PROJECT_BINARY_DIR}/InstallLinuxRuntime.cmake" @ONLY)
+    install(SCRIPT "${PROJECT_BINARY_DIR}/InstallLinuxRuntime.cmake")
+endif()
+install(FILES "${PROJECT_SOURCE_DIR}/cmake/ffmpeg-lock.json"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/AudioLibraryToolkit")
 
 if(BUILD_TESTING)
     add_subdirectory(tests)

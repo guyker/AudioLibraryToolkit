@@ -1,5 +1,10 @@
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+add_test(NAME ffmpeg-sdk-setup
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/ffmpeg_setup.py")
+add_test(NAME ffmpeg-bundled-runtime
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/bundled_runtime.py"
+        --converter "$<TARGET_FILE:AudioLibraryToolkit>")
 add_test(NAME taglib-update-check
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/taglib_update_check.py"
         "${CMAKE_COMMAND}" "${PROJECT_SOURCE_DIR}/cmake/CheckTagLibUpdate.cmake")
@@ -42,9 +47,7 @@ foreach(_target IN ITEMS preservation_audit_test warning_regressions_test media_
     target_compile_options(${_target} PRIVATE
         "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/W3;/utf-8;/permissive->"
         "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>>:-Wall;-Wextra;-Wpedantic>")
-    if(WIN32)
-        afc_copy_windows_ffmpeg_runtime(${_target})
-    endif()
+    afc_stage_ffmpeg_runtime(${_target})
 endforeach()
 
 add_test(NAME preservation-audit

@@ -85,6 +85,32 @@ int main(int argc, char** argv)
             "The default configuration contained a local output or library");
         require(fs::is_regular_file(workingConfig), "Working-directory config was changed");
 
+        const auto encoderConfig = testRoot / "encoder.json";
+        for (const auto& name : { L"", L"ffmpeg", L"ffmpeg.exe", L"bundled" }) {
+            auto settings = AppSettingsJson::GetDefaultSettings();
+            settings.FLACSettings.ffmpeg_exe_name = name;
+            settings.saveToFile(encoderConfig);
+            const auto loaded = AppSettingsJson::LoadWithDefaults(encoderConfig, errorMessage);
+            require(loaded && loaded->FLACSettings.ffmpeg_exe_name == L"bundled",
+                "A legacy FFmpeg default retained host executable lookup");
+        }
+        for (const auto& invalid : { R"("ffmpeg-custom")", R"("./ffmpeg")", "false", R"("ffmpeg\u0000.exe")" }) {
+            {
+                std::ofstream file(encoderConfig);
+                file << "{\"FLACSettings\":{\"ffmpeg_exe_name\":" << invalid << "}}";
+            }
+            require(!AppSettingsJson::LoadWithDefaults(encoderConfig, errorMessage),
+                "Invalid FFmpeg selection was accepted");
+        }
+        auto overrideSettings = AppSettingsJson::GetDefaultSettings();
+        overrideSettings.FLACSettings.ffmpeg_exe_name =
+            CommonUtils::utf8ToWstring(CommonUtils::path_to_utf8(testRoot / fs::path(u8"encoder-\u97f3")));
+        overrideSettings.saveToFile(encoderConfig);
+        const auto overrideLoaded = AppSettingsJson::LoadWithDefaults(encoderConfig, errorMessage);
+        require(overrideLoaded && overrideLoaded->FLACSettings.ffmpeg_exe_name ==
+                overrideSettings.FLACSettings.ffmpeg_exe_name,
+            "An absolute Unicode encoder override was not preserved");
+
         writeConfig(expectedConfig, 4);
         auto preferred = AppSettingsJson::LoadForCommandLine(std::nullopt, errorMessage);
         require(preferred != nullptr && preferred->LogLevel == 4,

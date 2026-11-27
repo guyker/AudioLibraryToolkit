@@ -22,7 +22,7 @@ const std::string kConfigurationHelp =
     "  Version (string, default 1.0.0): informational config value; --version reports the executable version.\n"
     "  OutDirectory (path): required output root unless --output-dir is supplied.\n"
     "  DatabaseFileName (string, default all_albums.db): legacy value; db import uses a library-named database.\n"
-    "  FLACSettings.ffmpeg_exe_name (string, default ffmpeg): executable used by convert.\n"
+    "  FLACSettings.ffmpeg_exe_name (string, default bundled): bundled encoder; an absolute path opts into an external encoder with a warning. No PATH lookup.\n"
     "  FLACSettings.ffmpeg_convert_24bit_flac (string, default -map 0:a:0 -af aresample=osf=s16:osr=44100:dither_method=triangular -c:a flac -y -v warning -stats): compatibility value only; conversion uses fixed options and determines overwrite behavior separately.\n"
     "  FLACSettings.ffmpeg_get_metadata_tags (string, default -v quiet -print_format json -show_format -show_streams -show_chapters): compatibility value only; metadata reads use fixed options or the library API.\n"
     "  MediaDirectoryList (array): legacy menu libraries; subcommands use positional input paths instead.\n"

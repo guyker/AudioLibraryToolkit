@@ -6,10 +6,10 @@ area: [AudioLibraryToolkit]
 status: active
 supersedes: [K-014]
 created: 2026-11-19
-reviewed: 2026-11-24
+reviewed: 2026-11-26
 cites:
-  - path: AudioLibraryToolkit/src/conversion/MediaConversionTask.cpp
-    symbol: quoteWindowsArgument
+  - path: AudioLibraryToolkit/src/platform/FFmpegRuntime.cpp
+    symbol: QuoteWindowsArgument
 ---
 
 **Fact:** `quoteWindowsArgument` escapes every FFmpeg argument using Windows CRT parsing rules before

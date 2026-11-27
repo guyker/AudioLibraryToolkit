@@ -215,7 +215,7 @@ No Node.js, npm, frontend sources or graphical environment are required.
 In Visual Studio, open the repository folder (File > Open > Folder) and choose a Windows preset; Visual Studio
 reads `CMakePresets.json` directly, so no solution or project files are kept.
 
-Initialize submodules (`git submodule update --init --recursive`) and install CMake 3.28+, Ninja, Python 3
+Initialize submodules (`git submodule update --init --recursive`) and install CMake 3.28+, Ninja, Python 3.12+
 and a C++20 toolchain. CMake fetches the pinned TagLib revision for audio metadata. Each build checks GitHub
 for a newer stable TagLib release and reports one if available; the pin is never changed automatically. If the
 check cannot reach GitHub, it reports that the check was unavailable and the build continues. The check reports
@@ -224,20 +224,18 @@ Command Prompt or `$LASTEXITCODE` in PowerShell; zero means success.
 Each build also reports the versions of the selected external dependencies, including the FFmpeg headers and build
 tool, TagLib, CLI11, spdlog, fmt, SQLite, RapidJSON, utfcpp and optional ZLIB.
 
-On Windows, use an x64 Visual Studio Developer PowerShell/Command Prompt. Set the `FFmpeg_ROOT` environment
-variable or pass `-DFFmpeg_ROOT=<path>` for a matching shared FFmpeg SDK containing `include`, `lib` and `bin`
-directories; by default CMake checks
-`external\ffmpeg\ffmpeg-master-latest-win64-gpl-shared\`. The SDK must include the five FFmpeg import
-libraries and runtime DLLs used by the application.
-For conversion, FFmpeg 6.0+ must also be on `PATH` or selected by the `FLACSettings.ffmpeg_exe_name`
-configuration setting; installing the application does not install the FFmpeg executable. Conversion progress
-uses the audio-encoder statistics options (`-stats_enc_post` and `-stats_enc_post_fmt`) available in these versions.
+On Windows, use an x64 Visual Studio Developer PowerShell/Command Prompt. On Linux, the supported baseline is
+Ubuntu 24.04 x86_64 with GCC 13; install `patchelf` and pkg-config along with the build prerequisites.
+Neither platform uses a system FFmpeg installation for the normal build or bundled runtime.
 
-On Linux, the supported CI reference is Ubuntu 24.04 x86-64 with GCC 13. Install FFmpeg runtime tools and
-development packages for libavformat, libavcodec, libavfilter, libavutil and libswresample, plus pkg-config.
-The FFmpeg executable must include the `libmp3lame` encoder for MP3 integration tests. With Ubuntu's FFmpeg 6.1.1,
-existing tests fail for AAC/ALAC M4A preservation and one ID3v2.3 comment lookup; see
-`docs/knowledge/K-063-ffmpeg-6-1-m4a-vendor-ids-fail-the-flac-preservation-audit.md` for the conversion defect.
+Before configuring, run `python tools\prepare_ffmpeg.py` (`python3 tools/prepare_ffmpeg.py` on Linux).
+This developer/CI restore downloads the platform SDK pinned by `cmake/ffmpeg-lock.json`, verifies its SHA-256 and
+extracts it under ignored `external/ffmpeg/<build>/<platform>`. Git stores the lock/scripts, not binaries or a
+new submodule. Subsequent runs verify and reuse the SDK; `--offline` also permits restoration from the cached
+archive in `out/dependencies/ffmpeg`. `--verify-only` never downloads.
+For another SDK location, restore with `--root <path>` and pass `-DFFmpeg_ROOT:PATH=<path>` to CMake (or set
+`FFmpeg_ROOT` in the environment). It must contain the same verified locked SDK. A stale cache pointing to an old
+SDK fails with setup instructions rather than falling back to PATH.
 
 Configure, build and test using the matching preset:
 
@@ -250,13 +248,47 @@ ctest --preset windows-debug
 Use `linux-debug` on Linux; `windows-release` and `linux-release` select Release builds. Build output is
 isolated under `out/build/<preset>`. To stage a Windows build, run `cmake --install out\build\windows-debug`;
 on Linux, run `cmake --install out/build/linux-debug`. Add `--prefix <directory>` to choose another location.
-Linux uses installed system FFmpeg libraries. Windows stages the matched runtime DLLs beside
-`AudioLibraryToolkit.exe`.
+Installation includes the matching FFmpeg tools and runtime: DLLs beside the Windows executables, or private
+libraries under `lib/AudioLibraryToolkit` on Linux.
 For Windows Debug, run `out\build\windows-debug\AudioLibraryToolkit\AudioLibraryToolkit.exe`.
 Existing build directories may still contain obsolete executables under `FlacConvert`.
 
 The root VS Code workspace provides a Debug build task and launch configurations using these presets and the C/C++
 extension. On Windows, start VS Code from an x64 Visual Studio developer environment so CMake can find MSVC.
+
+## Bundled FFmpeg and packaging
+
+Copy/extract the **whole installed package**, not just `AudioLibraryToolkit.exe` or the Linux executable.
+End users do not install or download FFmpeg: it is already in the package and works offline within the supported
+OS baseline. Application startup checks linked library versions and locations. If a required DLL/shared object is
+absent, the OS loader may fail before an application diagnostic can appear.
+
+`FLACSettings.ffmpeg_exe_name` defaults to `"bundled"`; omitted/empty values and legacy `"ffmpeg"` /
+`"ffmpeg.exe"` values select the encoder beside the application. PATH and the working directory are not searched.
+An explicit absolute executable path remains supported, with a warning that it opts out of bundled encoder-version
+consistency; linked libraries still come from the application package. Other relative paths/bare names and invalid
+types are rejected. Before actual encoding, the application checks the encoder identity and required capabilities.
+Failure creates no conversion output and never falls back to a host encoder. Previews and no-encode operations
+do not run encoder probes.
+
+After a Release build, create a local development archive with:
+
+```text
+python tools\package_application.py --build-dir out\build\windows-release --development
+```
+
+Use the Linux paths/preset on Linux. The script performs a clean temporary install, checks the runtime, and creates
+a named development-only ZIP/tar.gz under `out/packages`, including a file-hash manifest. Use `--output-dir` for
+another destination; an existing runtime archive is never overwritten.
+
+**Redistribution is currently blocked pending corresponding-source/licensing review.** Omitting `--development`
+requires a reviewed, matching `cmake/ffmpeg-redistribution.json` and the recorded source companion archives.
+Those archives are placed beside the runtime package; end users need not download them to run the app.
+Before distribution, provide the exact application/FFmpeg/dependency sources, patches, build materials and required
+notices, with clear source-download directions. A generic source link is insufficient.
+See [third-party notices](../THIRD_PARTY_NOTICES.md) and [F-013](../docs/features/F-013-bundled-ffmpeg.md).
+The lock guarantees identity, not indefinite upstream availability; retain approved SDK/source pairs in controlled
+release storage outside Git. This does not certify identical encoded bytes across operating systems or CPUs.
 
 ## Configuration and first run
 
@@ -537,10 +569,10 @@ CTest registers the native regression checks and the generated-fixture Python in
 the Python suite directly:
 
 ```text
-python tests\audio_library_integration.py --converter out\build\windows-debug\AudioLibraryToolkit\AudioLibraryToolkit.exe --ffmpeg external\ffmpeg\ffmpeg-master-latest-win64-gpl-shared\bin\ffmpeg.exe --ffprobe external\ffmpeg\ffmpeg-master-latest-win64-gpl-shared\bin\ffprobe.exe
+python tests\audio_library_integration.py --converter out\build\windows-debug\AudioLibraryToolkit\AudioLibraryToolkit.exe --ffmpeg out\build\windows-debug\AudioLibraryToolkit\ffmpeg.exe --ffprobe out\build\windows-debug\AudioLibraryToolkit\ffprobe.exe
 ```
 
-`FLACSettings.ffmpeg_exe_name` selects the conversion executable. The `ffmpeg_convert_24bit_flac` and
+`FLACSettings.ffmpeg_exe_name` follows the bundled/absolute-override policy above. The `ffmpeg_convert_24bit_flac` and
 `ffmpeg_get_metadata_tags` strings are compatibility fields, not runtime overrides: conversion and metadata options
 are defined in code. Library output filenames are generated from `mediaName`; old `resultPath` and `dbPath` fields
 are not read.

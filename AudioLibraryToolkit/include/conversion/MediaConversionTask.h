@@ -25,9 +25,9 @@ public:
     using ProgressCallback = std::function<void(std::optional<double>, std::string_view)>;
     MediaConversionTask() = delete;
     MediaConversionTask(const fs::path sourcePath, const fs::path targetPath, const fs::path targetTMPPath,
-        bool overwriteTarget = true, ConversionOptions options = {}) :
+        bool overwriteTarget = true, ConversionOptions options = {}, fs::path ffmpegExecutable = {}) :
         _sourcePath(sourcePath), _targetPath(targetPath), _targetTMPPath(targetTMPPath),
-        _overwriteTarget(overwriteTarget), _options(options), _status(0) {}
+        _overwriteTarget(overwriteTarget), _options(options), _ffmpegExecutable(std::move(ffmpegExecutable)), _status(0) {}
 
     virtual int Run();
     virtual int PostRun();
@@ -50,6 +50,7 @@ protected:
     const fs::path _targetTMPPath;
     const bool _overwriteTarget;
     const ConversionOptions _options;
+    fs::path _ffmpegExecutable;
     bool _preserveOriginalMetadata{ false };
     PreservationAudit::Result _audit;
     const char* _failureType{ "AUDIO" };

@@ -35,6 +35,7 @@ It runs as explicit CLI commands, a versioned headless worker, or, with no argum
 | Metadata archive | `src/metadata/FlacMetadata.cpp`, `include/metadata/FlacMetadata.h` | `FlacMetadata::Save` / `FlacMetadata::Verify` byte-exact archive as binary `.flac-metadata` or `.flac-metadata.json` (readable scan-schema metadata + Base64 archive; only the archive is verified); scan optionally writes binary metadata-only archives for native FLAC |
 | Preservation audit | `src/metadata/PreservationAudit.cpp`, `include/metadata/PreservationAudit.h` | `PreservationAudit::Compare` (tags, pictures, chapters, opaque blocks), `PreservationAudit::VerifyCopy` |
 | FFmpeg library access | `src/platform/FFmpeg.cpp`, `include/platform/FFmpeg.h`, `include/platform/FFmpegWrapper.h` | `FFmpeg::GetFFprobeMetadataAPI` (conversion/duplicate re-probes) and the process-wide log callback |
+| FFmpeg runtime | `src/platform/FFmpegRuntime.cpp`, `include/platform/FFmpegRuntime.h` | `ValidateLibraries` checks loaded library identity/location; `ResolveEncoder` selects and preflights the app-relative encoder or an explicit absolute override |
 | Catalog metadata | `src/metadata/TagLibReader.cpp`, `include/metadata/TagLibReader.h`, `include/catalog/MediaRecord.h`, `src/catalog/MediaRecordJson.cpp` | Read-only TagLib extraction, normalized multi-value tags, source-scoped raw tags, picture descriptors, and schema-v2 JSON |
 | Track/album model | `src/media/MediaTrack.cpp`, `include/media/MediaTrack.h`, `include/media/MediaInformation.h`, `include/media/MediaAlbum.h` | `MediaTrack` (legacy probe parsing/comparison), `FFprobeOutput`, `MediaAlbum` |
 | Catalog database | `src/catalog/CatalogDatabase.cpp`, `include/catalog/CatalogDatabase.h` | Schema-v2 SQLite writer, stable library-relative identity, incremental upsert and stale-file cleanup |
@@ -202,7 +203,10 @@ and actionable preservation warnings and errors remain visible.
    prints `ShowConversionPreview`, and requires `RUN` (`ConfirmPreview`). Duplicate destinations or existing targets
    without overwrite block the whole run; `FolderConvert::ReportDestinationConflicts` provides the same
    concise diagnostics for the menu and CLI without starting conversion or changing existing outputs.
-3. **Execute** – `FolderConvert::ExecuteConversion` creates the library folder (ownership = created by this run),
+3. **Execute** – for a plan with audio conversions, `FolderConvert::ExecuteConversion` resolves and preflights the
+   encoder before entering or creating the output directory. Missing, incompatible or incapable encoders fail
+   without creating an audit, marker or failure folder. Preview and no-encode plans do not launch an encoder.
+   It then creates the library folder (ownership = created by this run),
    creates the `.conversion-in-progress` marker directory, then processes audio files sequentially:
    `MediaConversionTask::Run` (convert + verify + audit) then `MediaConversionTask::PostRun` (install). For FLAC,
    announce the source track's parent folder when it changes, before conversion, and indicate the transition to
@@ -624,7 +628,7 @@ fail configuration loading.
 | `RecursionDirectorySearchDepth` | 10 | Discovery: folders deeper than this below the library root (root children are depth 1) are neither cataloged nor traversed |
 | `AlbumsSplitThreshold` | 2000 (>0) | JSON batch size |
 | `JsonBatchTargetBytes` | 0 (disabled) | Hard output JSON byte limit; oversized albums split into track fragments |
-| `FLACSettings.ffmpeg_exe_name` | `ffmpeg` | Conversion executable; the other `FLACSettings` strings are not used at runtime |
+| `FLACSettings.ffmpeg_exe_name` | `bundled` | App-relative encoder; empty, `ffmpeg` and `ffmpeg.exe` are bundled aliases. External overrides must be absolute executable paths and warn; no PATH/working-directory fallback. Other `FLACSettings` strings are not used at runtime |
 | `MetadataSidecars.Format` | `binary` (`binary`\|`json`) | Sidecar encoding for conversions |
 | `MetadataSidecars.ConvertToFlac`, `MetadataSidecars.ConvertToMp3` | `disabled` (`disabled`\|`optional`\|`required`) | Per-target sidecar policy; invalid values fail loading |
 | `TagIssueResolution` | `ask` (`ask`\|`auto`) | MP3 tag issues: `ask` prompts in the menu and fails the CLI before writing; `auto` applies `Mp3TagIssues` recommendations |
@@ -681,7 +685,8 @@ as usable audio metadata.
 
 ## Threading and process lifetime
 
-- Conversion: single thread; one synchronous FFmpeg child at a time (`_wspawnvp(_P_WAIT)` / `fork`+`execvp`+`waitpid`).
+- Conversion: single thread; one synchronous FFmpeg child at a time (`CreateProcessW` / `fork`+`execv`+`waitpid`).
+  Encoder preflight runs bounded identity/capability probes (10 seconds and 2 MiB output per probe).
 - Metadata import: when enabled, `BoundedTaskRunner::ForEach` runs a bounded per-album set of worker threads that
   claim track indexes from an atomic counter.
   At most `min(valid tracks in album, effective worker cap)` workers run; `MetadataScanMaxThreads=0` selects hardware
@@ -712,9 +717,9 @@ conversion records its class in `MediaConversionTask::GetFailureType`.
 
 Portable core with narrow conditional blocks (K-006). Windows-specific code: `wmain`, console code pages,
 `PlatformUtils::UserConfigDirectory`, `PlatformUtils::WindowsLongPath`, `ScopedCurrentDirectory`'s long-path fallback (short working-directory anchor and
-directory handles opened without delete sharing), `quoteWindowsArgument` + `_wspawnvp`, `MoveFileExW`,
+directory handles opened without delete sharing), `FFmpegRuntime::QuoteWindowsArgument` + `CreateProcessW`, `MoveFileExW`,
 `CompareStringOrdinal`, SQLite `win32-longpath` VFS (K-042). POSIX branches:
-`fork`/`execvp`, rename/hard-link install, `sqlite3_open`. `JsonUtils::tryParseMember` uses the portable
+`fork`/`execv`, rename/hard-link install, `sqlite3_open`. `JsonUtils::tryParseMember` uses the portable
 `JsonUtils::caseInsensitiveEquals` helper for case-insensitive keys (K-033).
 
 ## Build and external dependencies
@@ -722,17 +727,44 @@ directory handles opened without delete sharing), `quoteWindowsArgument` + `_wsp
 CMake is the shared project build (`CMakeLists.txt`, `AudioLibraryToolkit/CMakeLists.txt`), with Ninja presets for native
 Windows and Linux Debug/Release builds (`CMakePresets.json`). `AudioLibraryToolkitCore` owns the shared implementation and
 links the SQLite amalgamation, CLI11, header-only spdlog and FFmpeg; `AudioLibraryToolkit` owns the executable entry point.
-Windows uses MSVC and a matching shared FFmpeg SDK selected by `FFmpeg_ROOT` (default
-`external/ffmpeg/ffmpeg-master-latest-win64-gpl-shared/`); CMake stages the SDK runtime DLLs beside the executable
-(K-062). Linux uses pkg-config imported targets for the system FFmpeg development packages. Both platforms use the
+Windows x64 and Ubuntu 24.04 x86_64 use the platform-specific shared SDKs in `cmake/ffmpeg-lock.json`, pinned to
+one FFmpeg revision/variant with archive SHA-256 checksums. `tools/prepare_ffmpeg.py` downloads only during explicit
+developer/CI dependency restore, before CMake configuration, into ignored `external/ffmpeg/<build>/<platform>`.
+An SDK inventory stamp detects subsequent payload changes; a cached archive permits offline restoration.
+`cmake/FFmpegSDK.cmake` verifies the SDK without downloading and assigns exact headers, libraries and tools,
+replacing stale tool-cache selections. `FFmpeg_ROOT` can select another restored location (CMake cache, then
+environment); it cannot select an unrelated version. Both platforms use the
 tracked SQLite amalgamation and initialized CLI11/spdlog submodules. TagLib is fetched by CMake at a pinned
 revision. Each build checks GitHub for a newer stable release, reports it without changing the pin, and continues
 if the check is unavailable. Builds also report selected external dependency versions, distinguishing FFmpeg
 headers from the configured executable. ZLIB is optional in that dependency, so compressed ID3 frame support depends on build-time ZLIB
-availability. Runtime conversion still requires the `ffmpeg` executable with `libmp3lame` for MP3.
+availability.
 
-`cmake --install` stages the executable; Linux links system FFmpeg libraries, while Windows installs the matched
-runtime DLLs. CMake is the only build description; Visual Studio opens the CMake presets directly.
+### Bundled runtime and packages
+
+`cmake --install` stages the application, matching `ffmpeg`/`ffprobe`, configuration template, SDK lock and notices.
+Windows installs SDK DLLs and the Release MSVC runtime beside the executables. Linux places shared objects in
+`lib/AudioLibraryToolkit`; application/tools use `$ORIGIN/../lib/AudioLibraryToolkit`, and private libraries use their
+own `$ORIGIN` RUNPATH because ELF RUNPATH is not inherited transitively. Installation discovers and copies non-system
+dependencies, including the C++ runtime; glibc/loader and documented OS baseline dependencies remain system-provided.
+The prepared SDK is never patched: RPATH changes apply only to staged copies.
+
+At startup, `FFmpegRuntime::ValidateLibraries` checks the five linked FFmpeg API versions and loaded locations against
+the build and private runtime directory. Windows resolves loaded versioned DLL modules explicitly (an imported
+function address can identify an executable thunk); Linux uses `dladdr`. Missing ordinary imports can stop the OS
+loader before application diagnostics run. Worker startup diagnostics stay on stderr, never protocol stdout.
+Conversion selects the sibling encoder via `PlatformUtils::ExecutableDirectory`, not argv[0], cwd or PATH, and checks
+its build identity, encoder-statistics options and required FLAC/MP3 encoder. An absolute external override warns and
+opts out of encoder-version consistency only; it cannot replace the linked libraries. CLI, menu and worker share this
+policy. There is no runtime download or silent fallback.
+
+`tools/package_application.py` installs into a clean temporary tree and writes a ZIP (Windows) or tar.gz (Linux), with
+a hashed runtime inventory. Normal packaging requires Release configuration and matching, reviewed source records
+in `cmake/ffmpeg-redistribution.json`; matching source companion archives are copied alongside the runtime archive.
+The current provenance record is pending: exact FFmpeg/dependency sources, patches and build materials have not been
+fully established. `--development` explicitly creates local/test artifacts, not a redistribution approval.
+See `THIRD_PARTY_NOTICES.md` and F-013. Binaries/downloads are not committed or represented by a Git submodule.
+CMake remains the only build description; Visual Studio opens the CMake presets directly.
 
 CTest registers the Python integration suite and native preservation/warning regression tests. The native tests link
 `AudioLibraryToolkitCore` rather than IDE-generated object files; `tests/run_native_regression.py` creates temporary audio

@@ -6,7 +6,7 @@ area: ["External Dependencies"]
 status: active
 supersedes: [K-044]
 created: 2026-11-22
-reviewed: 2026-11-24
+reviewed: 2026-11-26
 cites:
   - path: cmake/platform/Windows.cmake
     symbol: afc_copy_windows_ffmpeg_runtime

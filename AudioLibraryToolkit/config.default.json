@@ -3,7 +3,9 @@
   "OutDirectory": "",
   "DatabaseFileName": "all_albums.db",
   "FLACSettings": {
-    "ffmpeg_exe_name": "ffmpeg",
+    // "bundled" uses the matching encoder beside the application, never PATH.
+    // An absolute external executable path is an explicit, warned compatibility override.
+    "ffmpeg_exe_name": "bundled",
     "ffmpeg_convert_24bit_flac": "-map 0:a:0 -af aresample=osf=s16:osr=44100:dither_method=triangular -c:a flac -y -v warning -stats",
     "ffmpeg_get_metadata_tags": "-v quiet -print_format json -show_format -show_streams -show_chapters"
   },
