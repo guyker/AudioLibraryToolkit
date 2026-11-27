@@ -103,6 +103,13 @@ add_test(NAME worker-protocol
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/worker_protocol.py"
         "$<TARGET_FILE:AudioLibraryToolkit>")
 if(WIN32)
+    add_executable(repair_publication_windows_test repair_publication_windows.cpp)
+    target_link_libraries(repair_publication_windows_test PRIVATE AudioLibraryToolkitCore)
+    target_compile_features(repair_publication_windows_test PRIVATE cxx_std_20)
+    target_compile_options(repair_publication_windows_test PRIVATE
+        "$<$<CXX_COMPILER_ID:MSVC>:/W3;/utf-8;/permissive->")
+    afc_stage_ffmpeg_runtime(repair_publication_windows_test)
+    add_test(NAME repair-publication-windows COMMAND "$<TARGET_FILE:repair_publication_windows_test>")
     add_test(NAME config-windows-console
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/windows_console_setup.py"
             "$<TARGET_FILE:AudioLibraryToolkit>")

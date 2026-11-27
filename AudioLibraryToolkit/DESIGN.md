@@ -360,7 +360,13 @@ Repair preparation rejects a source root or any discovered source entry that is 
 including regular-file links. Repair output remains separate from the source; staging uses held directory handles
 and no-follow file creation, then verifies before publication. Output directory chains are revalidated before
 staging, installation and report writes. Windows publication uses the anchored, checked output path and verifies
-the installed file identity. A separate same-permission process deliberately moving directories between checks can
+the installed file identity. Before staged content verification, Windows closes the flushed writer and reopens
+the same regular file under a read-only handle that excludes writes and deletion. Identity and size must survive
+that transition; its finalized last-write time becomes the publication baseline, avoiding false change alarms
+when closing a writer updates timestamps on network storage. Publication still checks identity, size and timestamp,
+and installed content is verified again. Identity-query failures and mismatched fields are reported distinctly.
+A successful run with no repairs needed still publishes JSON and HTML reports without copying audio.
+A separate same-permission process deliberately moving directories between checks can
 still race ordinary filesystem operations.
 
 ### Scan to JSON (menu 2, `scan`)

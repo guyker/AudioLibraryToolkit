@@ -262,6 +262,38 @@ private:
 #endif
 };
 
+#ifdef _WIN32
+BY_HANDLE_FILE_INFORMATION verifyOutputIdentity(HANDLE handle,
+    const BY_HANDLE_FILE_INFORMATION& expected, const fs::path& path, bool checkWriteTime)
+{
+    BY_HANDLE_FILE_INFORMATION actual{};
+    if (!GetFileInformationByHandle(handle, &actual)) {
+        throw fs::filesystem_error("Cannot inspect repair output identity", path,
+            std::error_code(static_cast<int>(GetLastError()), std::system_category()));
+    }
+    const char* mismatch = nullptr;
+    if ((actual.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
+        mismatch = "not a regular non-reparse file";
+    }
+    else if (actual.dwVolumeSerialNumber != expected.dwVolumeSerialNumber ||
+        actual.nFileIndexHigh != expected.nFileIndexHigh || actual.nFileIndexLow != expected.nFileIndexLow) {
+        mismatch = "file identity changed";
+    }
+    else if (actual.nFileSizeHigh != expected.nFileSizeHigh || actual.nFileSizeLow != expected.nFileSizeLow) {
+        mismatch = "file size changed";
+    }
+    else if (checkWriteTime &&
+        (actual.ftLastWriteTime.dwHighDateTime != expected.ftLastWriteTime.dwHighDateTime ||
+         actual.ftLastWriteTime.dwLowDateTime != expected.ftLastWriteTime.dwLowDateTime)) {
+        mismatch = "last-write timestamp changed";
+    }
+    if (mismatch) {
+        throw std::runtime_error("Repair output changed: " + std::string(mismatch) + ": " + utf8(path));
+    }
+    return actual;
+}
+#endif
+
 class SafeOutputTree
 {
 public:
@@ -610,6 +642,22 @@ void SafeOutputFile::Flush()
             _tree._root / _parent->relative / _name,
             std::error_code(static_cast<int>(GetLastError()), std::system_category()));
     }
+    const auto path = _tree._root / _parent->relative / _name;
+    // Windows can finalize the last-write timestamp only when the writer closes.
+    if (!CloseHandle(_handle)) {
+        throw fs::filesystem_error("Cannot close flushed repair temporary", path,
+            std::error_code(static_cast<int>(GetLastError()), std::system_category()));
+    }
+    _handle = INVALID_HANDLE_VALUE;
+    _verifyHandle = ::CreateFileW(PlatformUtils::WindowsLongPath(path).c_str(),
+        GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (_verifyHandle == INVALID_HANDLE_VALUE) {
+        throw fs::filesystem_error("Cannot lock flushed repair temporary for verification", path,
+            std::error_code(static_cast<int>(GetLastError()), std::system_category()));
+    }
+    _identity = verifyOutputIdentity(_verifyHandle, _identity, path, false);
+    _tree.Validate();
 #else
     if (::fsync(_descriptor) != 0) {
         throw fs::filesystem_error("Cannot flush repair temporary",
@@ -658,15 +706,16 @@ bool SafeOutputFile::Install(const fs::path& targetName, bool overwrite)
     }
     _tree.Validate();
 #ifdef _WIN32
-    BY_HANDLE_FILE_INFORMATION stagedIdentity{};
-    if (_handle == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(_handle, &stagedIdentity)) {
-        throw fs::filesystem_error("Cannot inspect verified repair temporary",
-            _tree._root / _parent->relative / _name,
+    if (_handle != INVALID_HANDLE_VALUE || _verifyHandle == INVALID_HANDLE_VALUE) {
+        throw std::runtime_error("Repair temporary must be flushed and locked before installation.");
+    }
+    const auto tempPath = _tree._root / _parent->relative / _name;
+    const auto stagedIdentity = verifyOutputIdentity(_verifyHandle, _identity, tempPath, true);
+    if (!CloseHandle(_verifyHandle)) {
+        throw fs::filesystem_error("Cannot close verified repair temporary", tempPath,
             std::error_code(static_cast<int>(GetLastError()), std::system_category()));
     }
-    CloseHandle(_handle);
-    _handle = INVALID_HANDLE_VALUE;
-    const auto tempPath = _tree._root / _parent->relative / _name;
+    _verifyHandle = INVALID_HANDLE_VALUE;
     HANDLE renameHandle = CreateFileW(PlatformUtils::WindowsLongPath(tempPath).c_str(),
         DELETE | GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
         FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
@@ -674,19 +723,12 @@ bool SafeOutputFile::Install(const fs::path& targetName, bool overwrite)
         throw fs::filesystem_error("Cannot lock verified repair temporary", tempPath,
             std::error_code(static_cast<int>(GetLastError()), std::system_category()));
     }
-    BY_HANDLE_FILE_INFORMATION currentIdentity{};
-    const bool sameFile = GetFileInformationByHandle(renameHandle, &currentIdentity) &&
-        (currentIdentity.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0 &&
-        currentIdentity.dwVolumeSerialNumber == stagedIdentity.dwVolumeSerialNumber &&
-        currentIdentity.nFileIndexHigh == stagedIdentity.nFileIndexHigh &&
-        currentIdentity.nFileIndexLow == stagedIdentity.nFileIndexLow &&
-        currentIdentity.nFileSizeHigh == stagedIdentity.nFileSizeHigh &&
-        currentIdentity.nFileSizeLow == stagedIdentity.nFileSizeLow &&
-        currentIdentity.ftLastWriteTime.dwHighDateTime == stagedIdentity.ftLastWriteTime.dwHighDateTime &&
-        currentIdentity.ftLastWriteTime.dwLowDateTime == stagedIdentity.ftLastWriteTime.dwLowDateTime;
-    if (!sameFile) {
+    try {
+        (void)verifyOutputIdentity(renameHandle, stagedIdentity, tempPath, true);
+    }
+    catch (const std::exception&) {
         CloseHandle(renameHandle);
-        throw std::runtime_error("Repair temporary changed after verification.");
+        throw;
     }
     CloseHandle(renameHandle);
     const auto installedPath = _tree._root / _parent->relative / targetName;
@@ -706,18 +748,7 @@ bool SafeOutputFile::Install(const fs::path& targetName, bool overwrite)
         throw fs::filesystem_error("Cannot open installed repair output for verification", installedPath,
             std::error_code(static_cast<int>(GetLastError()), std::system_category()));
     }
-    BY_HANDLE_FILE_INFORMATION installedIdentity{};
-    if (!GetFileInformationByHandle(_verifyHandle, &installedIdentity) ||
-        (installedIdentity.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
-        installedIdentity.dwVolumeSerialNumber != stagedIdentity.dwVolumeSerialNumber ||
-        installedIdentity.nFileIndexHigh != stagedIdentity.nFileIndexHigh ||
-        installedIdentity.nFileIndexLow != stagedIdentity.nFileIndexLow ||
-        installedIdentity.nFileSizeHigh != stagedIdentity.nFileSizeHigh ||
-        installedIdentity.nFileSizeLow != stagedIdentity.nFileSizeLow ||
-        installedIdentity.ftLastWriteTime.dwHighDateTime != stagedIdentity.ftLastWriteTime.dwHighDateTime ||
-        installedIdentity.ftLastWriteTime.dwLowDateTime != stagedIdentity.ftLastWriteTime.dwLowDateTime) {
-        throw std::runtime_error("Installed repair output changed during publication.");
-    }
+    (void)verifyOutputIdentity(_verifyHandle, stagedIdentity, installedPath, true);
     _installed = true;
 #else
     struct stat staged{};
@@ -781,6 +812,10 @@ void SafeOutputFile::RemoveTemporary() noexcept
 {
     if (_installed) return;
 #ifdef _WIN32
+    if (_verifyHandle != INVALID_HANDLE_VALUE) {
+        CloseHandle(_verifyHandle);
+        _verifyHandle = INVALID_HANDLE_VALUE;
+    }
     if (_handle != INVALID_HANDLE_VALUE) {
         CloseHandle(_handle);
         _handle = INVALID_HANDLE_VALUE;

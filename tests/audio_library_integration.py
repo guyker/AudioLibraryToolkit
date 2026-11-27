@@ -884,6 +884,25 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(sorted(map(picture_content, pictures)), sorted(map(picture_content, original_pictures)))
         self.assertEqual(Path(str(target) + ".flac-metadata").read_bytes(), self.prefix)
 
+    def test_repair_clean_library_publishes_reports_without_copying_audio(self):
+        self.track.write_bytes(self.repair_fixture.read_bytes())
+        before = {path.relative_to(self.source): path.read_bytes()
+                  for path in self.source.rglob("*") if path.is_file()}
+        result = self.repair()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        target = self.output / "repaired-metadata" / self.source.name
+        report = json.loads((target / "repair-report.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["status"], "no-repairs-needed")
+        self.assertEqual(report["repairedFiles"], 0)
+        self.assertEqual(report["files"], [])
+        self.assertEqual(report["findings"], [])
+        self.assertIn("Run status: no-repairs-needed",
+                      (target / "repair-summary.html").read_text(encoding="utf-8"))
+        self.assertEqual({path.name for path in target.iterdir()},
+                         {"repair-report.json", "repair-summary.html"})
+        self.assertEqual({path.relative_to(self.source): path.read_bytes()
+                          for path in self.source.rglob("*") if path.is_file()}, before)
+
     def test_repair_removes_only_identical_cdtoc_comments_without_reencoding(self):
         toc = "CDTOC=C+96+14AD7+1EE3E+2547E"
         self.track.write_bytes(add_vorbis_comments(
