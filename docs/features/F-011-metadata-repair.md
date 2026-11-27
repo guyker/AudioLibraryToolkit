@@ -92,6 +92,9 @@ of terminal control sequences. Phase boundaries are retained in the session log 
 ## Known limitations
 - Only FLAC and MP3 are supported; only the first leading ID3v2 tag of an MP3 is rewritten.
 - Different values are never reconciled automatically; audio-stream problems (missing MD5, MP3 garbage) are report-only.
+- FLAC frames are not parsed or decoded. Unrecognized trailing bytes, including appended zeros, can be missed
+  even when strict conversion rejects the file; `no-repairs-needed` certifies no detected metadata-rule findings,
+  not audio-stream integrity (K-079).
 - Output staging uses held directory handles and no-follow file operations where supported; output paths are revalidated
   during preparation, staging, installation and reporting. A separate same-permission process deliberately moving
   directories between checks can still race ordinary filesystem operations.

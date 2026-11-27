@@ -315,6 +315,9 @@ absolute chapter offsets do not move. Duplicate-frame checks run after encoding 
 duplicates.
 Existing FLAC padding is retained and expanded, or a new padding block is added when possible, to absorb shrinkage
 of the FLAC metadata section. Unreadable files are reported as `unreadable`.
+FLAC frame integrity is not checked: unrecognized bytes after the last frame can be treated as part of the audio
+range and missed, even though strict conversion rejects them. `no-repairs-needed` means no detected metadata-rule
+findings, not a verified audio stream (K-079).
 Repair preparation announces its source before discovery and reports discovery, inspection and planning progress,
 including elapsed time while work is pending. Discovery/planning totals are unknown; inspection shows completed
 files and a percentage once discovery establishes the total. Execution progress counts only verified installed
