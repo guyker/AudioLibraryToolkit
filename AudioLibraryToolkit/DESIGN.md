@@ -9,7 +9,7 @@ tracked in `docs/features/`. Code is cited as `path#Symbol`.
 `AudioLibraryToolkit` is a console utility for a local music library. It:
 
 - converts audio to a separate output tree (16-bit / 44.1 kHz FLAC, or FLAC to MP3) without touching sources;
-- repairs recognized FLAC/MP3 metadata defects, without touching audio bytes, into a separate output tree;
+- repairs FLAC/MP3 metadata by default; opt-in stream fixes require strict proof of identical decoded audio in a separate output tree;
 - scans libraries into JSON metadata batches;
 - finds probable duplicate albums from those batches;
 - imports the batches into a per-library SQLite database.
@@ -32,6 +32,7 @@ It runs as explicit CLI commands, a versioned headless worker, or, with no argum
 | MP3 tags | `src/metadata/Mp3TagMetadata.cpp`, `include/metadata/Mp3TagMetadata.h` | TagLib maps source FLAC comments into ID3v2.4 and reads MP3 ID3 properties for preservation auditing |
 | MP3 tag issues | `src/metadata/Mp3TagIssues.cpp`, `include/metadata/Mp3TagIssues.h` | Detects MP3 tag issues, lists resolution choices (recommended first) and applies the selected resolutions to source comments |
 | Metadata repair | `src/repair/AudioRepair.cpp`, `include/repair/AudioRepair.h`, `src/repair/RepairRules.cpp`, `include/repair/RepairRules.h` | `RepairRules::Analyze` detects FLAC/MP3 metadata defects and plans byte-range edits; `AudioRepair::Prepare` plans repairs; `AudioRepair::Execute` stages, verifies and installs repaired copies and `repair-report.json` |
+| Stream and container checks | `src/repair/RepairIntegrity.cpp`, `FlacFrameScanner.cpp` and `Mp3FrameScanner.cpp` in `src/repair`, `src/media/DecodeAnalyzer.cpp` | `AnalyzeSelected` resolves findings and edit ranges; native scanners check structure without decoding; `PrepareProof` / `VerifyProof` enforce strict PCM identity for FLAC edits |
 | Metadata archive | `src/metadata/FlacMetadata.cpp`, `include/metadata/FlacMetadata.h` | `FlacMetadata::Save` / `FlacMetadata::Verify` byte-exact archive as binary `.flac-metadata` or `.flac-metadata.json` (readable scan-schema metadata + Base64 archive; only the archive is verified); scan optionally writes binary metadata-only archives for native FLAC |
 | Preservation audit | `src/metadata/PreservationAudit.cpp`, `include/metadata/PreservationAudit.h` | `PreservationAudit::Compare` (tags, pictures, chapters, opaque blocks), `PreservationAudit::VerifyCopy` |
 | FFmpeg library access | `src/platform/FFmpeg.cpp`, `include/platform/FFmpeg.h`, `include/platform/FFmpegWrapper.h` | `FFmpeg::GetFFprobeMetadataAPI` (conversion/duplicate re-probes) and the process-wide log callback |
@@ -96,7 +97,7 @@ flowchart LR
 | `scan <library> [--output-dir] [--full-rescan] [--tier catalog\|integrity\|analysis] [--archive-flac-metadata\|--no-archive-flac-metadata]` | `ApplicationServices::Run` → `ScanFolderAndCreateJSON` | One library; name = folder name; archive flags override configuration |
 | `duplicates <json dir> [--open] [--report <file>]` | `ApplicationServices::Run` → `ScanFolderProcessJSONAndFindDuplicates` | Opens folders only with `--open`; `--report` writes a new JSON report |
 | `db import <json dir> [--output-dir]` | `ApplicationServices::Run` → `ImportJsonDirectoryToDatabase` | `<output root>/catalog-sqlite/<JSON folder name>/catalog-v2.sqlite`; output root is `--output-dir`, else `OutDirectory` |
-| `repair <input> [--output-dir] [--overwrite] [--rules <ids>]` | `ApplicationServices::Run` → `AudioRepair::Prepare` → `AudioRepair::Execute` | `<output root>/repaired-metadata/<input folder name>`; output root is `--output-dir`, else `OutDirectory` |
+| `repair <input> [--output-dir] [--overwrite] [--rules <ids>] [--metadata-mode/--integrity-mode/--container-mode/--decode-mode]` | `ApplicationServices::Run` → `AudioRepair::Prepare` → `AudioRepair::Execute` | `<output root>/repaired-metadata/<input folder name>`; output root is `--output-dir`, else `OutDirectory` |
 | No arguments | `RunLegacyMenu` | Options 1 FLAC, 2 scan, 3 duplicates, 4 DB import, 6 MP3, 7 repair; option 5 is unassigned; library options use active `MediaDirectoryList` entries |
 | `--worker` | `WorkerProtocol::Run` → `ApplicationServices::Run` | Version-1 JSON Lines process boundary for external clients; typed worker requests and CLI commands share operation dispatch |
 
@@ -281,11 +282,12 @@ overwriting), then the audio; on audio failure it restores or removes the sideca
 
 ### Metadata repair (menu 7, `repair`)
 
-`AudioRepair::Prepare` recursively inspects `.flac` and `.mp3` files with `RepairRules::Analyze`, a rule catalog
-(`RepairRules::Catalog`; `--rules` limits the CLI to listed ids). The default rule set retains MP3 ID3v1 for older
+`AudioRepair::Prepare` recursively inspects `.flac` and `.mp3` files with `RepairRules::AnalyzeSelected`,
+which delegates to `RepairRules::Analyze` for the default metadata-only selection. `RepairRules::Catalog` lists
+the rule IDs; `--rules` narrows the selection. The default rule set retains MP3 ID3v1 for older
 players; the CLI `--remove-id3v1`, explicit `--rules mp3.redundant-id3v1`, or the per-run menu prompt opts in to its
 removal when redundant. Each rule yields findings that
-are either automatically fixable or review-only. Fixes only rewrite metadata: an edit is
+are either automatically fixable or review-only. **In default metadata mode**, fixes only rewrite metadata: an edit is
 `head + source[audioOffset, audioOffset + audioSize) + tail`, so the audio/frame range is copied byte-for-byte and
 never decoded. A tag is removed only when it is empty, a byte-identical duplicate, or fully redundant with another
 tag; anything else that differs is reported for review rather than guessed. "Redundant" means every mapped value
@@ -315,9 +317,42 @@ absolute chapter offsets do not move. Duplicate-frame checks run after encoding 
 duplicates.
 Existing FLAC padding is retained and expanded, or a new padding block is added when possible, to absorb shrinkage
 of the FLAC metadata section. Unreadable files are reported as `unreadable`.
-FLAC frame integrity is not checked: unrecognized bytes after the last frame can be treated as part of the audio
+By default FLAC frame integrity is not checked: unrecognized bytes after the last frame can be treated as part of the audio
 range and missed, even though strict conversion rejects them. `no-repairs-needed` means no detected metadata-rule
-findings, not a verified audio stream (K-079).
+findings, not a verified audio stream.
+
+**Optional integrity path.** `RepairIntegrity::Categories` is resolved once per request from built-ins, optional
+`RepairCategories` config and per-member CLI/menu/worker overrides. Metadata defaults to `fix`, integrity/container/decode
+to `off`. `detect` never contributes an edit. Structural parsing is independent of strict full decoding.
+`RepairRules::AnalyzeSelected` keeps the legacy metadata path, and dispatches native frame walks to `ScanFlac` or
+`ScanMp3`. New IDs must never enter metadata defaults via the old empty-set-means-all convention. Container checks
+identify content; a file suffix or a tag signature alone never authorizes a writer.
+
+FLAC parsing consumes header, subframes, residual partitions, alignment and CRC footer from the known frame start;
+it never locates the last frame by scanning backwards for nonzero bytes. The repairable suffix is a bounded fill
+region *outside* a fully parsed program, not any zero run. Frame CRC, numbering, discontinuities, unknown tags and
+partial frames cannot be repaired by rewriting checksums or discarding samples. Reconcile only supported, unambiguous
+STREAMINFO fields and seek targets. Layer III lengths, protected CRCs and reservoir references, Xing/Info/LAME and
+VBRI are inspected without rewriting MP3 frames: even a count-only edit can affect gapless presentation.
+
+An eligible stream edit is an ordered map of source byte ranges; comparison reconstructs the plan and verifies
+replacement bytes, **all unchanged bytes**, exact output length and frame structure. The original source SHA-256
+binds preview evidence to execution. `DecodeAnalyzer::Prove` supplies strict PCM evidence separately from scan reports.
+Every stream edit requires strict decode of the held staged file, checking sample count, precision and the original
+nonzero FLAC MD5 (signed little-endian interleaved original-width PCM); absent a stored digest, both complete files
+must decode strictly with matching sample interpretation, count and SHA-256. A digest computed during repair cannot
+authorize a suffix trim from a failing original. Only an isolated post-frame FLAC fill with independent original
+nonzero count and MD5 matching all retained frames can qualify despite a source suffix decode error. Other unproven
+edits remain for manual review. For that exception, the rejected codec packet must have a verified source byte
+range intersecting the fill. A packet can also contain a valid frame: the CRC-checked frame boundary, not the packet
+start, determines what is removed. An unattributed, I/O or setup failure is not an exception. There is no
+re-encoding, concealment, remuxing or repair of compressed samples.
+
+Default category selections retain JSON schema 2. Non-default runs use [repair report schema 3](../docs/schemas/repair-report-v3.schema.json):
+effective modes, per-finding category and source-relative byte evidence, strict decode results, and per-file edit
+ranges and proof. A successful proof does not imply publication; only installed and verified files get `appliedRules`.
+Both HTML views distinguish changing file bytes from changing decoded audio. The worker advertises optional category
+support separately from its v1 `repair` operation. The existing output tree, parallelism and failure policy below apply to both paths.
 Repair preparation announces its source before discovery and reports discovery, inspection and planning progress,
 including elapsed time while work is pending. Discovery/planning totals are unknown; inspection shows completed
 files and a percentage once discovery establishes the total. Execution progress counts only verified installed
@@ -627,6 +662,7 @@ fail configuration loading.
 | `UseAsyncMetadataReads` | true | Parallel TagLib scan reads; legacy `UseAsyncFFmpegCalls` is accepted as an alias |
 | `Incremental` | true | Reuse scan records when library-relative file path, size and modification time match and the cached tier is the requested tier or higher (`AlbumCollection::ImportMetadata`) |
 | `ScanFlacMetadataArchives` | false | Default for optional byte-exact native FLAC scan archives; menu and CLI can override per run |
+| `RepairCategories` | `metadata: fix`, `integrity: off`, `container: off`, `decode: off` | Option 7 defaults; CLI, menu and worker can override individual categories for one request |
 | `ScanTier` | `catalog` (`catalog`\|`integrity`\|`analysis`) | Default scan tier; CLI `scan --tier` overrides it |
 | `MetadataScanMaxThreads` | 0 (automatic) | Maximum per-album metadata workers; 0 uses hardware concurrency, falling back to 4 |
 | `DecodeWorkers` | 0 (automatic) | Independent full-decode worker cap; 0 uses at most 4 workers and half the available hardware concurrency |
@@ -656,6 +692,7 @@ fail configuration loading.
 | Audit report | `<library output>/conversion-audit.json` | `writeAudit` in `FolderConvert.cpp` |
 | Session log | `%LOCALAPPDATA%\AudioLibraryToolkit\logs\afc-<timestamp>_<pid>_<sequence>.log` (Windows); XDG/HOME state directory elsewhere | `RunLogging::Start` / `RunLogging::Finish` |
 | In-progress marker | `<library output>/.conversion-in-progress/` (directory) | `FolderConvert::ExecuteConversion` |
+| Repair reports | `repaired-metadata/<library>/repair-report.json` (default schema 2; non-default categories schema 3) and `repair-summary.html` alongside it | `AudioRepair::Execute` |
 | Album JSON | `OutDirectory/catalog-json/<name>/media_out_<name>[_<n>].json` (schema v2; see `docs/schemas/media-catalog-v2.schema.json`) | `AlbumCollection::SaveAlbumsToJSON` |
 | Scan manifest | `OutDirectory/catalog-json/<name>/scan-manifest.json` (schema v1; batch inventory, SHA-256 integrity and archive references) | `writeScanManifest` |
 | FLAC metadata archive | Optional `OutDirectory/catalog-json/<name>/scan_metadata_<source-path-sha256>.flac-metadata` (native metadata blocks only; referenced by manifest) | `FlacMetadata::Save` / `FlacMetadata::Verify` |

@@ -1,4 +1,5 @@
 #include "DecodeAnalyzer.h"
+#include "FFmpeg.h"
 
 #include <algorithm>
 #include <cmath>
@@ -17,6 +18,26 @@ void require(bool condition, const char* message)
 int main(int argc, char* argv[])
 {
     try {
+        if (argc == 4 && std::string_view(argv[1]) == "--proof") {
+            FFmpeg::initialize_ffmpeg_logging();
+            const auto proof = DecodeAnalyzer::Prove(argv[3], std::string_view(argv[2]) == "flac");
+            if (!proof.clean) {
+                require(!proof.error.empty() && proof.samples == 0 &&
+                    proof.pcmSha256.empty() && proof.flacMd5.empty(), "Refusal exposed partial evidence.");
+                require(proof.errorOffset.has_value() == proof.errorPacketSize.has_value(),
+                    "Partial packet range in refused proof.");
+                std::cout << "refused\t" << proof.invalidBitstream << '\t' <<
+                    (proof.errorOffset ? std::to_string(*proof.errorOffset) : "-") << '\t' <<
+                    (proof.errorPacketSize ? std::to_string(*proof.errorPacketSize) : "-") << '\t' <<
+                    proof.error << '\n';
+            }
+            else {
+                require(!proof.format.empty() && !proof.errorOffset, "Missing or ambiguous proof interpretation.");
+                std::cout << "proof\t" << proof.samples << '\t' << proof.bits << '\t' <<
+                    proof.format << '\t' << proof.pcmSha256 << '\t' << proof.flacMd5 << '\n';
+            }
+            return 0;
+        }
         require(argc == 9,
             "Expected clean, retagged, truncated, dual-mono, antiphase, padded, full-scale, and silence paths.");
         MediaRecord clean;

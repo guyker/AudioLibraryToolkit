@@ -24,6 +24,13 @@ add_executable(taglib_smoke_test taglib_smoke.cpp)
 target_link_libraries(taglib_smoke_test PRIVATE AudioLibraryToolkitCore)
 add_executable(decode_analyzer_test decode_analyzer.cpp)
 target_link_libraries(decode_analyzer_test PRIVATE AudioLibraryToolkitCore)
+add_executable(flac_frame_scanner_test flac_frame_scanner.cpp)
+target_link_libraries(flac_frame_scanner_test PRIVATE AudioLibraryToolkitCore)
+add_test(NAME flac-frame-scanner COMMAND "$<TARGET_FILE:flac_frame_scanner_test>")
+add_executable(mp3_frame_scanner_test mp3_frame_scanner.cpp)
+target_link_libraries(mp3_frame_scanner_test PRIVATE AudioLibraryToolkitCore)
+afc_stage_ffmpeg_runtime(mp3_frame_scanner_test)
+add_test(NAME mp3-frame-scanner COMMAND "$<TARGET_FILE:mp3_frame_scanner_test>")
 add_executable(bounded_task_runner_test bounded_task_runner.cpp)
 target_include_directories(bounded_task_runner_test PRIVATE
     "${PROJECT_SOURCE_DIR}/AudioLibraryToolkit/include/common")
@@ -43,7 +50,7 @@ target_link_libraries(run_logging_test PRIVATE AudioLibraryToolkitCore)
 add_executable(app_settings_config_test app_settings_config.cpp)
 target_link_libraries(app_settings_config_test PRIVATE AudioLibraryToolkitCore)
 
-foreach(_target IN ITEMS preservation_audit_test warning_regressions_test media_metadata_json_test media_record_json_test taglib_smoke_test decode_analyzer_test bounded_task_runner_test scoped_current_directory_test scan_report_schema_test duplicate_review_test duplicate_matcher_test duplicate_comparison_test run_logging_test app_settings_config_test)
+foreach(_target IN ITEMS preservation_audit_test warning_regressions_test media_metadata_json_test media_record_json_test taglib_smoke_test decode_analyzer_test flac_frame_scanner_test bounded_task_runner_test scoped_current_directory_test scan_report_schema_test duplicate_review_test duplicate_matcher_test duplicate_comparison_test run_logging_test app_settings_config_test)
     target_compile_options(${_target} PRIVATE
         "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/W3;/utf-8;/permissive->"
         "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>>:-Wall;-Wextra;-Wpedantic>")
@@ -123,5 +130,6 @@ add_test(NAME mp3-conversion-integration
         --ffmpeg "${FFMPEG_EXECUTABLE}"
         --ffprobe "${FFPROBE_EXECUTABLE}"
         --audit-checker "$<TARGET_FILE:preservation_audit_test>"
+        --schema-checker "$<TARGET_FILE:scan_report_schema_test>"
         --taglib-debug "$<IF:$<OR:$<CONFIG:Debug>,$<BOOL:${TRACE_IN_RELEASE}>>,1,0>")
 set_tests_properties(mp3-conversion-integration PROPERTIES TIMEOUT 900)

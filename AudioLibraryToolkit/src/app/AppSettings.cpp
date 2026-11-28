@@ -30,6 +30,43 @@ std::shared_ptr<AppSettingsJson> AppSettingsJson::AppSettingsInstance = nullptr;
 
 namespace fs = std::filesystem;
 
+bool RepairCategoryOptions::Overrides::Read(const rapidjson::Value& parent, const char* key,
+    std::string& error)
+{
+    Overrides parsed;
+    bool seen = false;
+    for (auto member = parent.MemberBegin(); member != parent.MemberEnd(); ++member) {
+        if (std::string_view(member->name.GetString(), member->name.GetStringLength()) != key) continue;
+        if (seen || !member->value.IsObject()) {
+            error = std::string(key) + " must be a single object.";
+            return false;
+        }
+        seen = true;
+        for (auto category = member->value.MemberBegin(); category != member->value.MemberEnd(); ++category) {
+            const std::string name(category->name.GetString(), category->name.GetStringLength());
+            const auto field = std::ranges::find(Fields, name, &Field::key);
+            if (field == Fields.end()) {
+                error = std::string("Unknown ") + key + " category: " + name;
+                return false;
+            }
+            auto& target = parsed.modes[field - Fields.begin()];
+            if (target) {
+                error = std::string("Duplicate ") + key + " category: " + name;
+                return false;
+            }
+            Mode mode;
+            if (!category->value.IsString() || !field->Parse(
+                    { category->value.GetString(), category->value.GetStringLength() }, mode)) {
+                error = std::string(key) + "." + name + " must be " + field->Choices() + ".";
+                return false;
+            }
+            target = mode;
+        }
+    }
+    *this = parsed;
+    return true;
+}
+
 namespace {
 fs::path pathForInspection(const fs::path& path)
 {
@@ -910,6 +947,14 @@ std::string AppSettingsJson::toJsonString() const {
     sidecarObj.AddMember("ConvertToMp3", rapidjson::StringRef(policyName(MetadataSidecars.ConvertToMp3)), allocator);
     doc.AddMember("MetadataSidecars", sidecarObj, allocator);
 
+    rapidjson::Value repairObj(rapidjson::kObjectType);
+    for (const auto& field : RepairCategoryOptions::Fields) {
+        const auto mode = RepairIntegrity::ModeName(RepairCategories.*field.member);
+        repairObj.AddMember(rapidjson::StringRef(field.key),
+            rapidjson::StringRef(mode.data(), static_cast<rapidjson::SizeType>(mode.size())), allocator);
+    }
+    doc.AddMember("RepairCategories", repairObj, allocator);
+
     doc.AddMember("LogLevel", LogLevel, allocator);
     doc.AddMember("UseAsyncMetadataReads", UseAsyncMetadataReads, allocator);
     doc.AddMember("Incremental", Incremental, allocator);
@@ -982,6 +1027,23 @@ bool AppSettingsJson::loadFromJsonText(const std::string& text) {
     if (doc.HasParseError() || !doc.IsObject()) {
         std::cerr << "Error: Configuration must be a valid JSON object." << std::endl;
         return false;
+    }
+    if (doc.HasMember("RepairCategories")) {
+        RepairCategoryOptions::Overrides overrides;
+        std::string error;
+        if (!overrides.Read(doc, "RepairCategories", error)) {
+            spdlog::error("{}", error);
+            return false;
+        }
+        const auto categories = overrides.Resolve(RepairCategories);
+        try {
+            RepairIntegrity::EffectiveRules(categories, {}, false);
+        }
+        catch (const std::invalid_argument& exception) {
+            spdlog::error("Invalid RepairCategories: {}", exception.what());
+            return false;
+        }
+        RepairCategories = categories;
     }
     if (doc.HasMember("AlbumsSplitThreshold") &&
         (!doc["AlbumsSplitThreshold"].IsInt() || doc["AlbumsSplitThreshold"].GetInt() <= 0)) {

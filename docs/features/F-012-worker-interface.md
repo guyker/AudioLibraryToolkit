@@ -12,7 +12,8 @@ The worker uses the same bundled FFmpeg policy as CLI/menu (F-013); startup libr
 No protocol fields are added: explicit encoder overrides remain configuration settings subject to F-007 validation.
 
 Worker requests and CLI commands share typed application-service dispatch. Conversion and repair offer non-mutating
-previews; execution re-prepares before writing. Clients supply explicit MP3 tag choices and album paths for quarantine.
+previews; execution re-prepares before writing. Repair clients can negotiate the `repair.categories.v1` feature
+and supply per-request categories; older requests work unchanged. Clients supply explicit MP3 tag choices and album paths for quarantine.
 Configuration initialization uses supplied paths or creates an editable blank config from its shipped template and
 refuses to overwrite an existing config. Configuration snapshots and validation do not create missing files. Saving
 edits from a missing snapshot creates a file from built-in defaults without a backup; explicit default initialization

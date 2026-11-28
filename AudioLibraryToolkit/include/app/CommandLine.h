@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include "ConversionOptions.h"
+#include "RepairCategoryOptions.h"
 
 enum class CommandAction
 {
@@ -32,9 +33,11 @@ struct CommandLineOptions
     std::string logLevel;
     std::string reportPath;
     std::set<std::string> repairRules;
+    RepairCategoryOptions::Overrides repairCategories;
     std::vector<std::string> duplicateQuarantinePaths;
     std::size_t repairJobs{ 4 };
     bool repairDryRun{ false };
+    bool legacyRepairProgress{ false };
     bool repairRemoveId3v1{ false };
     bool preview{ false };
     bool outputDirectorySpecified{ false };

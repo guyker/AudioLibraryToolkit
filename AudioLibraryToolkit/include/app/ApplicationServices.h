@@ -6,6 +6,7 @@
 #include <vector>
 
 namespace AudioRepair { struct Plan; }
+struct MediaDirectoryElement;
 
 namespace ApplicationServices
 {
@@ -23,4 +24,6 @@ int FindDuplicates(const std::filesystem::path& jsonDirectory, bool openFolders,
 int ImportDatabase(const std::filesystem::path& jsonDirectory,
     const std::filesystem::path& outputRoot);
 void PrintRepairFindings(const AudioRepair::Plan& plan);
+bool ValidateRepairOutput(const std::filesystem::path& output,
+    const std::vector<MediaDirectoryElement>& libraries);
 }

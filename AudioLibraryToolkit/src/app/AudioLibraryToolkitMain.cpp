@@ -51,7 +51,7 @@ extern "C" {
 #include "FolderConvert.h"
 #include "WorkerProtocol.h"
 #include "AudioRepair.h"
-#include "RepairRules.h"
+#include "RepairCategoryOptions.h"
 #include "FlacMetadata.h"
 #include "DuplicateComparison.h"
 #include "DuplicateMatcher.h"
@@ -1229,7 +1229,7 @@ struct ManualOperationSummary {
     std::size_t completed{ 0 };
     ConversionProgress conversion;
     std::vector<fs::path> outputs;
-    const char* outputDescription{ nullptr };
+    std::string outputDescription;
     bool started{ false };
     bool reviewStopped{ false };
     std::size_t movedAlbums{ 0 };
@@ -1258,7 +1258,7 @@ struct ManualOperationSummary {
         for (const auto& output : outputs) {
             std::cout << "  Output location: " << pathToUtf8(output) << '\n';
         }
-        if (outputDescription) {
+        if (!outputDescription.empty()) {
             std::cout << "  Output: " << outputDescription << '\n';
         }
         if (movedAlbums || skippedDuplicatePairs) {
@@ -1701,19 +1701,47 @@ int ConvertFLACToMP3(const std::vector<MediaDirectoryElement>& libraries, const 
 
 void PrintRepairFindingCounts(const AudioRepair::Plan& plan)
 {
-    std::map<std::string, std::pair<std::size_t, std::size_t>> rules;
+    struct Counts { std::size_t repairable{}, review{}, information{}; };
+    std::map<std::string, Counts> rules;
     for (const auto& finding : plan.findings) {
         auto& counts = rules[finding.rule];
-        ++(finding.status == "repairable" ? counts.first : counts.second);
+        if (finding.status == "repairable") ++counts.repairable;
+        else if (finding.status == "informational") ++counts.information;
+        else ++counts.review;
     }
     for (const auto& [rule, counts] : rules) {
-        std::cout << "    " << rule << ": " << counts.first << " repairable finding(s), "
-            << counts.second << " finding(s) for review\n";
+        std::cout << "    " << rule << ": " << counts.repairable << " repairable finding(s), "
+            << counts.review << " finding(s) for review";
+        if (counts.information) std::cout << ", " << counts.information << " informational finding(s)";
+        std::cout << '\n';
     }
 }
 
+MenuConfirmation ConfigureRepairCategories(RepairIntegrity::Categories& categories)
+{
+    for (const auto& field : RepairCategoryOptions::Fields) {
+        const auto prompt = std::string("  ") + field.key + " [" +
+            std::string(RepairIntegrity::ModeName(categories.*field.member)) + "] (" + field.Choices() + "): ";
+        for (;;) {
+            std::string response;
+            const auto choice = ReadManualSetting(prompt.c_str(), response);
+            if (choice != MenuConfirmation::Run) return choice;
+            if (response.empty()) break;
+            std::ranges::transform(response, response.begin(),
+                [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            RepairIntegrity::Mode mode;
+            if (field.Parse(response, mode)) {
+                categories.*field.member = mode;
+                break;
+            }
+            std::cout << "Invalid " << field.key << " mode. Choose " << field.Choices() << ".\n";
+        }
+    }
+    return MenuConfirmation::Run;
+}
+
 int RepairConfiguredLibraries(const std::vector<MediaDirectoryElement>& libraries,
-    const fs::path& outputRoot, ManualOperationSummary& summary)
+    const fs::path& outputRoot, RepairIntegrity::Categories categories, ManualOperationSummary& summary)
 {
     summary.unit = "audio files repaired";
     if (libraries.empty()) {
@@ -1724,16 +1752,26 @@ int RepairConfiguredLibraries(const std::vector<MediaDirectoryElement>& librarie
     bool overwrite = false;
     for (;;) {
         std::string response;
-        const auto choice = ReadManualSetting("Overwrite existing repair output [NO] (YES/NO): ", response);
+        const auto choice = ReadManualSetting(
+            "Overwrite existing repair output [NO] (YES/NO), or type CATEGORIES to change checks first: ", response);
         if (choice != MenuConfirmation::Run) return cancelledMenuResult(choice);
+        if (response == "CATEGORIES") {
+            const auto selection = ConfigureRepairCategories(categories);
+            if (selection != MenuConfirmation::Run) return cancelledMenuResult(selection);
+            std::cout << "  " << RepairCategoryOptions::Summary(categories) << '\n';
+            continue;
+        }
         if (response.empty() || response == "NO") break;
         if (response == "YES") {
             overwrite = true;
             break;
         }
-        std::cout << "Invalid selection. Enter YES or NO.\n";
+        std::cout << "Invalid selection. Enter YES, NO or CATEGORIES.\n";
     }
     bool removeId3v1 = false;
+    if (categories.metadata != RepairIntegrity::Mode::Fix) {
+        std::cout << "  ID3v1 removal is unavailable unless metadata is in fix mode. Keep NO.\n";
+    }
     for (;;) {
         std::string response;
         const auto choice = ReadManualSetting("Remove redundant MP3 ID3v1 tags [NO] (YES/NO): ", response);
@@ -1745,8 +1783,8 @@ int RepairConfiguredLibraries(const std::vector<MediaDirectoryElement>& librarie
         }
         std::cout << "Invalid selection. Enter YES or NO.\n";
     }
-    auto rules = RepairRules::DefaultRules();
-    if (removeId3v1) rules.insert("mp3.redundant-id3v1");
+    const auto rules = RepairIntegrity::EffectiveRules(categories, {}, removeId3v1);
+    summary.outputDescription = RepairCategoryOptions::Summary(categories);
 
     std::vector<AudioRepair::Plan> plans;
     plans.reserve(libraries.size());
@@ -1760,9 +1798,11 @@ int RepairConfiguredLibraries(const std::vector<MediaDirectoryElement>& librarie
         }
         AudioRepair::Plan plan;
         const auto target = OutputLayout::Repair(outputRoot, name);
-        if (AudioRepair::Prepare(source, target, overwrite, rules, plan) != 0) return 1;
+        if (!ApplicationServiceOperations::ValidateRepairOutput(target, libraries)) return 1;
+        if (AudioRepair::Prepare(source, target, overwrite, rules, plan, plan.workers, false, categories) != 0) return 1;
         summary.outputs.push_back(absoluteDisplayPath(target));
-        std::cout << "\nOperation preview: validate and repair FLAC/MP3 metadata\n"
+        std::cout << "\nOperation preview: validate and repair FLAC/MP3\n"
+            << "  " << RepairCategoryOptions::Summary(categories) << '\n'
             << "  Input: " << pathToUtf8(plan.input) << '\n'
             << "  Output: " << pathToUtf8(plan.output) << '\n'
             << "  FLAC/MP3 files inspected: " << plan.inspectedFiles << '\n'
@@ -1787,16 +1827,9 @@ int RepairConfiguredLibraries(const std::vector<MediaDirectoryElement>& librarie
     for (std::size_t i = 0; i < plans.size(); ++i) {
         for (std::size_t j = 0; j < plans.size(); ++j) {
             if (i == j) continue;
-            std::error_code leftError, rightError, otherTargetError;
+            std::error_code leftError, otherTargetError;
             const auto target = fs::weakly_canonical(plans[i].output, leftError);
-            const auto otherSource = fs::weakly_canonical(plans[j].input, rightError);
             const auto otherTarget = fs::weakly_canonical(plans[j].output, otherTargetError);
-            if (leftError || rightError ||
-                isSameOrChildPath(target, otherSource) || isSameOrChildPath(otherSource, target)) {
-                spdlog::error("Repair output overlaps an active source library: '{}'.",
-                    pathToUtf8(plans[i].output));
-                return 1;
-            }
             if (otherTargetError ||
                 isSameOrChildPath(target, otherTarget) || isSameOrChildPath(otherTarget, target)) {
                 spdlog::error("Repair output collides with another library's repair output: '{}'.",
@@ -1815,9 +1848,8 @@ int RepairConfiguredLibraries(const std::vector<MediaDirectoryElement>& librarie
 
     std::cout << "  Sources are unchanged. Only folders with safe repairs are copied; other files in those folders "
         "are copied byte-for-byte.\n"
-        "  Fix rules change metadata only (redundant tags, duplicate/empty comments, picture descriptors,\n"
-        "  invalid seek tables, ID3v2.3 text encodings). Non-redundant, conflicting or unreadable metadata is left\n"
-        "  unchanged and reported. The audio byte range is copied and verified; never decoded or re-encoded.\n"
+        "  Detect modes only report findings. Container and full-decode checks never make edits.\n"
+        "  Integrity edits require proof of unchanged PCM even with full decode off.\n"
         "  MP3 ID3v1 tags are kept unless removal was explicitly enabled.\n"
         "  repair-report.json records findings, applied rules and installed files.\n";
     const auto confirmation = ConfirmPreview();
@@ -3290,6 +3322,26 @@ void ApplicationServiceOperations::PrintRepairFindings(const AudioRepair::Plan& 
     PrintRepairFindingCounts(plan);
 }
 
+bool ApplicationServiceOperations::ValidateRepairOutput(const fs::path& output,
+    const std::vector<MediaDirectoryElement>& libraries)
+{
+    const auto comparisonPath = [](const fs::path& path) {
+        auto key = fs::weakly_canonical(fs::absolute(path));
+        if (!key.has_filename() && key.has_relative_path()) key = key.parent_path();
+        return key;
+    };
+    const auto target = comparisonPath(output);
+    for (const auto& library : libraries) {
+        if (!library.isActive) continue;
+        const auto source = comparisonPath(pathFromUtf8(library.mediaPath));
+        if (isSameOrChildPath(target, source) || isSameOrChildPath(source, target)) {
+            spdlog::error("Repair output overlaps an active source library: '{}'.", pathToUtf8(output));
+            return false;
+        }
+    }
+    return true;
+}
+
 namespace
 {
 struct MenuEntry {
@@ -3354,13 +3406,13 @@ constexpr std::array<MenuEntry, 6> MenuEntries{ {
         "      Tag issues (empty values, numeric genres, NULs, FLAC-only blocks, ReplayGain) are\n"
         "      offered as choices after preview, once per issue type, unless\n"
         "      TagIssueResolution is \"auto\" (recommended fixes applied).\n" },
-    { '7', ConvertActionEnum::RepairEnum, "Validate and repair FLAC/MP3 metadata [sources unchanged]",
-        "      Input: native FLAC and MP3 files in active libraries, recursively.\n"
+    { '7', ConvertActionEnum::RepairEnum, "Validate and repair FLAC/MP3: metadata, integrity, container, decode [sources unchanged]",
+        "      Input: .flac and .mp3 files in active libraries, recursively.\n"
         "      Output: OutDirectory/repaired-metadata/<mediaName>; only folders containing a safe repair\n"
         "              are copied, with all files in those folders retained unchanged otherwise.\n"
-        "      Fix (metadata only): redundant ID3/APE tags, duplicate or empty comments and frames,\n"
-        "           wrong picture MIME/size/depth, invalid seek tables, ID3v2.3 text encodings.\n"
-        "      Audio bytes are copied and verified unchanged; never decoded or re-encoded.\n"
+        "      Metadata and stream integrity support off/detect/fix. Container and strict full decode\n"
+        "      support off/detect. Detect only reports findings; integrity fixes require PCM proof.\n"
+        "      Type CATEGORIES at the overwrite prompt to change the configured modes for this run.\n"
         "      Non-redundant, conflicting or unreadable metadata is left unchanged for manual review.\n"
         "      repair-report.json records findings, applied rules and installation states.\n"
         "      Redundant MP3 ID3v1 removal is opt-in; four workers process files in parallel.\n"
@@ -3368,13 +3420,16 @@ constexpr std::array<MenuEntry, 6> MenuEntries{ {
         "      RUN confirms execution; read/write/verification failures retain the marker and report.\n" }
 } };
 
-void ShowActionDetails(const MenuEntry& entry)
+void ShowActionDetails(const MenuEntry& entry, const RepairIntegrity::Categories& categories)
 {
     std::cout << "\n" << entry.number << " - " << entry.label << '\n' << entry.details;
+    if (entry.action == ConvertActionEnum::RepairEnum) {
+        std::cout << "  " << RepairCategoryOptions::Summary(categories) << '\n';
+    }
 }
 }
 
-ConvertActionEnum GetUserAction()
+ConvertActionEnum GetUserAction(const RepairIntegrity::Categories& categories)
 {
     std::cout << "\nSelect run option\n"
         "Uses active configured libraries. Details and a preview follow selection.\n\n";
@@ -3404,7 +3459,7 @@ ConvertActionEnum GetUserAction()
         if (input == "?") {
             std::cout << "\nAll actions use active MediaDirectoryList libraries; OutDirectory is the output root.\n";
             for (const auto& entry : MenuEntries) {
-                ShowActionDetails(entry);
+                ShowActionDetails(entry, categories);
             }
             continue;
         }
@@ -3414,7 +3469,7 @@ ConvertActionEnum GetUserAction()
             std::cout << "Invalid selection. Choose a listed option or 0 to exit.\n";
             continue;
         }
-        ShowActionDetails(*entry);
+        ShowActionDetails(*entry, categories);
         return entry->action;
     }
 }
@@ -3554,7 +3609,8 @@ int RunLegacyMenu()
             return ConvertFLACToMP3(mediaList, pathFromUtf8(appSettingPtr->OutDirectory), summary);
 
         case ConvertActionEnum::RepairEnum: //7
-            return RepairConfiguredLibraries(mediaList, pathFromUtf8(appSettingPtr->OutDirectory), summary);
+            return RepairConfiguredLibraries(mediaList, pathFromUtf8(appSettingPtr->OutDirectory),
+                appSettingPtr->RepairCategories, summary);
 
         default:
             spdlog::error("Action not found: {}", static_cast<int>(action));
@@ -3562,7 +3618,7 @@ int RunLegacyMenu()
         }
     };
     for (;;) {
-        const auto action = GetUserAction();
+        const auto action = GetUserAction(appSettingPtr->RepairCategories);
         ManualOperationSummary summary;
         int result = 1;
         try {
@@ -3682,7 +3738,20 @@ int RunWithArguments(const std::vector<const char*>& arguments)
 
     const std::string operation = arguments.size() == 1
         ? "interactive menu" : (arguments[1] == nullptr ? "command line" : arguments[1]);
-    RunLogging::Start(operation);
+    // A configured category override requires JSON-only stdout, while legacy runs keep all console progress.
+    bool deferRepairConsole = false;
+    if (operation == "repair") {
+        for (auto it = arguments.begin() + 2; it != arguments.end(); ++it) {
+            const std::string_view arg(*it);
+            if (arg == "--") break;
+            if (arg == "--dry-run" || arg.starts_with("--dry-run=")) {
+                RunLogging::SetConsoleToStderr(true);
+                deferRepairConsole = true;
+                break;
+            }
+        }
+    }
+    RunLogging::Start(operation, std::nullopt, deferRepairConsole);
     logConfigurationPath(arguments);
     if (!FFmpegRuntime::ValidateLibraries()) {
         RunLogging::Finish(1);

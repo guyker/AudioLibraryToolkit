@@ -17,7 +17,6 @@
 #include "FolderConvert.h"
 #include "OutputLayout.h"
 #include "PlatformUtils.h"
-#include "RepairRules.h"
 #include "RunLogging.h"
 
 namespace
@@ -98,6 +97,8 @@ int ApplicationServices::Run(const CommandLineOptions& options)
             RunLogging::RecordError("Configuration error: " + configurationError);
             return 1;
         }
+        if (options.action == CommandAction::Repair && options.repairDryRun)
+            RunLogging::SetConsoleToStderr(!(options.legacyRepairProgress && settings->RepairCategories.Legacy()));
 
         if (options.action != CommandAction::Duplicates && !options.outputDirectorySpecified &&
             (settings->OutDirectory.empty() || std::ranges::all_of(settings->OutDirectory,
@@ -201,10 +202,12 @@ int ApplicationServices::Run(const CommandLineOptions& options)
                 return 1;
             }
             AudioRepair::Plan plan;
-            auto rules = options.repairRules.empty() ? RepairRules::DefaultRules() : options.repairRules;
-            if (options.repairRemoveId3v1) rules.insert("mp3.redundant-id3v1");
-            if (AudioRepair::Prepare(inputPath, OutputLayout::Repair(outputRoot, name),
-                    options.overwrite, rules, plan, options.repairJobs, options.repairDryRun) != 0) {
+            const auto categories = options.repairCategories.Resolve(settings->RepairCategories);
+            const auto rules = RepairIntegrity::EffectiveRules(categories, options.repairRules, options.repairRemoveId3v1);
+            const auto target = OutputLayout::Repair(outputRoot, name);
+            if (!ApplicationServiceOperations::ValidateRepairOutput(target, settings->MediaDirectoryList) ||
+                AudioRepair::Prepare(inputPath, target, options.overwrite, rules, plan,
+                    options.repairJobs, options.repairDryRun, categories) != 0) {
                 return 1;
             }
             if (options.preview) {
@@ -215,6 +218,7 @@ int ApplicationServices::Run(const CommandLineOptions& options)
                         return finding.status == "manual-review" || finding.status == "unreadable";
                     });
                 std::cout << "Repair preview:\n"
+                    << "  " << RepairCategoryOptions::Summary(categories) << '\n'
                     << "  Source: " << pathToUtf8(plan.input) << '\n'
                     << "  Output: " << pathToUtf8(plan.output) << '\n'
                     << "  Files inspected: " << plan.inspectedFiles << '\n'
@@ -228,6 +232,7 @@ int ApplicationServices::Run(const CommandLineOptions& options)
                 return AudioRepair::PrintDryRunReport(plan);
             }
             std::cout << "Repair preview: " << pathToUtf8(plan.input) << '\n'
+                << "  " << RepairCategoryOptions::Summary(categories) << '\n'
                 << "  Output: " << pathToUtf8(plan.output) << '\n'
                 << "  FLAC/MP3 files inspected: " << plan.inspectedFiles << '\n'
                 << "  Files to repair: " << std::count_if(plan.files.begin(), plan.files.end(),
@@ -238,7 +243,10 @@ int ApplicationServices::Run(const CommandLineOptions& options)
                     }) << '\n'
                 << "  Existing destination conflicts: " << plan.conflicts.size() << '\n';
             ApplicationServiceOperations::PrintRepairFindings(plan);
-            return AudioRepair::Execute(plan) == 0 ? 0 : 1;
+            const int result = AudioRepair::Execute(plan);
+            std::cout << "Repair result: " << (result == 0 ? "completed" : result > 0 ? "needs review" : "failed")
+                << "\n  " << RepairCategoryOptions::Summary(categories) << '\n';
+            return result == 0 ? 0 : 1;
         }
 
         case CommandAction::Scan: {

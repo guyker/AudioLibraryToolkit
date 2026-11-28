@@ -16,7 +16,8 @@
 namespace RunLogging
 {
     bool Start(const std::string& operation,
-        const std::optional<std::filesystem::path>& logDirectory = std::nullopt);
+        const std::optional<std::filesystem::path>& logDirectory = std::nullopt,
+        bool deferConsoleUntilConfigured = false);
     void SetConsoleToStderr(bool enabled);
     void SetProgressEventHandler(std::function<void(std::string)> handler);
     void SetFileLevel(spdlog::level::level_enum level);

@@ -11,7 +11,9 @@ Option 5 is not listed or accepted; the existing MP3 and repair choices remain o
 Conflicts block the run before installing output. After a started or failed operation a summary reports Completed, Partially
 completed or Failed with confirmed counts, and the program exits. Duplicate review also reports `Stopped by user`
 when ended early. `0` or EOF at the menu exits; `?` shows help.
-Option 7 validates and repairs recognized FLAC/MP3 metadata issues into `OutDirectory/repaired-metadata/<mediaName>` without
+Option 7 shows its current category settings first. Enter `CATEGORIES` to change them or answer the existing
+overwrite prompt directly. Metadata repair is the default; optional stream repairs change file bytes but never
+decoded PCM. Option 7 writes into `OutDirectory/repaired-metadata/<mediaName>` without
 modifying sources; it copies only folders with safe repairs and requires `RUN` after preview. A repair output that
 overlaps another active library's source or another library's repair output (for example, duplicate `mediaName`
 values) blocks the run before any repair is installed. Redundant MP3 ID3v1

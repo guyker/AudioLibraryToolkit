@@ -33,6 +33,8 @@ built-in defaults and validation to a found file (`AppSettingsJson::LoadWithDefa
 entries require a non-empty `mediaPath`; otherwise loading fails.
 `TagIssueResolution` (`ask`|`auto`, default `ask`; other values fail loading) controls MP3 tag issues (F-002): `ask`
 prompts in the menu and fails the CLI before writing; `auto` applies the recommended fixes.
+`RepairCategories` sets option 7 defaults per member: `metadata=fix`, `integrity=off`, `container=off`,
+`decode=off`. A run can override one member without replacing the others; see F-011 for valid modes and their cost.
 `UseAsyncMetadataReads` controls parallel TagLib reads during scan; the previous `UseAsyncFFmpegCalls` key remains
 accepted as an alias when the new key is absent. `CatalogExtensions` defaults to `.flac` and `.mp3`; additional supported TagLib formats can be
 enabled explicitly. `UseFFmpegLibraryAPI` is deprecated, ignored with a warning, and omitted when configuration is

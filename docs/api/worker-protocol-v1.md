@@ -20,7 +20,7 @@ checks, collision handling, and output safety rules remain authoritative.
 | `scan` | `inputPath` | `fullRescan`, `tier`, `archiveFlacMetadata`, `outputDirectory`, `configPath` |
 | `duplicates` | `jsonDirectory` | `openFolders`, `reportPath`, `duplicateQuarantinePaths` (string array), `outputDirectory`, `configPath` |
 | `databaseImport` | `jsonDirectory` | `outputDirectory`, `configPath` |
-| `repair` | `inputPath` | `overwrite`, `dryRun`, `removeId3v1`, `jobs` (1-16), `rules` (string array), `outputDirectory`, `configPath` |
+| `repair` | `inputPath` | `repairCategories`, `overwrite`, `dryRun`, `removeId3v1`, `jobs` (1-16), `rules` (string array), `outputDirectory`, `configPath` |
 | `initializeConfig` | `libraryPath`, `outputDirectory` | `configPath` |
 | `initializeDefaultConfig` | none | `configPath` |
 | `readConfiguration` | none | `configPath` |
@@ -38,6 +38,21 @@ For MP3 conversion, `tagIssueResolutions` is an optional object keyed by `emptyV
 subject to the choices supported by that issue type. Unspecified detected issues remain unresolved: the configured
 `TagIssueResolution: "auto"` policy applies recommended choices; otherwise the operation stops before writing.
 
+For repair, the optional `ready.features` entry `repair.categories.v1` advertises category support. Clients that
+depend on category restrictions must check this **before** sending a request: older v1 workers may ignore new fields.
+Clients using the existing request need not change. Example (valid for `preview` and `run`):
+
+```json
+{"protocolVersion":1,"requestId":"check-7","type":"preview","operation":"repair","parameters":{"inputPath":"D:\\Music","repairCategories":{"metadata":"off","integrity":"detect","container":"detect"}}}
+```
+
+`metadata` and `integrity` take `off`, `detect` or `fix`; `container` and `decode` take `off` or `detect`.
+Each field overrides its `RepairCategories` configuration member, otherwise the built-ins are `fix/off/off/off`.
+An empty or omitted `rules` array does not widen these modes. A filter naming a rule from a disabled category, an
+all-off selection, or an invalid mode is an error. Detection alone cannot authorize an edit. Structural inspection
+does not imply a full decode. A non-default category selection produces a [schema-3 repair report](../schemas/repair-report-v3.schema.json);
+default categories retain schema 2. Source and installation safety apply to both.
+
 `initializeConfig` creates a new configuration from the backend defaults/template using the selected output and
 library paths. It refuses to overwrite an existing file; when `configPath` is omitted, the backend's per-user
 configuration path is used.
@@ -47,7 +62,7 @@ commented template when valid and built-in defaults otherwise. It also refuses t
 Configuration operations target that same per-user file unless `configPath` selects another path. A read returns
 `schemaVersion`, the resolved absolute path, `exists`, a content `revision`, and the parsed configuration. A missing
 file returns built-in defaults with revision `"missing"` and is not created by reading or validation. A patch is a JSON
-object of top-level setting names. An object value (`FLACSettings`, `MetadataSidecars`) is merged member by member into
+object of top-level setting names. An object value (`FLACSettings`, `MetadataSidecars`, `RepairCategories`) is merged member by member into
 the object in the file, so members the patch omits and unknown members keep their text and comments. Any other value,
 including the lists `MediaDirectoryList` and `CatalogExtensions`, replaces the existing value as a whole, so comments and
 unknown entries inside a replaced list are not kept. Validation applies the patch to the loaded JSONC file and runs backend validation without writing. Saving requires the

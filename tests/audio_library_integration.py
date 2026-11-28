@@ -884,6 +884,174 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(sorted(map(picture_content, pictures)), sorted(map(picture_content, original_pictures)))
         self.assertEqual(Path(str(target) + ".flac-metadata").read_bytes(), self.prefix)
 
+    def test_repair_integrity_proves_only_the_unframed_flac_suffix(self):
+        source = self.work / "integrity-source"
+        source.mkdir()
+        track = source / "24-bit.flac"
+        checked(ARGS.ffmpeg, "-v", "error", "-f", "lavfi", "-i",
+                "sine=frequency=443:sample_rate=96000:duration=0.37",
+                "-ac", "2", "-c:a", "flac", "-sample_fmt", "s32", "-bits_per_raw_sample", "24", track)
+        pristine = track.read_bytes()
+        expected_md5 = pristine[26:42].hex()
+        self.assertNotEqual(int(expected_md5, 16), 0)
+        track.write_bytes(pristine + bytes(4186))
+        damaged_hash = hashlib.sha256(track.read_bytes()).digest()
+        def verify_source():
+            self.assertEqual(list(source.iterdir()), [track])
+            self.assertEqual(hashlib.sha256(track.read_bytes()).digest(), damaged_hash)
+        def dry(*flags):
+            res = self.repair(source, "--dry-run", *flags)
+            verify_source()
+            return json.loads(next(s for s in res.stdout.splitlines() if s.startswith('{"schemaVersion"')))
+        legacy = dry()
+        self.assertEqual((legacy["schemaVersion"], legacy["findings"]), (2, []))
+        detected = dry("--metadata-mode", "off", "--integrity-mode", "detect")
+        finding, = detected["findings"]
+        self.assertEqual((finding["rule"], finding["status"], finding["evidence"]["offset"],
+                          finding["evidence"]["length"]), ("flac.trailing-data", "manual-review", len(pristine), 4186))
+        self.assertEqual(detected["files"], [])
+        res = self.repair(source, "--integrity-mode", "fix", "--rules", "flac.trailing-data")
+        verify_source()
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        folder = self.output / "repaired-metadata" / source.name
+        self.assertEqual((folder / track.name).read_bytes(), pristine)
+        checked(ARGS.ffmpeg, "-nostdin", "-xerror", "-v", "error", "-i", folder / track.name, "-f", "null", "-")
+        report = json.loads((folder / "repair-report.json").read_text(encoding="utf-8"))
+        proof = report["files"][0]["proof"]
+        self.assertEqual((proof["status"], proof["output"]["flacPcmMd5"]), ("passed", expected_md5))
+        self.assertEqual(report["files"][0]["editRegions"], [{"offset": len(pristine), "length": 4186}])
+        self.assertEqual(proof["originalFlacMd5"], expected_md5)
+        self.assertEqual(proof["sourceFileSha256"], damaged_hash.hex())
+        self.assertEqual(report["decodeChecks"], [])  # Mandatory proof is not an optional source survey.
+        if ARGS.schema_checker:
+            validated = run(ARGS.schema_checker, Path(__file__).resolve().parents[1] / "docs" / "schemas" /
+                            "repair-report-v3.schema.json", "repair-report.json", cwd=folder)
+            self.assertEqual(validated.returncode, 0, validated.stderr)
+        res = self.repair(source, "--metadata-mode", "off", "--integrity-mode", "fix", "--decode-mode", "detect",
+                          "--overwrite")
+        verify_source()
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        report = json.loads((folder / "repair-report.json").read_bytes())
+        self.assertEqual(report["status"], "completed")
+        self.assertEqual(report["files"][0]["proof"]["output"]["flacPcmMd5"], expected_md5)
+        if report["decodeChecks"][0]["strictDecode"] == "failed":
+            self.assertEqual(next(f for f in report["findings"] if f["rule"] == "decode.strict")["status"],
+                             "informational")
+
+    def test_repair_integrity_does_not_replace_a_conflicting_pcm_digest(self):
+        data = bytearray(self.plain)
+        data[26] ^= 0x80
+        self.track.write_bytes(data + bytes(4186))
+        before = {p.relative_to(self.source): p.read_bytes() for p in self.source.rglob("*") if p.is_file()}
+        result = self.repair(self.source, "--integrity-mode", "fix", "--rules", "flac.trailing-data")
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        folder = self.output / "repaired-metadata" / self.source.name
+        self.assertFalse((folder / self.track.name).exists())
+        report = json.loads((folder / "repair-report.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["repairedFiles"], 0)
+        self.assertEqual(report["files"][0]["proof"]["status"], "refused")
+        self.assertTrue((folder / ".repair-in-progress").exists())
+        self.assertEqual({p.relative_to(self.source): p.read_bytes() for p in self.source.rglob("*") if p.is_file()}, before)
+
+    def test_repair_integrity_never_uses_a_new_md5_to_authorize_a_suffix_trim(self):
+        source = self.plain[:26] + bytes(16) + self.plain[42:] + bytes(4186)
+        self.track.write_bytes(source)
+        folder = self.output / "repaired-metadata" / self.source.name
+        folder.mkdir(parents=True)
+        existing = folder / self.name
+        existing.write_bytes(b"existing destination")
+        res = self.repair(self.source, "--integrity-mode", "fix", "--overwrite")
+        self.assertNotEqual(res.returncode, 0)
+        self.assertEqual(existing.read_bytes(), b"existing destination")
+        self.assertEqual(self.track.read_bytes(), source)
+        report = json.loads((folder / "repair-report.json").read_bytes())
+        self.assertEqual(report["repairedFiles"], 0)
+        self.assertNotIn("appliedRules", report["files"][0])
+        self.assertEqual(report["files"][0]["proof"]["status"], "refused")
+        self.assertTrue((folder / ".repair-in-progress").exists())
+
+    def test_repair_integrity_mp3_diagnostics_and_container_selection_are_read_only(self):
+        library = self.work / "diagnostics"
+        library.mkdir()
+        mp3 = library / "sample.mp3"
+        checked(ARGS.ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=frequency=790:duration=1",
+                "-c:a", "libmp3lame", "-q:a", "3", mp3)
+        clean = mp3.read_bytes()
+        mp3.write_bytes(clean + b"unclassified suffix")
+        (library / "looks-like.flac").write_bytes(clean)
+        (library / "empty.mp3").write_bytes(b"")
+        (library / "out-of-scope.wav").write_bytes(b"not an input to option 7")
+        before = {p.name: hashlib.sha256(p.read_bytes()).digest() for p in library.iterdir()}
+        for jobs in (1, 4):
+            res = self.repair(library, "--metadata-mode", "off", "--integrity-mode", "fix",
+                              "--container-mode", "detect", "--jobs", str(jobs), "--dry-run")
+            self.assertEqual(res.returncode, 1)
+            report = json.loads(res.stdout)
+            self.assertEqual(report["inspectedFiles"], 3)
+            found = {(f["source"], f["rule"]) for f in report["findings"]}
+            self.assertEqual(found, {("sample.mp3", "mp3.trailing-data"), ("looks-like.flac", "container.mismatch"),
+                                     ("empty.mp3", "container.empty")})
+            self.assertEqual((report["files"], report["decodeChecks"]), ([], []))
+            self.assertEqual({p.name: hashlib.sha256(p.read_bytes()).digest() for p in library.iterdir()}, before)
+            self.assertFalse(self.output.exists())
+
+    def test_repair_integrity_fills_only_missing_md5(self):
+        pristine = self.plain
+        missing = pristine[:26] + bytes(16) + pristine[42:]
+        self.track.write_bytes(missing)
+        result = self.repair(self.source, "--integrity-mode", "fix", "--rules", "flac.fill-md5")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.track.read_bytes(), missing)
+        folder = self.output / "repaired-metadata" / self.source.name
+        self.assertEqual((folder / self.track.name).read_bytes(), pristine)
+        proof = json.loads((folder / "repair-report.json").read_text(encoding="utf-8"))["files"][0]["proof"]
+        self.assertEqual(proof["source"]["pcmSha256"], proof["output"]["pcmSha256"])
+
+    def test_repair_integrity_proves_streaminfo_and_seek_fields_without_changing_frames(self):
+        source = self.plain
+        meta, audio = blocks(source)
+        block = int.from_bytes(source[8:10], "big")
+        point = struct.pack(">QQH", 0, 0, block)
+        # Insert a first-frame seek point so restoring the file is independently checkable byte-for-byte.
+        pristine = (source[:42] + b"\x03\0\0\x12" + point + source[42:])
+        self.assertGreater(len(meta), 1)
+        damaged = bytearray(pristine)
+        damaged[8:10] = (block - 1).to_bytes(2, "big")
+        damaged[12:15] = b"\0\0\x01"
+        damaged[25] ^= 1
+        damaged[61] = 1  # offset in the seek point; the sample number still identifies the first frame
+        self.track.write_bytes(damaged)
+        res = self.repair(self.source, "--metadata-mode", "off", "--integrity-mode", "fix")
+        self.assertEqual(self.track.read_bytes(), damaged)
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        folder = self.output / "repaired-metadata" / self.source.name
+        self.assertEqual((folder / self.name).read_bytes(), pristine)
+        report = json.loads((folder / "repair-report.json").read_bytes())
+        self.assertEqual({f["rule"] for f in report["findings"]},
+                         {"flac.total-samples", "flac.block-bounds", "flac.frame-sizes", "flac.seek-target"})
+        self.assertTrue(all(f["status"] == "repaired" for f in report["findings"]))
+        self.assertTrue(all(p["offset"] + p["length"] <= audio + 22 for p in report["files"][0]["editRegions"]))
+        recheck = self.repair(folder, "--integrity-mode", "detect", "--dry-run", output=self.work / "recheck")
+        self.assertEqual(recheck.returncode, 0, recheck.stdout + recheck.stderr)
+        self.assertEqual(json.loads(recheck.stdout)["findings"], [])
+
+    def test_repair_integrity_detect_only_metadata_does_not_contribute_edits(self):
+        tagged = add_vorbis_comments(self.plain, ["EXTRA=kept", "EXTRA=kept"])
+        missing = tagged[:26] + bytes(16) + tagged[42:]
+        for mode in ("detect", "fix"):
+            self.track.write_bytes(missing)
+            root = self.work / mode
+            result = self.repair(self.source, "--metadata-mode", mode, "--integrity-mode", "fix", output=root)
+            self.assertEqual(result.returncode, 1 if mode == "detect" else 0, result.stdout + result.stderr)
+            self.assertEqual(self.track.read_bytes(), missing)
+            folder = root / "repaired-metadata" / self.source.name
+            output = (folder / self.name).read_bytes()
+            self.assertEqual(output.count(b"EXTRA=kept"), 2 if mode == "detect" else 1)
+            self.assertEqual(output[26:42], tagged[26:42])
+            self.assertEqual(output[blocks(output)[1]:], tagged[blocks(tagged)[1]:])
+            report = json.loads((folder / "repair-report.json").read_bytes())
+            self.assertEqual(report["files"][0]["proof"]["status"], "passed")
+
     def test_repair_clean_library_publishes_reports_without_copying_audio(self):
         self.track.write_bytes(self.repair_fixture.read_bytes())
         before = {path.relative_to(self.source): path.read_bytes()
@@ -3919,6 +4087,7 @@ if __name__ == "__main__":
     parser.add_argument("--ffmpeg", type=lambda value: Path(value).resolve(), required=True)
     parser.add_argument("--ffprobe", type=lambda value: Path(value).resolve(), required=True)
     parser.add_argument("--audit-checker", type=lambda value: Path(value).resolve())
+    parser.add_argument("--schema-checker", type=lambda value: Path(value).resolve())
     parser.add_argument("--taglib-debug", type=int, choices=(0, 1), default=0)
     ARGS, remaining = parser.parse_known_args()
     unittest.main(argv=[__file__, *remaining])

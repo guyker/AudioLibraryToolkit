@@ -82,27 +82,56 @@ std::string hexDigest(const std::uint8_t* bytes, std::size_t size)
     return result;
 }
 
-std::optional<std::string> hashFile(const std::filesystem::path& path)
+constexpr int strictErrorChecks = AV_EF_CRCCHECK | AV_EF_BITSTREAM | AV_EF_BUFFER | AV_EF_EXPLODE;
+
+int openInput(const std::filesystem::path& path, FormatPtr& format, const char* expected = nullptr)
 {
-    std::ifstream input(path, std::ios::binary);
-    if (!input) return std::nullopt;
-    auto* rawHash = av_sha_alloc();
-    if (rawHash == nullptr) return std::nullopt;
-    std::unique_ptr<AVSHA, decltype(&av_free)> hash(rawHash, &av_free);
-    if (av_sha_init(hash.get(), 256) < 0) return std::nullopt;
-    std::array<std::uint8_t, 64 * 1024> buffer{};
-    while (input) {
-        input.read(reinterpret_cast<char*>(buffer.data()),
-            static_cast<std::streamsize>(buffer.size()));
-        const auto count = input.gcount();
-        if (count > 0) {
-            av_sha_update(hash.get(), buffer.data(), static_cast<unsigned int>(count));
+#ifdef _WIN32
+    const auto utf8Path = PlatformUtils::WideToUTF8(PlatformUtils::WindowsLongPath(path));
+#else
+    const auto utf8Path = path.string();
+#endif
+    AVFormatContext* raw = nullptr;
+    if (expected) {
+        raw = avformat_alloc_context();
+        if (!raw) return AVERROR(ENOMEM);
+        raw->error_recognition = strictErrorChecks;
+        // Probe the bytes; forcing the expected demuxer would hide a container mismatch.
+        raw->format_whitelist = av_strdup(expected);
+        raw->protocol_whitelist = av_strdup("file");
+        if (!raw->format_whitelist || !raw->protocol_whitelist) {
+            avformat_free_context(raw);
+            return AVERROR(ENOMEM);
         }
     }
-    if (!input.eof()) return std::nullopt;
-    std::array<std::uint8_t, 32> digest{};
-    av_sha_final(hash.get(), digest.data());
-    return hexDigest(digest.data(), digest.size());
+    const int result = avformat_open_input(&raw, utf8Path.c_str(), nullptr, nullptr);
+    format.reset(raw);
+    return result;
+}
+
+// Raw demuxers can probe past arbitrary leading junk. Inspect the same opened
+// input, allowing leading ID3v2 tags but not a resync to an unrelated stream.
+bool hasNativeHeader(AVIOContext* input, bool flac)
+{
+    if (!input) return false;
+    const auto saved = avio_tell(input);
+    if (saved < 0 || avio_seek(input, 0, SEEK_SET) != 0) return false;
+    bool matched = false;
+    std::array<std::uint8_t, 10> header{};
+    while (avio_read(input, header.data(), static_cast<int>(header.size())) == static_cast<int>(header.size())) {
+        if (header[0] != 'I' || header[1] != 'D' || header[2] != '3') {
+            matched = flac
+                ? (header[0] == 'f' && header[1] == 'L' && header[2] == 'a' && header[3] == 'C')
+                : (header[0] == 0xff && (header[1] & 0xe6) == 0xe2 && (header[1] & 0x18) != 8);
+            break;
+        }
+        if (header[3] < 2 || header[3] > 4 || header[4] == 255 ||
+            (header[3] != 4 && (header[5] & 0x10)) ||
+            ((header[6] | header[7] | header[8] | header[9]) & 0x80)) break;
+        const auto size = (header[6] << 21) | (header[7] << 14) | (header[8] << 7) | header[9];
+        if (avio_skip(input, size + ((header[5] & 0x10) ? 10 : 0)) < 0) break;
+    }
+    return avio_seek(input, saved, SEEK_SET) == saved && matched;
 }
 
 struct ChannelStats
@@ -259,7 +288,7 @@ double readSample(const AVFrame& frame, AVSampleFormat format, int channel, int 
     const auto baseFormat = av_get_packed_sample_fmt(format);
     const int plane = planar ? channel : 0;
     const int channels = frame.ch_layout.nb_channels;
-    const int index = planar ? sample : sample * channels + channel;
+    const auto index = planar ? sample : static_cast<std::ptrdiff_t>(sample) * channels + channel;
     switch (baseFormat) {
     case AV_SAMPLE_FMT_U8:
         return (static_cast<const std::uint8_t*>(static_cast<const void*>(data[plane]))[index] - 128) / 128.0;
@@ -279,25 +308,18 @@ double readSample(const AVFrame& frame, AVSampleFormat format, int channel, int 
     }
 }
 
-std::optional<std::int64_t> readIntegerSample(const AVFrame& frame,
-    AVSampleFormat format, int channel, int sample)
+std::optional<std::int64_t> readIntegerSample(const std::uint8_t* plane, std::ptrdiff_t index,
+    AVSampleFormat packedFormat)
 {
-    const auto* data = frame.extended_data;
-    const bool planar = av_sample_fmt_is_planar(format) != 0;
-    const auto baseFormat = av_get_packed_sample_fmt(format);
-    const int plane = planar ? channel : 0;
-    const int channels = frame.ch_layout.nb_channels;
-    const int index = planar ? sample : sample * channels + channel;
-    switch (baseFormat) {
+    switch (packedFormat) {
     case AV_SAMPLE_FMT_U8:
-        return static_cast<std::int64_t>(
-            static_cast<const std::uint8_t*>(static_cast<const void*>(data[plane]))[index]) - 128;
+        return static_cast<std::int64_t>(plane[index]) - 128;
     case AV_SAMPLE_FMT_S16:
-        return static_cast<const std::int16_t*>(static_cast<const void*>(data[plane]))[index];
+        return reinterpret_cast<const std::int16_t*>(plane)[index];
     case AV_SAMPLE_FMT_S32:
-        return static_cast<const std::int32_t*>(static_cast<const void*>(data[plane]))[index];
+        return reinterpret_cast<const std::int32_t*>(plane)[index];
     case AV_SAMPLE_FMT_S64:
-        return static_cast<std::int64_t*>(static_cast<void*>(data[plane]))[index];
+        return reinterpret_cast<const std::int64_t*>(plane)[index];
     default:
         return std::nullopt;
     }
@@ -326,6 +348,13 @@ void updateHash(AVSHA* hash, const std::uint8_t* data, std::size_t size)
         av_sha_update(hash, data, chunk);
         data += chunk;
         size -= chunk;
+    }
+}
+
+void appendLittleEndian(std::vector<std::uint8_t>& bytes, std::uint64_t value, int bits)
+{
+    for (int bit = 0; bit < bits; bit += 8) {
+        bytes.push_back(static_cast<std::uint8_t>(value >> bit));
     }
 }
 
@@ -363,6 +392,8 @@ bool appendFrameSamples(const AVFrame& frame, AVSampleFormat format,
         std::array<double, 2> stereoValues{};
         bool audible = false;
         for (int channel = 0; channel < channels; ++channel) {
+            const auto* plane = frame.extended_data[planar ? channel : 0];
+            const auto index = planar ? sample : static_cast<std::ptrdiff_t>(sample) * channels + channel;
             if (analyzeSignal) {
                 const double value = readSample(frame, format, channel, sample);
                 if (!std::isfinite(value)) {
@@ -378,7 +409,7 @@ bool appendFrameSamples(const AVFrame& frame, AVSampleFormat format,
                 channelStats.sumSquares += static_cast<long double>(value) * value;
                 channelStats.peak = std::max(channelStats.peak, std::abs(value));
                 if (integerFormat) {
-                    const auto integerSample = readIntegerSample(frame, format, channel, sample);
+                    const auto integerSample = readIntegerSample(plane, index, baseFormat);
                     if (!integerSample) {
                         error = "Decoder returned an unsupported integer sample format.";
                         return false;
@@ -400,24 +431,17 @@ bool appendFrameSamples(const AVFrame& frame, AVSampleFormat format,
                 channelStats.hasPrevious = true;
             }
 
-            const auto* source = frame.extended_data[planar ? channel : 0] +
-                static_cast<std::ptrdiff_t>((planar ? sample : sample * channels + channel) *
-                    bytesPerSample);
+            const auto* source = plane + index * bytesPerSample;
             interleaved.insert(interleaved.end(), source, source + bytesPerSample);
 
             if (flacHash != nullptr && integerFormat && declaredBits > 0 &&
                 declaredBits <= integerSampleBits) {
-                const auto raw = readIntegerSample(frame, format, channel, sample);
+                const auto raw = readIntegerSample(plane, index, baseFormat);
                 if (!raw) continue;
                 const int shift = integerSampleBits - declaredBits;
                 const std::int64_t normalized = shift == 0 ? *raw : (*raw >> shift);
                 integerOrMask |= static_cast<std::uint64_t>(normalized);
-                const auto unsignedSample = static_cast<std::uint64_t>(normalized);
-                for (int byte = 0; byte < (declaredBits + 7) / 8; ++byte) {
-                    const auto valueByte = static_cast<std::uint8_t>(
-                        (unsignedSample >> (byte * 8)) & 0xff);
-                    flacPcmBytes.push_back(valueByte);
-                }
+                appendLittleEndian(flacPcmBytes, static_cast<std::uint64_t>(normalized), declaredBits);
             }
         }
         if (analyzeSignal && channels >= 2) {
@@ -437,6 +461,44 @@ bool appendFrameSamples(const AVFrame& frame, AVSampleFormat format,
     return true;
 }
 
+// FLAC hashes interleaved signed samples sign-extended to the next whole byte.
+// The MP3 presentation instead preserves every bit of its native float output.
+const char* serializeFrame(const AVFrame& frame, AVSampleFormat fmt, int bits, bool flac,
+    std::vector<std::uint8_t>& bytes)
+{
+    const auto packed = av_get_packed_sample_fmt(fmt);
+    const int shift = av_get_bytes_per_sample(fmt) * 8 - bits;
+    if (shift < 0 || (flac ? (packed != AV_SAMPLE_FMT_S16 && packed != AV_SAMPLE_FMT_S32) :
+        packed != AV_SAMPLE_FMT_FLT)) return "Unsupported decoded PCM representation.";
+    const bool planar = av_sample_fmt_is_planar(fmt) != 0;
+    const int channels = frame.ch_layout.nb_channels;
+    if (!frame.extended_data) return "Missing decoded sample data.";
+    for (int plane = 0; plane < (planar ? channels : 1); ++plane) {
+        if (!frame.extended_data[plane]) return "Missing decoded sample plane.";
+    }
+    bytes.clear();
+    bytes.reserve(static_cast<std::size_t>(frame.nb_samples) * channels * ((bits + 7) / 8));
+    for (int i = 0; i < frame.nb_samples; ++i) {
+        for (int ch = 0; ch < channels; ++ch) {
+            const auto* plane = frame.extended_data[planar ? ch : 0];
+            const int index = planar ? i : i * channels + ch;
+            if (flac) {
+                const auto value = *readIntegerSample(plane, index, packed);
+                if ((value & ((std::int64_t{1} << shift) - 1)) != 0) {
+                    return "Decoded precision exceeds the declared FLAC width.";
+                }
+                appendLittleEndian(bytes, static_cast<std::uint64_t>(value >> shift), bits);
+            }
+            else {
+                const float value = reinterpret_cast<const float*>(plane)[index];
+                if (!std::isfinite(value)) return "Decoder returned a non-finite MP3 sample.";
+                appendLittleEndian(bytes, std::bit_cast<std::uint32_t>(value), 32);
+            }
+        }
+    }
+    return nullptr;
+}
+
 void fail(IntegrityResult& integrity, MediaRecord& record,
     std::string message, std::optional<std::int64_t> position = std::nullopt)
 {
@@ -451,6 +513,260 @@ void fail(IntegrityResult& integrity, MediaRecord& record,
     }
 }
 
+// Drain after every packet so a successful send cannot leave an error hidden at EOF.
+// The scan keeps its historical diagnostic position; repair only attributes failures
+// to an actual packet, and uses a synchronous native decoder without delayed frames.
+struct DecodeFailure
+{
+    std::int64_t position = -1;
+    bool invalidBitstream = false;
+};
+
+std::string decodePackets(AVFormatContext& format, AVCodecContext& codec, int streamIndex,
+    AVPacket& packet, AVFrame& frame, bool strict, DecodeFailure& failure, auto&& validatePacket, auto&& accept)
+{
+    std::string error;
+    auto receive = [&]() {
+        int result;
+        while ((result = avcodec_receive_frame(&codec, &frame)) >= 0) {
+            if (strict && (frame.decode_error_flags != 0 ||
+                (frame.flags & (AV_FRAME_FLAG_CORRUPT | AV_FRAME_FLAG_DISCARD)) != 0)) {
+                failure.invalidBitstream = frame.decode_error_flags != 0 || (frame.flags & AV_FRAME_FLAG_CORRUPT);
+                error = "Decoder returned a corrupt, concealed or discarded audio frame.";
+            }
+            else {
+                accept(frame, error);
+            }
+            av_frame_unref(&frame);
+            if (!error.empty()) return AVERROR_INVALIDDATA;
+        }
+        if (result != AVERROR(EAGAIN) && result != AVERROR_EOF) {
+            failure.invalidBitstream = result == AVERROR_INVALIDDATA;
+            error = "Audio decode failed: " + ffmpegError(result);
+        }
+        return result;
+    };
+
+    int result;
+    while ((result = av_read_frame(&format, &packet)) >= 0) {
+        if (packet.stream_index == streamIndex) {
+            failure.position = packet.pos >= 0 || strict ? packet.pos : packet.pts;
+            if (strict && ((packet.flags & (AV_PKT_FLAG_CORRUPT | AV_PKT_FLAG_DISCARD)) != 0 ||
+                packet.size <= 0)) {
+                failure.invalidBitstream = (packet.flags & AV_PKT_FLAG_CORRUPT) != 0;
+                return "Demuxer returned a corrupt, discarded or empty audio packet.";
+            }
+            if (!validatePacket(packet)) return "Incomplete or unsupported native audio packet.";
+            result = avcodec_send_packet(&codec, &packet);
+            if (result == AVERROR(EAGAIN)) {
+                if (strict) failure.position = -1; // A pending frame predates this packet.
+                receive();
+                if (!error.empty()) return error;
+                if (strict) failure.position = packet.pos;
+                result = avcodec_send_packet(&codec, &packet);
+            }
+            if (result < 0) {
+                failure.invalidBitstream = result == AVERROR_INVALIDDATA;
+                return "Decoder rejected an audio packet: " + ffmpegError(result);
+            }
+            result = receive();
+            if (!error.empty()) return error;
+            if (strict && result != AVERROR(EAGAIN)) return "Decoder ended before input EOF.";
+        }
+        av_packet_unref(&packet);
+    }
+    if (strict) failure.position = -1;
+    if (result != AVERROR_EOF) return "Audio packet read failed: " + ffmpegError(result);
+    if (strict && format.pb && format.pb->error < 0 && format.pb->error != AVERROR_EOF) {
+        return "Audio input read failed: " + ffmpegError(format.pb->error);
+    }
+    result = avcodec_send_packet(&codec, nullptr);
+    if (result < 0 && result != AVERROR_EOF) {
+        failure.invalidBitstream = result == AVERROR_INVALIDDATA;
+        return "Decoder flush failed: " + ffmpegError(result);
+    }
+    result = receive();
+    if (strict && error.empty() && result != AVERROR_EOF) return "Decoder did not drain to EOF.";
+    return error;
+}
+
+// A parser may concatenate or resynchronize packets. On failure verify its
+// reported position/size against the actual bytes of this same open input.
+bool matchesSourcePacket(AVIOContext* input, const AVPacket& packet, std::int64_t position)
+{
+    if (!input || position < 0 || position != packet.pos || packet.size <= 0 || !packet.data ||
+        position > INT64_MAX - packet.size || avio_seek(input, position, SEEK_SET) != position) {
+        return false;
+    }
+    std::array<std::uint8_t, 8192> bytes{};
+    for (int i = 0; i < packet.size;) {
+        const int n = std::min(packet.size - i, static_cast<int>(bytes.size()));
+        if (avio_read(input, bytes.data(), n) != n ||
+            !std::equal(bytes.data(), bytes.data() + n, packet.data + i)) return false;
+        i += n;
+    }
+    return true;
+}
+
+}
+
+std::optional<std::string> DecodeAnalyzer::FileSha256(const std::filesystem::path& path)
+{
+#ifdef _WIN32
+    std::ifstream input(std::filesystem::path(PlatformUtils::WindowsLongPath(path)), std::ios::binary);
+#else
+    std::ifstream input(path, std::ios::binary);
+#endif
+    if (!input) return std::nullopt;
+    std::unique_ptr<AVSHA, decltype(&av_free)> hash(av_sha_alloc(), &av_free);
+    if (!hash || av_sha_init(hash.get(), 256) < 0) return std::nullopt;
+    std::array<std::uint8_t, 64 * 1024> buffer{};
+    while (input) {
+        input.read(reinterpret_cast<char*>(buffer.data()),
+            static_cast<std::streamsize>(buffer.size()));
+        const auto count = input.gcount();
+        if (count > 0) av_sha_update(hash.get(), buffer.data(), static_cast<unsigned int>(count));
+    }
+    if (!input.eof() || input.bad()) return std::nullopt;
+    std::array<std::uint8_t, 32> digest{};
+    av_sha_final(hash.get(), digest.data());
+    return hexDigest(digest.data(), digest.size());
+}
+
+RepairPcmProof DecodeAnalyzer::Prove(const std::filesystem::path& path, bool flac)
+{
+    const auto failure = [](std::string message) {
+        RepairPcmProof proof;
+        proof.error = std::move(message);
+        return proof;
+    };
+    FFmpeg::ScopedLogCapture logCapture(path, "repair-decode");
+    const char* nativeFormat = flac ? "flac" : "mp3";
+    FormatPtr format;
+    int result = openInput(path, format, nativeFormat);
+    if (result < 0) return failure("Cannot open native audio input: " + ffmpegError(result));
+    if (!hasNativeHeader(format->pb, flac)) return failure("Cannot verify the native audio header.");
+    result = avformat_find_stream_info(format.get(), nullptr);
+    if (result < 0) return failure("Cannot read audio stream information: " + ffmpegError(result));
+    int streamIndex = -1;
+    for (unsigned i = 0; i < format->nb_streams; ++i) {
+        const auto& stream = *format->streams[i];
+        if (stream.codecpar->codec_type == AVMEDIA_TYPE_AUDIO && streamIndex < 0) {
+            streamIndex = static_cast<int>(i);
+        }
+        else if (stream.codecpar->codec_type != AVMEDIA_TYPE_VIDEO ||
+            !(stream.disposition & AV_DISPOSITION_ATTACHED_PIC)) {
+            return failure("Expected one native audio program with optional attached pictures.");
+        }
+    }
+    if (streamIndex < 0) return failure("No native audio stream was found.");
+    const auto& stream = *format->streams[streamIndex];
+    const auto& params = *stream.codecpar;
+    if (params.codec_id != (flac ? AV_CODEC_ID_FLAC : AV_CODEC_ID_MP3)) {
+        return failure("Audio codec does not match the expected native format.");
+    }
+    const int bits = flac ? params.bits_per_raw_sample : 32;
+    const int rate = params.sample_rate;
+    const int channels = params.ch_layout.nb_channels;
+    if (rate <= 0 || !av_channel_layout_check(&params.ch_layout) ||
+        params.ch_layout.order != AV_CHANNEL_ORDER_NATIVE || channels > (flac ? 8 : 2) ||
+        (flac && (bits < 4 || bits > 32 || params.extradata_size != 34))) {
+        return failure("Unverified audio precision, sample rate or channel layout.");
+    }
+    const auto channelMask = params.ch_layout.u.mask;
+    const AVCodec* decoder = avcodec_find_decoder_by_name(flac ? "flac" : "mp3float");
+    if (!decoder) return failure("Expected native audio decoder is unavailable.");
+    CodecPtr codec(avcodec_alloc_context3(decoder));
+    if (!codec) return failure("Cannot allocate the native audio decoder.");
+    result = avcodec_parameters_to_context(codec.get(), &params);
+    if (result < 0) return failure("Cannot configure the native audio decoder: " + ffmpegError(result));
+    codec->thread_count = 1;
+    codec->err_recognition = strictErrorChecks;
+    codec->error_concealment = 0;
+    codec->pkt_timebase = stream.time_base;
+    result = avcodec_open2(codec.get(), decoder, nullptr);
+    if (result < 0) return failure("Cannot open the native audio decoder: " + ffmpegError(result));
+
+    FramePtr frame(av_frame_alloc());
+    PacketPtr packet(av_packet_alloc());
+    std::unique_ptr<AVSHA, decltype(&av_free)> sha(av_sha_alloc(), &av_free);
+    std::unique_ptr<AVMD5, decltype(&av_free)> md5(flac ? av_md5_alloc() : nullptr, &av_free);
+    if (!packet || !frame || !sha || (flac && !md5) || av_sha_init(sha.get(), 256) < 0) {
+        return failure("Unable to allocate PCM proof state.");
+    }
+    if (md5) av_md5_init(md5.get());
+    std::vector<std::uint8_t> bytes;
+    AVSampleFormat firstFormat = AV_SAMPLE_FMT_NONE;
+    std::uint64_t samples = 0;
+    DecodeFailure rejected;
+    // The MP3 decoder can return complete-looking PCM from a short final packet by
+    // reading padding. Require libav's independent Layer III parser to emit a whole
+    // frame from the packet *without* its EOF flush (which emits truncated data).
+    std::unique_ptr<AVCodecParserContext, decltype(&av_parser_close)> parser(
+        flac ? nullptr : av_parser_init(AV_CODEC_ID_MP3), &av_parser_close);
+    CodecPtr parserCodec(flac ? nullptr : avcodec_alloc_context3(decoder));
+    if (!flac && (!parser || !parserCodec)) return failure("Cannot allocate the Layer III packet parser.");
+    auto validate = [&](const AVPacket& input) {
+        if (flac) return true;
+        if (input.size < 4 || (input.data[1] & 6) != 2) return false;
+        std::uint8_t* parsed = nullptr;
+        int size = 0;
+        const int used = av_parser_parse2(parser.get(), parserCodec.get(), &parsed, &size,
+            input.data, input.size, input.pts, input.dts, input.pos);
+        return used == input.size && size == input.size && parsed == input.data;
+    };
+    auto error = decodePackets(*format, *codec, streamIndex, *packet, *frame, true, rejected, validate,
+        [&](const AVFrame& decoded, std::string& reason) {
+        const auto fmt = static_cast<AVSampleFormat>(decoded.format);
+        if ((firstFormat != AV_SAMPLE_FMT_NONE && firstFormat != fmt) || decoded.sample_rate != rate ||
+            decoded.ch_layout.order != AV_CHANNEL_ORDER_NATIVE || decoded.ch_layout.u.mask != channelMask ||
+            decoded.ch_layout.nb_channels != channels || (flac && codec->bits_per_raw_sample != bits)) {
+            reason = "Changed or unsupported decoded PCM interpretation.";
+            return;
+        }
+        firstFormat = fmt;
+        if (decoded.nb_samples <= 0 || decoded.nb_samples > (flac ? 65535 : 1152) ||
+            samples > UINT64_MAX - decoded.nb_samples) {
+            reason = "Invalid decoded sample count.";
+            return;
+        }
+        if (const char* e = serializeFrame(decoded, fmt, bits, flac, bytes)) {
+            reason = e;
+            return;
+        }
+        updateHash(sha.get(), bytes.data(), bytes.size());
+        if (md5) av_md5_update(md5.get(), bytes.data(), bytes.size());
+        samples += static_cast<std::uint64_t>(decoded.nb_samples);
+    });
+    if (!error.empty()) {
+        auto proof = failure(std::move(error));
+        proof.invalidBitstream = rejected.invalidBitstream;
+        if (matchesSourcePacket(format->pb, *packet, rejected.position)) {
+            proof.errorOffset = static_cast<std::uint64_t>(rejected.position);
+            proof.errorPacketSize = static_cast<std::uint64_t>(packet->size);
+        }
+        return proof;
+    }
+    for (const auto& log : logCapture.TakeLogs()) {
+        if (log.level == "error") return failure(log.component + ": " + log.message);
+    }
+    if (samples == 0) return failure("Decoder produced no audio samples.");
+    RepairPcmProof proof;
+    proof.bits = bits;
+    proof.samples = samples;
+    proof.format = std::string(nativeFormat) + ":" + av_get_sample_fmt_name(firstFormat) +
+        ":" + std::to_string(bits) + "bit:" + std::to_string(rate) + "Hz:channel-mask=" +
+        std::to_string(channelMask) + ":interleaved-le";
+    std::array<std::uint8_t, 32> shaBytes{};
+    av_sha_final(sha.get(), shaBytes.data());
+    proof.pcmSha256 = hexDigest(shaBytes.data(), shaBytes.size());
+    if (md5) {
+        std::array<std::uint8_t, 16> md5Bytes{};
+        av_md5_final(md5.get(), md5Bytes.data());
+        proof.flacMd5 = hexDigest(md5Bytes.data(), md5Bytes.size());
+    }
+    proof.clean = true;
+    return proof;
 }
 
 static void analyzeAudio(const std::filesystem::path& filePath,
@@ -458,26 +774,19 @@ static void analyzeAudio(const std::filesystem::path& filePath,
 {
     auto& integrity = record.integrity;
     integrity.status = "failed";
-    if (const auto digest = hashFile(filePath)) {
+    if (const auto digest = DecodeAnalyzer::FileSha256(filePath)) {
         integrity.fileSha256 = *digest;
     }
     else {
         integrity.error = "Unable to read the complete source file for SHA-256.";
     }
 
-#ifdef _WIN32
-    const auto widePath = PlatformUtils::WindowsLongPath(filePath);
-    const auto utf8Path = PlatformUtils::WideToUTF8(widePath);
-#else
-    const auto utf8Path = filePath.string();
-#endif
-    AVFormatContext* rawFormat = nullptr;
-    int result = avformat_open_input(&rawFormat, utf8Path.c_str(), nullptr, nullptr);
+    FormatPtr format;
+    int result = openInput(filePath, format);
     if (result < 0) {
         fail(integrity, record, "Cannot open audio stream: " + ffmpegError(result));
         return;
     }
-    FormatPtr format(rawFormat);
     result = avformat_find_stream_info(format.get(), nullptr);
     if (result < 0) {
         fail(integrity, record, "Cannot read audio stream information: " + ffmpegError(result));
@@ -511,7 +820,7 @@ static void analyzeAudio(const std::filesystem::path& filePath,
         fail(integrity, record, "Cannot configure audio decoder: " + ffmpegError(result));
         return;
     }
-    codec->err_recognition = AV_EF_CRCCHECK | AV_EF_BITSTREAM | AV_EF_BUFFER | AV_EF_EXPLODE;
+    codec->err_recognition = strictErrorChecks;
     result = avcodec_open2(codec.get(), decoder, nullptr);
     if (result < 0) {
         fail(integrity, record, "Cannot initialize audio decoder: " + ffmpegError(result));
@@ -548,80 +857,31 @@ static void analyzeAudio(const std::filesystem::path& filePath,
         stream->codecpar->bits_per_raw_sample);
     const bool isFlac = stream->codecpar->codec_id == AV_CODEC_ID_FLAC;
     const int md5Bits = isFlac ? declaredBits : 0;
-    std::int64_t currentPosition = -1;
-    std::string decodeError;
+    DecodeFailure rejected;
     EbuR128Filter signalFilter;
     bool signalFilterStarted = false;
     bool signalFilterAvailable = includeSignalAnalysis;
     std::string signalFilterError;
 
-    auto receiveFrames = [&]() {
-        while (true) {
-            const int receiveResult = avcodec_receive_frame(codec.get(), frame.get());
-            if (receiveResult == AVERROR(EAGAIN) || receiveResult == AVERROR_EOF) return true;
-            if (receiveResult < 0) {
-                decodeError = "Audio decode failed: " + ffmpegError(receiveResult);
-                return false;
+    auto decodeError = decodePackets(*format, *codec, streamIndex, *packet, *frame, false,
+        rejected, [](const AVPacket&) { return true; }, [&](const AVFrame& decoded, std::string& error) {
+        if (includeSignalAnalysis && signalFilterAvailable) {
+            if (!signalFilterStarted) {
+                signalFilterStarted = true;
+                signalFilterAvailable = signalFilter.Initialize(decoded, signalFilterError);
             }
-            if (includeSignalAnalysis && signalFilterAvailable) {
-                if (!signalFilterStarted) {
-                    signalFilterStarted = true;
-                    signalFilterAvailable = signalFilter.Initialize(*frame, signalFilterError);
-                }
-                if (signalFilterAvailable &&
-                    !signalFilter.AddFrame(*frame, record.signal, signalFilterError)) {
-                    signalFilterAvailable = false;
-                }
-            }
-            if (!appendFrameSamples(*frame, static_cast<AVSampleFormat>(frame->format),
-                pcmHash.get(), isFlac ? flacHash.get() : nullptr, md5Bits, stats,
-                sampleCount, integerOrMask, integerSampleBits, firstAudibleSample,
-                lastAudibleSample, stereoProductSum, includeSignalAnalysis, decodeError)) {
-                av_frame_unref(frame.get());
-                return false;
-            }
-            av_frame_unref(frame.get());
-        }
-    };
-
-    while ((result = av_read_frame(format.get(), packet.get())) >= 0) {
-        if (packet->stream_index == streamIndex) {
-            currentPosition = packet->pos >= 0 ? packet->pos : packet->pts;
-            result = avcodec_send_packet(codec.get(), packet.get());
-            if (result == AVERROR(EAGAIN)) {
-                if (!receiveFrames()) {
-                    av_packet_unref(packet.get());
-                    break;
-                }
-                result = avcodec_send_packet(codec.get(), packet.get());
-            }
-            if (result < 0) {
-                decodeError = "Decoder rejected an audio packet: " + ffmpegError(result);
-                av_packet_unref(packet.get());
-                break;
-            }
-            if (!receiveFrames()) {
-                av_packet_unref(packet.get());
-                break;
+            if (signalFilterAvailable && !signalFilter.AddFrame(decoded, record.signal, signalFilterError)) {
+                signalFilterAvailable = false;
             }
         }
-        av_packet_unref(packet.get());
-    }
-    if (result != AVERROR_EOF && decodeError.empty()) {
-        decodeError = "Audio packet read failed: " + ffmpegError(result);
-    }
-    if (decodeError.empty()) {
-        result = avcodec_send_packet(codec.get(), nullptr);
-        if (result < 0 && result != AVERROR_EOF) {
-            decodeError = "Decoder flush failed: " + ffmpegError(result);
-        }
-        else if (!receiveFrames()) {
-            if (decodeError.empty()) decodeError = "Audio decode failed while flushing.";
-        }
-    }
+        appendFrameSamples(decoded, static_cast<AVSampleFormat>(decoded.format),
+            pcmHash.get(), isFlac ? flacHash.get() : nullptr, md5Bits, stats,
+            sampleCount, integerOrMask, integerSampleBits, firstAudibleSample,
+            lastAudibleSample, stereoProductSum, includeSignalAnalysis, error);
+    });
     if (!decodeError.empty()) {
-        fail(integrity, record, std::move(decodeError), currentPosition >= 0
-            ? std::optional<std::int64_t>(currentPosition) : std::nullopt);
+        fail(integrity, record, std::move(decodeError), rejected.position >= 0
+            ? std::optional<std::int64_t>(rejected.position) : std::nullopt);
         return;
     }
     if (includeSignalAnalysis && signalFilterAvailable &&

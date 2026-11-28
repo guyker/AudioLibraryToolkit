@@ -13,6 +13,7 @@
 #include <rapidjson/writer.h>
 
 #include "RunLogging.h"
+#include "RepairRules.h"
 
 namespace
 {
@@ -229,7 +230,8 @@ bool makeOptions(const rapidjson::Value& request, CommandLineOptions& options,
     else if (operation == "repair") {
         if (!getBool(params, "overwrite", options.overwrite, error) ||
             !getBool(params, "dryRun", options.repairDryRun, error) ||
-            !getBool(params, "removeId3v1", options.repairRemoveId3v1, error)) return false;
+            !getBool(params, "removeId3v1", options.repairRemoveId3v1, error) ||
+            !options.repairCategories.Read(params, "repairCategories", error)) return false;
         if (params.HasMember("jobs")) {
             if (!params["jobs"].IsInt() || params["jobs"].GetInt() < 1 ||
                 params["jobs"].GetInt() > 16) {
@@ -243,13 +245,17 @@ bool makeOptions(const rapidjson::Value& request, CommandLineOptions& options,
                 error = "rules must be an array of rule ids.";
                 return false;
             }
-            std::string rules;
             for (const auto& rule : params["rules"].GetArray()) {
                 if (!rule.IsString() || rule.GetStringLength() == 0) {
                     error = "rules must contain only non-empty strings.";
                     return false;
                 }
-                options.repairRules.emplace(rule.GetString(), rule.GetStringLength());
+                const std::string id(rule.GetString(), rule.GetStringLength());
+                if (!RepairRules::IsKnownRule(id)) {
+                    error = "Unknown repair rule: " + id;
+                    return false;
+                }
+                options.repairRules.insert(id);
             }
         }
     }
@@ -321,6 +327,10 @@ int WorkerProtocol::Run(std::istream& input, std::ostream& output, const Operati
                 "saveConfiguration" }) {
             writer.String(capability);
         }
+        writer.EndArray();
+        writer.Key("features");
+        writer.StartArray();
+        writer.String("repair.categories.v1");
         writer.EndArray();
     });
 

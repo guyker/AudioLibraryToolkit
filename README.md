@@ -4,7 +4,7 @@ Two independently built modules live here:
 
 | Module | Purpose | Documentation |
 |---|---|---|
-| `AudioLibraryToolkit` | Headless C++ audio conversion, metadata repair, catalog and duplicate management | [Toolkit guide](AudioLibraryToolkit/README.md), [design](AudioLibraryToolkit/DESIGN.md), [features](docs/features/index.md), [knowledge](docs/knowledge/index.md) |
+| `AudioLibraryToolkit` | Headless C++ audio conversion, metadata and stream repair, catalog and duplicate management | [Toolkit guide](AudioLibraryToolkit/README.md), [design](AudioLibraryToolkit/DESIGN.md), [features](docs/features/index.md), [knowledge](docs/knowledge/index.md) |
 | `AudioLibraryToolkit.Desktop` | Optional Electron desktop client | [Desktop guide](AudioLibraryToolkit.Desktop/README.md), [design](AudioLibraryToolkit.Desktop/DESIGN.md), [features](AudioLibraryToolkit.Desktop/docs/features/index.md), [knowledge](AudioLibraryToolkit.Desktop/docs/knowledge/index.md) |
 
 The toolkit owns the [versioned worker interface](docs/api/worker-protocol-v1.md). The desktop consumes that interface

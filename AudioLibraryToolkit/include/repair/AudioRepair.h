@@ -1,4 +1,5 @@
 #pragma once
+#include "RepairRules.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -10,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-// Plans and executes metadata-only repairs (RepairRules) into a separate output tree; sources are never modified.
+// Plans and executes selected repairs into a separate output tree; sources are never modified.
 namespace AudioRepair
 {
 struct Finding
@@ -21,6 +22,9 @@ struct Finding
     std::string status;
     std::size_t count{ 0 };
     std::string detail;
+    std::optional<RepairIntegrity::Issue> evidence;
+    std::string proofStatus;
+    bool detectionOnly{};
 };
 
 struct FindingImpact
@@ -45,6 +49,10 @@ struct PlannedFile
     // Fix rule ids with their counts, re-checked against the source before writing.
     std::vector<std::pair<std::string, std::size_t>> fixes;
     std::string status{ "not-attempted" };
+    std::string sourceDigest, editDigest, originalMd5;
+    std::uint64_t frameSamples{}, declaredSamples{};
+    RepairRules::Proof proof;
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> editRanges;
 };
 
 struct Plan
@@ -63,11 +71,13 @@ struct Plan
     std::vector<PlannedFile> files;
     std::vector<Finding> findings;
     std::vector<std::filesystem::path> conflicts;
+    RepairIntegrity::Categories categories;
+    std::map<std::filesystem::path, RepairPcmProof> decoded;
 };
 
 int Prepare(const std::filesystem::path& input, const std::filesystem::path& output,
     bool overwrite, const std::set<std::string>& rules, Plan& plan,
-    std::size_t workers = 4, bool dryRun = false);
+    std::size_t workers = 4, bool dryRun = false, const RepairIntegrity::Categories& categories = {});
 bool ReportDestinationConflicts(const Plan& plan);
 int Execute(Plan& plan, std::size_t* repaired = nullptr, std::size_t* copied = nullptr);
 int PrintDryRunReport(const Plan& plan);

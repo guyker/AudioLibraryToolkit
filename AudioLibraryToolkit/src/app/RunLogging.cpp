@@ -27,6 +27,7 @@
 #endif
 
 #include <spdlog/logger.h>
+#include <spdlog/details/log_msg_buffer.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
@@ -57,20 +58,39 @@ bool recordFileDiagnostic(spdlog::level::level_enum level, const std::string& me
 class ProgressConsoleSink final : public spdlog::sinks::sink
 {
 public:
-    explicit ProgressConsoleSink(bool toStderr)
-        : _sink(toStderr
+    ProgressConsoleSink(bool toStderr, bool defer)
+    {
+        SetOutput(toStderr);
+        _defer = defer;
+    }
+
+    void SetOutput(bool toStderr)
+    {
+        std::lock_guard lock(_mutex);
+        auto* output = toStderr ? &std::cerr : &std::cout;
+        if (_output == output) {
+            FlushPending();
+            return;
+        }
+        ClearLine();
+        _output = output;
+        _sink = toStderr
             ? std::static_pointer_cast<spdlog::sinks::sink>(
                 std::make_shared<spdlog::sinks::stderr_color_sink_mt>())
             : std::static_pointer_cast<spdlog::sinks::sink>(
-                std::make_shared<spdlog::sinks::stdout_color_sink_mt>())),
-        _output(toStderr ? std::cerr : std::cout)
-    {
+                std::make_shared<spdlog::sinks::stdout_color_sink_mt>());
         _sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%t] [%^%l%$] %v");
+        FlushPending();
     }
 
     void log(const spdlog::details::log_msg& message) override
     {
         std::lock_guard lock(_mutex);
+        if (_defer && _pending.size() < 64) {
+            _pending.emplace_back(message);
+            return;
+        }
+        if (_defer) FlushPending();
         ClearLine();
         _sink->log(message);
     }
@@ -106,7 +126,7 @@ public:
         }
         const auto previousLength = (std::min)(_lineLength, limit);
         const auto padding = previousLength > display.size() ? previousLength - display.size() : 0;
-        _output << '\r' << display << std::string(padding, ' ') << std::flush;
+        *_output << '\r' << display << std::string(padding, ' ') << std::flush;
         _lineLength = display.size();
     }
     void Clear()
@@ -116,17 +136,25 @@ public:
     }
 
 private:
+    void FlushPending()
+    {
+        for (const auto& entry : _pending) _sink->log(entry);
+        _pending.clear();
+        _defer = false;
+    }
     void ClearLine()
     {
         if (_lineLength == 0) return;
-        _output << '\r' << std::string((std::min)(_lineLength, PlatformUtils::ConsoleWidth() - 1), ' ')
+        *_output << '\r' << std::string((std::min)(_lineLength, PlatformUtils::ConsoleWidth() - 1), ' ')
             << '\r' << std::flush;
         _lineLength = 0;
     }
     std::shared_ptr<spdlog::sinks::sink> _sink;
-    std::ostream& _output;
+    std::ostream* _output{};
     std::mutex _mutex;
     std::size_t _lineLength{ 0 };
+    bool _defer{};
+    std::vector<spdlog::details::log_msg_buffer> _pending;
 };
 
 std::shared_ptr<ProgressConsoleSink> consoleSink;
@@ -216,9 +244,9 @@ spdlog::filename_t toFilename(const fs::path& path)
 #endif
 }
 
-std::shared_ptr<spdlog::sinks::sink> createConsoleSink()
+std::shared_ptr<spdlog::sinks::sink> createConsoleSink(bool defer = false)
 {
-    consoleSink = std::make_shared<ProgressConsoleSink>(consoleToStderr);
+    consoleSink = std::make_shared<ProgressConsoleSink>(consoleToStderr, defer);
     consoleSink->set_level(spdlog::level::info);
     return consoleSink;
 }
@@ -312,6 +340,7 @@ void emitProgressEvent(std::string message)
 void RunLogging::SetConsoleToStderr(bool enabled)
 {
     consoleToStderr = enabled;
+    if (consoleSink) consoleSink->SetOutput(enabled);
 }
 
 void RunLogging::SetProgressEventHandler(std::function<void(std::string)> handler)
@@ -321,10 +350,10 @@ void RunLogging::SetProgressEventHandler(std::function<void(std::string)> handle
 }
 
 bool RunLogging::Start(const std::string& operation,
-    const std::optional<std::filesystem::path>& logDirectory)
+    const std::optional<std::filesystem::path>& logDirectory, bool deferConsoleUntilConfigured)
 {
     runStartedAt = std::chrono::steady_clock::now();
-    std::vector<spdlog::sink_ptr> sinks{ createConsoleSink() };
+    std::vector<spdlog::sink_ptr> sinks{ createConsoleSink(deferConsoleUntilConfigured) };
     fileSink.reset();
     runLogPath.reset();
     activeMarkerPath.clear();
@@ -518,6 +547,8 @@ std::optional<std::filesystem::path> RunLogging::CurrentLogPath()
 
 void RunLogging::Finish(int exitCode)
 {
+    // Help, argument errors and failed configuration loads can finish before selecting a stream.
+    if (consoleSink) consoleSink->SetOutput(consoleToStderr);
     ClearProgress();
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - runStartedAt).count();

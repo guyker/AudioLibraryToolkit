@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AudioLibraryToolkit repair report, explicit categories",
+  "type": "object",
+  "required": ["schemaVersion", "source", "output", "status", "error", "categories", "decodeChecks", "rules", "inspectedFiles", "repairedFiles", "copiedFiles", "conflicts", "findings", "files"],
+  "properties": {
+    "schemaVersion": {"enum": [3]},
+    "source": {"type": "string"}, "output": {"type": "string"},
+    "status": {"enum": ["dry-run", "completed", "completed-with-findings", "no-repairs-needed", "failed"]},
+    "error": {"type": "string"},
+    "categories": {
+      "type": "object", "required": ["metadata", "integrity", "container", "decode"],
+      "properties": {
+        "metadata": {"enum": ["off", "detect", "fix"]}, "integrity": {"enum": ["off", "detect", "fix"]},
+        "container": {"enum": ["off", "detect"]}, "decode": {"enum": ["off", "detect"]}
+      }
+    },
+    "decodeChecks": {"type": "array", "items": {"allOf": [{"$ref": "#/$defs/decoded"}, {"required": ["source"]}]}},
+    "rules": {"$ref": "#/$defs/strings"}, "conflicts": {"$ref": "#/$defs/strings"},
+    "inspectedFiles": {"$ref": "#/$defs/count"}, "repairedFiles": {"$ref": "#/$defs/count"}, "copiedFiles": {"$ref": "#/$defs/count"},
+    "findings": {"type": "array", "items": {
+      "type": "object", "required": ["source", "rule", "status", "count", "detail", "category", "kind", "detection", "risk", "evidence", "proofStatus"],
+      "properties": {
+        "category": {"enum": ["metadata", "integrity", "container", "decode", "io"]},
+        "kind": {"enum": ["finding", "observation"]},
+        "detection": {"enum": ["byte-parsing", "frame-inspection", "strict-full-decode", "input-validation"]},
+        "rule": {"type": "string"}, "source": {"type": "string"}, "count": {"$ref": "#/$defs/count"},
+        "status": {"enum": ["informational", "unreadable", "manual-review", "repairable", "repaired"]},
+        "detail": {"type": "string"}, "proofStatus": {"$ref": "#/$defs/proofStatus"},
+        "evidence": {"type": "object", "properties": {
+          "offset": {"$ref": "#/$defs/count"}, "length": {"$ref": "#/$defs/count"},
+          "expected": {"type": "string"}, "observed": {"type": "string"}
+        }},
+        "risk": {"type": "object", "required": ["label", "leavingUnchanged", "fixing"]}
+      }
+    }},
+    "files": {"type": "array", "items": {
+      "type": "object", "required": ["source", "output", "action", "status", "impact"],
+      "properties": {
+        "action": {"enum": ["copy", "repair"]},
+        "editRegions": {"type": "array", "items": {"type": "object", "required": ["offset", "length"],
+          "description": "Original file byte interval [offset, offset + length).",
+          "properties": {"offset": {"$ref": "#/$defs/count"}, "length": {"$ref": "#/$defs/count"}}}},
+        "proof": {"type": "object", "required": ["status"], "properties": {
+          "status": {"$ref": "#/$defs/proofStatus"}, "reason": {"type": "string"}, "method": {"type": "string"},
+          "sourceFileSha256": {"$ref": "#/$defs/sha256"}, "plannedEditSha256": {"$ref": "#/$defs/sha256"},
+          "frameSamplesPerChannel": {"$ref": "#/$defs/count"}, "originalDeclaredSamples": {"$ref": "#/$defs/count"},
+          "originalFlacMd5": {"type": "string", "pattern": "^[a-fA-F0-9]{32}$"}, "unchangedBytes": {"enum": ["verified"]},
+          "source": {"$ref": "#/$defs/decoded"}, "output": {"$ref": "#/$defs/decoded"}
+        }}
+      }
+    }}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
+    "count": {"type": "integer", "minimum": 0},
+    "strings": {"type": "array", "items": {"type": "string"}},
+    "proofStatus": {"enum": ["not-required", "pending", "passed", "refused", "failed"]},
+    "decoded": {"type": "object", "required": ["strictDecode"], "properties": {
+      "strictDecode": {"enum": ["passed", "failed"]}, "samplesPerChannel": {"$ref": "#/$defs/count"},
+      "format": {"type": "string"}, "pcmSha256": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
+      "flacPcmMd5": {"type": "string", "pattern": "^[a-fA-F0-9]{32}$"}, "reason": {"type": "string"}
+    }}
+  }
+}

@@ -29,6 +29,7 @@ const std::string kConfigurationHelp =
     "    isActive (bool, default true), mediaPath (path), mediaName (string, defaults to the path's folder name): legacy menu properties.\n"
     "  MetadataSidecars.Format (binary|json, default binary): original FLAC metadata archive written next to converted audio as .flac-metadata or readable .flac-metadata.json.\n"
     "  MetadataSidecars.ConvertToFlac / ConvertToMp3 (disabled|optional|required, default disabled): sidecar policy per conversion target; optional runs may turn sidecars off (menu prompt or --no-metadata-sidecar), required runs reject that request. Without a sidecar, metadata the output cannot carry stops the conversion.\n"
+    "  RepairCategories: metadata (default fix) and integrity (default off) accept off|detect|fix; container and decode accept off|detect (default off). Repair mode options override individual configured categories for one run.\n"
     "  LogLevel (integer 0-6, default 1): detailed session-log threshold (trace, debug, info, warn, err, critical, off); console output remains concise.\n"
     "  UseAsyncMetadataReads (bool, default true): parallel TagLib metadata reads while scanning; legacy UseAsyncFFmpegCalls is also accepted.\n"
     "  Incremental (bool, default true): reuse metadata records when path, size and modification time are unchanged.\n"
@@ -82,7 +83,7 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
         "First run creates an editable config and requires an output directory and input library; an explicitly requested invalid config is an error.\n\n"
         "Commands:\n"
         "  convert <input-dir>   Convert supported audio into a separate output tree.\n"
-        "  repair <input-dir>    Validate FLAC/MP3 metadata and repair safe problems without touching audio.\n"
+        "  repair <input-dir>    Inspect FLAC/MP3 and write verified repairs to a separate output tree.\n"
         "  scan <library-dir>    Create split JSON metadata files for a library.\n"
         "  duplicates <json-dir> Find duplicate albums from JSON files.\n"
         "  db import <json-dir>  Import JSON metadata into SQLite.\n\n"
@@ -129,7 +130,7 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
     });
 
     auto* repair = app.add_subcommand("repair",
-        "Validate FLAC and MP3 metadata and apply safe metadata-only repairs; audio bytes are never changed.");
+        "Inspect FLAC/MP3 metadata, stream integrity, container or strict decode; metadata-only repair by default.");
     repair->add_option("input-dir", options.inputPath, "Audio library directory to inspect.")
         ->required()
         ->check([](const std::string& value) {
@@ -149,7 +150,17 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
         "Allow removal of redundant MP3 ID3v1 tags (kept by default for older players).");
     repair->add_option("--jobs", options.repairJobs, "Maximum parallel repair workers (1-16; default 4).")
         ->check(CLI::Range(1, 16));
-    std::string ruleHelp = "Comma-separated rule ids to run (default: all except mp3.redundant-id3v1). Rules:";
+    for (std::size_t i = 0; i < RepairCategoryOptions::Fields.size(); ++i) {
+        const auto& field = RepairCategoryOptions::Fields[i];
+        const std::string flag = std::string("--") + field.key + "-mode";
+        repair->add_option_function<std::string>(flag, [&options, i, flag](const std::string& value) {
+            const auto& field = RepairCategoryOptions::Fields[i];
+            RepairIntegrity::Mode mode;
+            if (!field.Parse(value, mode)) throw CLI::ValidationError(flag, field.Choices());
+            options.repairCategories.modes[i] = mode;
+        }, "Override RepairCategories." + std::string(field.key) + " for this run: " + field.Choices() + ".");
+    }
+    std::string ruleHelp = "Comma-separated filter within enabled categories; never enables a category. Rules:";
     for (const auto& rule : RepairRules::Catalog()) {
         ruleHelp += "\n    " + rule.id + (rule.canFix ? " [fix]: " : " [report]: ") + rule.description;
     }
@@ -160,11 +171,17 @@ int ParseCommandLine(int argc, const char* const argv[], CommandLineOptions& opt
         });
     add_config_option(repair, options);
     repair->footer(command_footer(
-        "Inspects native FLAC and MP3 files with metadata-only rules (see --rules). Audio bytes are copied and verified unchanged. Redundant MP3 ID3v1 tags are kept by default; --remove-id3v1 or explicitly selecting mp3.redundant-id3v1 opts in. --dry-run prints a complete JSON report and writes no repair output. --jobs limits parallel workers (default 4). Only affected folders are copied; sources are never modified. Findings needing review exit with code 1. Existing destinations fail unless --overwrite is supplied.",
+        "Detect reports findings without making edits. Metadata fixes preserve the copied audio byte range. Integrity fixes may change file bytes but require proof of unchanged compressed frames and decoded PCM, even with --decode-mode off. Container and full-decode checks never make edits. Redundant MP3 ID3v1 tags are kept by default; --remove-id3v1 requires metadata fix mode. --dry-run prints a complete JSON report without writing repair output. Only affected folders are copied; sources are never modified. Findings needing review exit with code 1. Existing destinations fail unless --overwrite is supplied.",
         "  AudioLibraryToolkit repair \"D:\\Music\"\n"
         "  AudioLibraryToolkit repair \"D:\\Music\" --output-dir \"E:\\Repaired\"\n"
-        "  AudioLibraryToolkit repair \"D:\\Music\" --rules flac.duplicate-comments,mp3.redundant-id3v1"));
-    repair->callback([&options] { options.action = CommandAction::Repair; });
+        "  AudioLibraryToolkit repair \"D:\\Music\" --rules flac.duplicate-comments,mp3.redundant-id3v1\n"
+        "  AudioLibraryToolkit repair \"D:\\Music\" --integrity-mode fix --rules flac.trailing-data --dry-run"));
+    repair->callback([&options] {
+        options.action = CommandAction::Repair;
+        // Old CLI scripts consume progress as well as a schema-2 JSON line. Workers never opt in.
+        options.legacyRepairProgress = options.repairDryRun &&
+            std::ranges::none_of(options.repairCategories.modes, [](const auto& mode) { return mode.has_value(); });
+    });
 
     auto* scan = app.add_subcommand("scan", "Scan a library and write split JSON metadata files.");
     scan->add_option("library-dir", options.inputPath, "Audio library directory to scan.")

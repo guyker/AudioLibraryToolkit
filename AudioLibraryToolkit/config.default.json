@@ -10,6 +10,14 @@
     "ffmpeg_get_metadata_tags": "-v quiet -print_format json -show_format -show_streams -show_chapters"
   },
   "MediaDirectoryList": [],
+  // Option 7 / repair: metadata and integrity accept off, detect or fix; container and decode accept off or detect.
+  // Detect reports findings without making edits. Integrity fixes require PCM proof even with decode off.
+  "RepairCategories": {
+    "metadata": "fix",
+    "integrity": "off",
+    "container": "off",
+    "decode": "off"
+  },
   // MetadataSidecars applies to conversion runs only (menu 1/6 and CLI convert).
   // Scan metadata archives are controlled independently by ScanFlacMetadataArchives below.
   "MetadataSidecars": {

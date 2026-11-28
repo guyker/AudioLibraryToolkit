@@ -18,6 +18,7 @@
 #include "CommonUtils.h"
 #include "ConversionOptions.h"
 #include "OutputLayout.h"
+#include "RepairCategoryOptions.h"
 // RapidJSON headers
 #include "rapidjson/document.h"
 #include "rapidjson/writer.h"
@@ -168,6 +169,7 @@ struct AppSettingsJson
 	bool DuplicateStripEditionText{ false };
 	bool DuplicatePartialMatches{ false };
 	int DuplicatePartialMinCoverage{ 80 }; // percent of the larger album's tracks
+	RepairIntegrity::Categories RepairCategories{};
 
 	//APP Setting properties - END
 

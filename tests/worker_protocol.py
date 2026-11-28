@@ -9,6 +9,133 @@ import tempfile
 from pathlib import Path
 
 
+def test_repair_selection(executable, root, env):
+    source = root / "selection"
+    source.mkdir()
+    (source / "notes.txt").write_bytes(b"album companion")
+    output = root / "selection-output"
+    configured = root / "selection.json"
+    configured.write_text(json.dumps({
+        "OutDirectory": str(output), "RepairCategories": {"integrity": "detect"},
+        "MediaDirectoryList": [{"mediaPath": str(source)}],
+    }), encoding="utf-8")
+    defaults = {"metadata": "fix", "integrity": "off", "container": "off", "decode": "off"}
+    def snapshot():
+        return {p.relative_to(source): p.read_bytes() if p.is_file() else None for p in source.rglob("*")}
+
+    before = snapshot()
+
+    def request(name, kind="run", **parameters):
+        return json.dumps({
+            "protocolVersion": 1, "requestId": name, "type": kind, "operation": "repair",
+            "parameters": {"inputPath": str(source), "configPath": str(configured),
+                           "dryRun": True, **parameters},
+        })
+
+    malformed = [[], None, {"stream": "detect"}, {"metadata": False}, {"decode": "fix"},
+                 {"container": "fix"}, {"integrity": "fix\0no"}]
+    invalid_requests = {f"bad-category-{i}": value for i, value in enumerate(malformed)}
+    legacy = {"repairCategories": defaults, "rules": []}
+    lines = [request(name, repairCategories=value) for name, value in invalid_requests.items()]
+    lines.extend([
+        request("duplicate-mode", repairCategories={"metadata": "fix"}).replace(
+            '"metadata": "fix"', '"metadata":"fix","metadata":"off"'),
+        request("unknown-rule", rules=["flac.not-a-rule"]),
+        request("legacy", **legacy),
+        request("legacy-inherited", configPath=str(root / "config.json"), outputDirectory=str(output)),
+        request("configured", rules=[]),
+        request("override", repairCategories={"metadata": "off"}, rules=["flac.trailing-data"]),
+        request("preview", "preview", repairCategories={"metadata": "off"}, rules=["flac.trailing-data"]),
+        request("id3-union", repairCategories=defaults, rules=["mp3.text-encoding"], removeId3v1=True),
+        request("id3-detect", repairCategories={"metadata": "detect"}, rules=["mp3.redundant-id3v1"]),
+        request("id3-conflict", repairCategories={"metadata": "detect"}, removeId3v1=True, dryRun=False),
+        request("disabled-rule", repairCategories=defaults, rules=["flac.trailing-data"], dryRun=False),
+        request("all-off", repairCategories={"integrity": "off", "metadata": "off"}, dryRun=False),
+        request("protected-library", inputPath=str(root / "input"), outputDirectory=str(source), dryRun=False),
+    ])
+    result = subprocess.run([str(executable), "--worker"], input="\n".join(lines) + "\n", env=env,
+                            capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert result.returncode == 0, result.stderr
+    events = [json.loads(line) for line in result.stdout.splitlines()]
+    assert "repair.categories.v1" in events[0]["features"] and "repair" in events[0]["capabilities"]
+
+    def replies(name):
+        return [e for e in events if e["requestId"] == name]
+
+    def text(name):
+        return "".join(e["text"] for e in replies(name) if e["type"] == "output")
+
+    def report(name):
+        assert replies(name)[-1].get("exitCode") == 0, (replies(name), result.stderr)
+        return json.loads(text(name))
+
+    for name in (*invalid_requests, "duplicate-mode", "unknown-rule"):
+        assert [e["type"] for e in replies(name)] == ["error"], (name, replies(name))
+    for name in ("id3-conflict", "disabled-rule", "all-off", "protected-library"):
+        reply = replies(name)[-1]
+        assert reply["type"] == "error" or reply.get("status") == "failed", (name, reply)
+    legacy_report = report("legacy")
+    assert legacy_report == report("legacy-inherited") and legacy_report["schemaVersion"] == 2
+    assert "categories" not in legacy_report and "flac.trailing-data" not in legacy_report["rules"]
+    assert "mp3.redundant-id3v1" not in legacy_report["rules"]
+    assert report("configured")["categories"] == {**defaults, "integrity": "detect"}
+    selected = report("override")
+    assert selected["schemaVersion"] == 3 and selected["rules"] == ["flac.trailing-data"], selected
+    assert selected["categories"] == {**defaults, "metadata": "off", "integrity": "detect"}
+    assert replies("preview")[-1].get("exitCode") == 0 and "PCM" in text("preview")
+    assert "integrity=detect" in text("preview") and "Metadata=off" in text("preview")
+    assert set(report("id3-union")["rules"]) == {"mp3.text-encoding", "mp3.redundant-id3v1"}
+    assert report("id3-detect")["rules"] == ["mp3.redundant-id3v1"]
+    assert snapshot() == before and not output.exists()
+
+    cli = [str(executable), "repair", str(source), "--config", str(configured)]
+    dry_run = subprocess.run([*cli, "--integrity-mode", "off", "--dry-run"], env=env,
+                             capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert dry_run.returncode == 0 and json.loads(dry_run.stdout) == legacy_report, dry_run
+    config_only = subprocess.run([*cli, "--dry-run"], env=env, capture_output=True,
+                                 text=True, encoding="utf-8", timeout=60)
+    assert config_only.returncode == 0 and json.loads(config_only.stdout) == report("configured"), config_only
+    assert "Repair discovery:" in config_only.stderr
+    old_cli = subprocess.run([str(executable), "repair", str(source), "--config", str(root / "config.json"),
+                              "--output-dir", str(output), "--dry-run"], env=env, capture_output=True,
+                             text=True, encoding="utf-8", timeout=60)
+    assert old_cli.returncode == 0 and "Repair discovery:" in old_cli.stdout
+    assert [json.loads(line) for line in old_cli.stdout.splitlines() if line.startswith("{")] == [legacy_report]
+    for flag in ("--container-mode", "--decode-mode"):
+        refused = subprocess.run([*cli, flag, "fix"], env=env, capture_output=True, timeout=60)
+        assert refused.returncode != 0 and not output.exists(), refused
+    assert snapshot() == before
+
+    # Keep both the per-user menu configuration and its retained HTML previews in the fixture.
+    home = root / "menu-home"
+    preview_dir = root / "menu-previews"
+    preview_dir.mkdir()
+    menu_env = dict(env, LOCALAPPDATA=str(home), XDG_CONFIG_HOME=str(home), HOME=str(home),
+                    TEMP=str(preview_dir), TMP=str(preview_dir), TMPDIR=str(preview_dir))
+    config_dir = home / "Library" / "Application Support" if sys.platform == "darwin" else home
+    config_dir = config_dir / "AudioLibraryToolkit"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_bytes(configured.read_bytes())
+
+    def menu(answers):
+        run = subprocess.run([str(executable)], input=answers, env=menu_env,
+                             capture_output=True, text=True, encoding="utf-8", timeout=60)
+        assert run.returncode == 0, (run.stdout, run.stderr)
+        return run.stdout
+
+    for stop in ("BACK\n0\n", "EXIT\n", ""):
+        cancelled = menu("7\nCATEGORIES\noff\n" + stop)
+        assert "Completion summary" not in cancelled and not output.exists()
+    help_text = menu("?\n0\n")
+    assert "integrity=detect" in help_text and "decoded PCM" in help_text
+    completed = menu("7\nCATEGORIES\noff\n\noops\ndetect\noff\n\n\nRUN\n")
+    assert "Invalid container mode" in completed and "ID3v1 removal is unavailable" in completed
+    assert "Metadata=off" in completed.split("Completion summary:")[1]
+    installed = json.loads((output / "repaired-metadata" / source.name / "repair-report.json").read_bytes())
+    assert installed["categories"] == {**defaults, "metadata": "off", "integrity": "detect", "container": "detect"}
+    assert snapshot() == before
+
+
 def main():
     executable = Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="alt-worker-") as directory:
@@ -85,6 +212,7 @@ def main():
                          if event["type"] == "completed" and event["requestId"] == "valid-repair")
         assert completed["status"] == "succeeded", (completed, result.stderr)
         assert all(event.get("protocolVersion") == 1 for event in events), events
+        test_repair_selection(executable, root, env)
 
         editable_config = root / "editable.json"
         editable_config.write_text(
@@ -179,6 +307,9 @@ def main():
             '    "ffmpeg_exe_name": "ffmpeg", // keep this note\n'
             '    "UnknownFlacKey": [1, 2]\n'
             '  },\n'
+            '  "RepairCategories": {\n'
+            '    "integrity": "detect" // retain structural checks\n'
+            '  },\n'
             '  "MetadataSidecars": {\n'
             '    // nested explanation\n'
             '    "Format": "binary",\n'
@@ -190,6 +321,7 @@ def main():
         nested_events, nested_saved = save_patch(nested_config, nested_snapshot["revision"], {
             "FLACSettings": {"ffmpeg_exe_name": custom_encoder, "ffmpeg_get_metadata_tags": "-hide_banner"},
             "MetadataSidecars": {"Format": "json", "ConvertToFlac": "optional", "ConvertToMp3": "disabled"},
+            "RepairCategories": {"metadata": "off", "decode": "detect"},
         }, "nested-save")
         assert nested_saved["status"] == "succeeded", nested_events
         nested_raw = nested_config.read_text(encoding="utf-8")
@@ -203,6 +335,9 @@ def main():
             "Format": "json", "ConvertToFlac": "optional", "ConvertToMp3": "disabled"}, nested_after
         assert nested_after["configuration"]["FLACSettings"]["ffmpeg_exe_name"] == custom_encoder, nested_after
         assert nested_after["configuration"]["FLACSettings"]["ffmpeg_get_metadata_tags"] == "-hide_banner"
+        assert "// retain structural checks" in nested_raw
+        assert nested_after["configuration"]["RepairCategories"] == {
+            "metadata": "off", "integrity": "detect", "container": "off", "decode": "detect"}
 
         _, partial_saved = save_patch(nested_config, nested_after["revision"],
                                       {"MetadataSidecars": {"Format": "binary"}}, "nested-partial")
@@ -219,6 +354,9 @@ def main():
                                        {"MetadataSidecars": {"Format": "xml"}}, "nested-invalid")
         assert nested_invalid["status"] == "failed", nested_invalid
         assert nested_config.read_text(encoding="utf-8") == before_invalid
+        _, bad_categories = save_patch(nested_config, partial_after["revision"],
+                                       {"RepairCategories": {"decode": "fix"}}, "bad-category-patch")
+        assert bad_categories["status"] == "failed" and nested_config.read_text(encoding="utf-8") == before_invalid
 
         # Members and objects missing from the file are added with the file's own layout.
         sparse_config = root / "sparse.json"

@@ -47,6 +47,40 @@ const std::vector<RuleInfo> kCatalog{
     { "mp3.stream-garbage", "mp3", false, "Non-audio bytes before the first MPEG frame are reported." },
     { "mp3.unsupported-id3-layout", "mp3", false,
         "ID3v2 tags with unsupported versions, flags or layouts are reported without modification." },
+    { "flac.trailing-data", "flac", true, "Unframed suffix after a proven complete FLAC program." },
+    { "flac.header-crc", "flac", false, "FLAC header CRC-8 mismatch." },
+    { "flac.frame-crc", "flac", false, "FLAC frame CRC-16 mismatch." },
+    { "flac.lost-sync", "flac", false, "Broken sequence of native FLAC frames." },
+    { "flac.truncated-frame", "flac", false, "Incomplete final FLAC frame." },
+    { "flac.number-discontinuity", "flac", false, "Unexpected frame or first-sample number." },
+    { "flac.total-samples", "flac", true, "Incorrect nonzero STREAMINFO sample count." },
+    { "flac.block-bounds", "flac", true, "STREAMINFO block bounds contradicted by frames." },
+    { "flac.frame-sizes", "flac", true, "Incorrect nonzero STREAMINFO frame-size extrema." },
+    { "flac.fill-md5", "flac", true, "Establish a previously missing STREAMINFO PCM digest." },
+    { "flac.seek-target", "flac", true, "Seek point inconsistent with actual target frame." },
+    { "flac.unsupported-stream", "flac", false, "Cannot establish exact FLAC frame structure." },
+    { "mp3.leading-data", "mp3", false, "Data before the first confirmed Layer III frame." },
+    { "mp3.trailing-data", "mp3", false, "Data after the last confirmed Layer III frame." },
+    { "mp3.truncated-frame", "mp3", false, "Incomplete final Layer III frame." },
+    { "mp3.lost-sync", "mp3", false, "Interrupted Layer III frame sequence." },
+    { "mp3.xing-counts", "mp3", false, "Xing/Info totals disagree with the frame walk." },
+    { "mp3.xing-toc", "mp3", false, "Invalid Xing/Info seek table." },
+    { "mp3.vbri-counts", "mp3", false, "Inconsistent VBRI frame or byte count." },
+    { "mp3.vbri-toc", "mp3", false, "Inconsistent VBRI seek table." },
+    { "mp3.lame-tag-crc", "mp3", false, "LAME Info Tag checksum mismatch." },
+    { "mp3.lame-music-crc", "mp3", false, "LAME encoded music checksum mismatch." },
+    { "mp3.stream-parameters", "mp3", false, "Frame parameter transition." },
+    { "mp3.frame-crc", "mp3", false, "MPEG protected-frame checksum mismatch." },
+    { "mp3.no-vbr-header", "mp3", false, "VBR without an optional seek header." },
+    { "mp3.embedded-id3", "mp3", false, "ID3v2 tag between music frames." },
+    { "mp3.unsupported-stream", "mp3", false, "Unsupported or ambiguous MPEG stream structure." },
+    { "flac.leading-data", "flac", false, "Bytes before the native FLAC marker." },
+    { "container.empty", "both", false, "Empty file." },
+    { "container.no-audio", "both", false, "Container with no audio." },
+    { "container.mismatch", "both", false, "Name and actual container or codec disagree." },
+    { "container.unsupported", "both", false, "Unrecognized container or unsupported stream." },
+    { "decode.strict", "both", false, "Complete strict native audio decode." },
+    { "flac.md5-mismatch", "flac", false, "Stored FLAC MD5 differs from decoded PCM." },
 };
 
 struct Reader
@@ -1595,7 +1629,8 @@ std::set<std::string> DefaultRules()
 {
     std::set<std::string> rules;
     for (const auto& rule : kCatalog) {
-        if (rule.id != "mp3.redundant-id3v1") rules.insert(rule.id);
+        if (RepairIntegrity::CategoryOf(rule.id) == "metadata" && rule.id != "mp3.redundant-id3v1")
+            rules.insert(rule.id);
     }
     return rules;
 }
@@ -1628,6 +1663,36 @@ void Write(const fs::path& source, const Edit& edit, const WriteSink& sink)
 {
     std::ifstream input(source, std::ios::binary);
     if (!input || !sink) throw std::runtime_error("Cannot open repair source or output sink.");
+    if (edit.stream) {
+        std::array<char, 65536> buffer;
+        std::uint64_t cursor = 0;
+        const auto consume = [&](std::uint64_t count, bool copy, const Bytes* expected) {
+            std::uint64_t pos = 0;
+            while (pos < count) {
+                const auto n = static_cast<std::size_t>((std::min<std::uint64_t>)(buffer.size(), count-pos));
+                if (!input.read(buffer.data(), n)) throw std::runtime_error("Incomplete source edit range.");
+                if (copy) sink(buffer.data(), n);
+                else if (expected ? !std::equal(expected->begin()+pos, expected->begin()+pos+n,
+                            reinterpret_cast<const std::uint8_t*>(buffer.data())) :
+                        std::any_of(buffer.begin(), buffer.begin()+n, [](char ch) {return ch != 0;}))
+                    throw std::runtime_error("Source bytes differ from declared edit before-image.");
+                pos += n;
+            }
+            cursor += count;
+        };
+        const auto sourceSize = fs::file_size(source);
+        for (const auto& patch : edit.stream->patches) {
+            if (patch.offset < cursor || patch.offset > sourceSize)
+                throw std::runtime_error("Invalid source edit position.");
+            consume(patch.offset - cursor, true, nullptr);
+            consume(patch.removeSize ? patch.removeSize : patch.before.size(), false,
+                patch.removeSize ? nullptr : &patch.before);
+            if (!patch.after.empty()) sink(reinterpret_cast<const char*>(patch.after.data()), patch.after.size());
+        }
+        if (cursor > sourceSize) throw std::runtime_error("Invalid source edit length.");
+        consume(sourceSize - cursor, true, nullptr);
+        return;
+    }
     if (!edit.head.empty()) sink(reinterpret_cast<const char*>(edit.head.data()), edit.head.size());
     input.seekg(static_cast<std::streamoff>(edit.audioOffset));
     std::array<char, 64 * 1024> buffer{};
@@ -1644,6 +1709,33 @@ bool Verify(const fs::path& source, const fs::path& output, const Edit& edit,
     const std::set<std::string>& enabled, std::string& error)
 {
     try {
+        if (edit.stream) {
+            std::ifstream original(source, std::ios::binary);
+            std::ifstream staged(output, std::ios::binary);
+            const auto sourceSize = fs::file_size(source), outputSize = fs::file_size(output);
+            std::uint64_t from = 0, to = 0;
+            for (const auto& patch : edit.stream->patches) {
+                const auto removed = patch.removeSize ? patch.removeSize : patch.before.size();
+                if (patch.offset < from || patch.offset > sourceSize || removed > sourceSize - patch.offset ||
+                    patch.offset - from > outputSize - to ||
+                    !compareRange(original, from, staged, to, patch.offset - from))
+                    throw std::runtime_error("Unchanged bytes outside a declared edit differ.");
+                to += patch.offset - from;
+                if (patch.after.size() > outputSize - to || !compareBytes(staged, to, patch.after))
+                    throw std::runtime_error("Staged replacement differs from the declared edit.");
+                from = patch.offset + removed;
+                to += patch.after.size();
+            }
+            if (sourceSize - from != outputSize - to || !compareRange(original, from, staged, to, sourceSize - from))
+                throw std::runtime_error("Staged length or unchanged trailing bytes differ.");
+            const auto checked = RepairIntegrity::ScanFlac(output);
+            if (!checked.complete || std::any_of(checked.issues.begin(), checked.issues.end(),
+                [&](const auto& issue) {return !issue.informational && (!issue.patch || enabled.contains(issue.rule));}))
+                throw std::runtime_error("Staged FLAC did not pass frame reinspection.");
+            if (!edit.stream->metadataFixes.empty() && analyzeAs(output, source, edit.stream->metadataFixes).edit)
+                throw std::runtime_error("Staged FLAC still needs the selected metadata repair.");
+            return true;
+        }
         std::error_code ec;
         const auto size = fs::file_size(output, ec);
         if (ec || size != edit.head.size() + edit.audioSize + edit.tail.size()) {

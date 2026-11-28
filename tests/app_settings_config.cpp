@@ -46,6 +46,38 @@ void writeConfig(const fs::path& path, int logLevel)
     require(static_cast<bool>(output), "Could not write test config");
 }
 
+void testRepairCategories(const fs::path& shippedTemplate)
+{
+    using RepairIntegrity::Mode;
+    auto settings = AppSettingsJson::GetDefaultSettings();
+    require(settings.RepairCategories.Legacy(), "Built-in repair defaults are not metadata-only");
+    // Load over non-default modes to check that the shipped template actually specifies every default.
+    settings.RepairCategories = { Mode::Off, Mode::Fix, Mode::Detect, Mode::Detect };
+    require(settings.loadFromFile(shippedTemplate) && settings.RepairCategories.Legacy(),
+        "Shipped repair defaults differ from the built-in defaults");
+    require(settings.loadFromJsonText(R"({"RepairCategories":{"integrity":"detect"}})") &&
+            settings.RepairCategories.metadata == Mode::Fix && settings.RepairCategories.integrity == Mode::Detect,
+        "Partial repair settings did not inherit metadata repair");
+    require(settings.loadFromJsonText(R"({"RepairCategories":{"metadata":"off","container":"detect"}})"),
+        "Could not overlay partial repair categories");
+    auto loaded = AppSettingsJson::GetDefaultSettings();
+    require(loaded.loadFromJsonText(settings.toJsonString()) && loaded.RepairCategories.metadata == Mode::Off &&
+            loaded.RepairCategories.integrity == Mode::Detect && loaded.RepairCategories.container == Mode::Detect &&
+            loaded.RepairCategories.decode == Mode::Off,
+        "Repair categories were lost in serialization");
+
+    for (const auto* text : {
+             R"({"RepairCategories":[]})", R"({"RepairCategories":{"container":"fix"}})",
+             R"({"RepairCategories":{"decode":"fix"}})", R"({"RepairCategories":{"unknown":"off"}})",
+             R"({"RepairCategories":{"metadata":true}})", R"({"RepairCategories":{"metadata":"repair"}})",
+             R"({"RepairCategories":{"metadata":"fix\u0000"}})", R"({"RepairCategories":{"metadata":"off"}})",
+             R"({"RepairCategories":{"integrity":"detect","integrity":"fix"}})",
+             R"({"RepairCategories":{},"RepairCategories":{"integrity":"fix"}})" }) {
+        auto invalid = AppSettingsJson::GetDefaultSettings();
+        require(!invalid.loadFromJsonText(text), "Invalid or all-off repair categories were accepted");
+    }
+}
+
 int main(int argc, char** argv)
 {
     if (argc < 2) {
@@ -63,6 +95,7 @@ int main(int argc, char** argv)
     const auto& cleanupRoot = testRoot;
 #endif
     try {
+        testRepairCategories(shippedTemplate);
         fs::create_directories(testRoot / "working");
         setConfigEnvironment(testRoot / fs::path(u8"config-\u97f3"));
         fs::current_path(testRoot / "working");

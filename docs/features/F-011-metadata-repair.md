@@ -1,4 +1,4 @@
-# F-011: Repair recognized FLAC/MP3 metadata defects
+# F-011: Repair FLAC/MP3 metadata and validate stream integrity
 
 Status: active
 
@@ -14,8 +14,8 @@ MP3 ID3v1 tags are kept by default for older players; remove redundant ones only
 an explicit `--rules mp3.redundant-id3v1` selection, or the menu's per-run opt-in. Existing FLAC padding is
 preserved and metadata shrinkage is absorbed into padding when possible.
 
-Repair code writes only to a separate destination tree; source files are read-only and audio bytes are copied unchanged,
-never decoded or re-encoded. Repaired files are written to
+With default settings repair writes only to a separate destination tree; source files are read-only and the inferred
+audio bytes are copied unchanged, never decoded or re-encoded. Repaired files are written to
 `<output-root>/repaired-metadata/<library-name>` (`--output-dir`, else `OutDirectory` for the CLI); only folders with a repair are
 copied, retaining all other files unchanged. In menu option 7, repair outputs of different active libraries may not
 overlap each other or another library's source; the run fails before installing anything. Existing nested output
@@ -49,13 +49,17 @@ phases with a known total show a rough ETA. Interactive updates reuse one line; 
 of terminal control sequences. Phase boundaries are retained in the session log in both modes.
 
 ## Entry points
+- Enter `CATEGORIES` before the menu overwrite/ID3v1 choices, or pass `--metadata-mode`, `--integrity-mode`,
+  `--container-mode`, `--decode-mode` to `repair`. Config `RepairCategories` and worker v1 `repairCategories` use
+  the same members. Metadata and integrity support `off/detect/fix`; container and decode support `off/detect`.
+  Built-ins are `fix/off/off/off`. Rule filters narrow modes; they do not enable a disabled category.
 - `repair <input> [--output-dir <directory>] [--overwrite] [--rules <ids>] [--remove-id3v1] [--dry-run] [--jobs <1-16>]` → `AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp#RunWithArgumentsImpl`
   → `AudioLibraryToolkit/src/repair/AudioRepair.cpp#AudioRepair::Prepare`, `AudioLibraryToolkit/src/repair/AudioRepair.cpp#AudioRepair::Execute`
 - Menu option 7 → `AudioLibraryToolkit/src/app/AudioLibraryToolkitMain.cpp#RepairConfiguredLibraries`
 
 ## Design and knowledge
 - DESIGN: `AudioLibraryToolkit/DESIGN.md` → Metadata repair; rules in `AudioLibraryToolkit/src/repair/RepairRules.cpp#RepairRules::Analyze`
-- Knowledge: K-065 operation-based output layout; the stable repair and verification contract is documented in DESIGN.
+- Knowledge: K-065 operation-based output layout; K-080 explains the original PCM witnesses required for a stream edit.
 
 ## Acceptance checks
 - [ ] Identical duplicate CDTOC comments are reduced to one in the output; source bytes remain unchanged.
@@ -88,13 +92,36 @@ of terminal control sequences. Phase boundaries are retained in the session log 
       paths are retained in the session log when error-level file logging is enabled.
 - [ ] Preparation displays progress before confirmation without writing repair output; cancellation keeps sources unchanged.
 - [ ] Installation progress advances only after verification/installation and stops short of 100% on failure.
+- [ ] A generated 24-bit/96 kHz FLAC with 4,186 appended zero bytes is clean in default metadata mode,
+      reported with its exact byte interval in integrity detect mode, and restored byte-for-byte in integrity fix mode.
+      The source remains unchanged; a missing or contradictory PCM witness never authorizes a failing-source trim.
+- [ ] STREAMINFO and seek corrections retain the complete compressed frames; metadata detect mode does not silently
+      apply a tag change during an integrity repair. Only a strictly verified installation lists applied rules.
+- [ ] MP3 stream anomalies and wrong containers never authorize an audio edit. A structural-only run has no full-decode
+      result; explicitly requesting decode reports the whole-file result separately from installation.
+
+## Opt-in integrity behavior
+
+Structural inspection checks actual native FLAC frame boundaries, CRCs, continuity, size/sample declarations and
+seek targets. A proven post-frame fill region may be removed; unrecognized trailers, truncated frames and gaps
+are not cut. Eligible FLAC field edits correct unambiguous declarations, fill a previously unknown MD5 or correct
+a seek offset/length for an existing real sample target. Nonzero MD5 mismatches are never restamped. MP3 frame
+boundaries, counts, VBR headers/tables, CRCs, embedded tags and parameter changes are diagnostic only.
+Container inspection distinguishes mismatches and empty/no-audio inputs under supported extensions; no renaming,
+demuxing or discovery of other extensions. `decode=detect` checks whole-file decoding independently.
+
+Each integrity edit requires an exact edit map, comparison of every unchanged byte, and a strict staged decode
+with matching PCM and sample count. Without an original FLAC MD5 both whole files must decode cleanly and match.
+The only exception for a strict source failure is independently proven FLAC suffix fill with original nonzero MD5
+and declared count matching the complete retained program. Default JSON stays schema 2. Non-default runs use
+[schema 3](../schemas/repair-report-v3.schema.json), separating detections, pending/refused proofs and installed changes.
+Both HTML views show the selected categories. Detect-only is not an edit; no structural finding is not a PCM certificate.
 
 ## Known limitations
 - Only FLAC and MP3 are supported; only the first leading ID3v2 tag of an MP3 is rewritten.
-- Different values are never reconciled automatically; audio-stream problems (missing MD5, MP3 garbage) are report-only.
-- FLAC frames are not parsed or decoded. Unrecognized trailing bytes, including appended zeros, can be missed
-  even when strict conversion rejects the file; `no-repairs-needed` certifies no detected metadata-rule findings,
-  not audio-stream integrity (K-079).
+- Different values are never reconciled automatically. MP3 writes remain metadata-only; no VBR header insertion,
+  CRC regeneration, re-encoding, sample insertion or deletion. Unknown or ambiguous data stays for review.
+- Metadata-only mode intentionally does not parse FLAC frames or certify the stream. Enable integrity explicitly.
 - Output staging uses held directory handles and no-follow file operations where supported; output paths are revalidated
   during preparation, staging, installation and reporting. A separate same-permission process deliberately moving
   directories between checks can still race ordinary filesystem operations.

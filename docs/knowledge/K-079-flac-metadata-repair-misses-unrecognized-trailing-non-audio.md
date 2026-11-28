@@ -3,7 +3,8 @@ id: K-079
 kind: defect
 title: "FLAC metadata repair misses unrecognized trailing non-audio bytes"
 area: [AudioLibraryToolkit]
-status: active
+status: fixed
+fixed_by: K-080
 created: 2026-11-28
 reviewed: 2026-11-28
 cites:

@@ -42,6 +42,9 @@ add_library(AudioLibraryToolkitCore STATIC
     src/platform/FFmpegRuntime.cpp
     src/platform/PlatformUtils.cpp
     src/repair/AudioRepair.cpp
+    src/repair/RepairIntegrity.cpp
+    src/repair/FlacFrameScanner.cpp
+    src/repair/Mp3FrameScanner.cpp
     src/repair/RepairRules.cpp
     src/app/AppSettings.cpp
     src/app/CommandLine.cpp

@@ -1,4 +1,6 @@
 #pragma once
+#include "RepairIntegrity.h"
+#include "DecodeAnalyzer.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -9,8 +11,7 @@
 #include <string>
 #include <vector>
 
-// Metadata-only repair rules for native FLAC and MP3 files. Rules never change audio bytes: a repaired file is the
-// rebuilt metadata head, the untouched source audio byte range and the rebuilt trailing metadata.
+// Metadata edits preserve the audio byte range. Stream edits must additionally prove decoded PCM identity.
 namespace RepairRules
 {
 struct RuleInfo
@@ -26,6 +27,7 @@ const std::vector<RuleInfo>& Catalog();
 std::set<std::string> DefaultRules();
 bool IsKnownRule(const std::string& id);
 bool IsSupportedFile(const std::filesystem::path& path);
+std::string ProposedWording(std::string_view detail);
 
 struct Finding
 {
@@ -33,6 +35,9 @@ struct Finding
     bool fix{ false };
     std::size_t count{ 0 };
     std::string detail;
+    std::optional<RepairIntegrity::Issue> evidence;
+    std::string proofStatus;
+    bool detectionOnly{};
 };
 
 struct Edit
@@ -41,16 +46,38 @@ struct Edit
     std::uint64_t audioOffset{ 0 };
     std::uint64_t audioSize{ 0 };
     std::vector<std::uint8_t> tail;
+    struct StreamEdit
+    {
+        std::vector<RepairIntegrity::Patch> patches;
+        std::uint64_t samples{}, declaredSamples{};
+        int bits{};
+        std::string md5;
+        bool suffixOnly{}, needsMd5{};
+        std::set<std::string> metadataFixes;
+    };
+    std::optional<StreamEdit> stream;
 };
 
 struct Analysis
 {
     std::vector<Finding> findings;
     std::optional<Edit> edit;
+    std::optional<RepairPcmProof> decoded;
 };
 
 // An empty rule set enables every rule. Throws std::runtime_error when the file cannot be parsed.
 Analysis Analyze(const std::filesystem::path& path, const std::set<std::string>& enabled);
+Analysis AnalyzeSelected(const std::filesystem::path& path, const std::set<std::string>& rules,
+    const RepairIntegrity::Categories& categories);
+struct Proof
+{
+    std::string status, method, error;
+    std::optional<RepairPcmProof> source, output;
+};
+bool PrepareProof(const std::filesystem::path& source, Edit::StreamEdit& edit, Proof& proof);
+bool VerifyProof(const std::filesystem::path& output, const Edit::StreamEdit& edit, Proof& proof);
+std::string FileDigest(const std::filesystem::path& path);
+std::string EditDigest(const Edit::StreamEdit& edit);
 using WriteSink = std::function<void(const char*, std::size_t)>;
 void Write(const std::filesystem::path& source, const Edit& edit, const WriteSink& sink);
 // Confirms the output is exactly the planned edit, its audio range is byte-identical to the source and no enabled

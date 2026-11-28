@@ -35,10 +35,18 @@ are retained. Existing destinations are rejected unless you explicitly enable `-
 manual-review findings and failures with a nonzero exit code.
 
 Review `repair-report.json` and the printed `repair-summary.html` path for installed changes and unresolved findings.
-Audio bytes are verified unchanged, but that does not guarantee every player's metadata compatibility. Redundant
+In default metadata mode the inferred audio bytes are verified unchanged, but that does not guarantee every player's metadata compatibility. Redundant
 MP3 ID3v1 tags are kept by default for older players.
 
 For an interactive HTML preview before repair, run `AudioLibraryToolkit` without arguments and choose menu option 7;
 the preview requires a separate `RUN` confirmation before repair output is written.
+
+## 4. Check the stream itself
+
+Enter `CATEGORIES` in option 7 or use `--integrity-mode detect --container-mode detect` for structural inspection.
+Add `--decode-mode detect` for an expensive full decode. To repair only a proven FLAC suffix, use
+`--integrity-mode fix --rules flac.trailing-data`. A suffix is not located by counting zeros backwards: repair must
+parse every complete frame and verify the decoded PCM before installing anything. Truncation, CRC errors,
+unrecognized metadata, and inconsistent PCM hashes are not fixed by deleting bytes or re-encoding.
 
 See the [repair feature reference](../features/F-011-metadata-repair.md) for supported rules and limitations.

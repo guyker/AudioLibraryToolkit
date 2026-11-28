@@ -877,19 +877,56 @@ void SafeOutputFile::RemoveTemporary() noexcept
 #endif
 }
 
+using ReportWriter = rapidjson::Writer<rapidjson::StringBuffer>;
+void writeDecoded(ReportWriter& writer, const RepairPcmProof& decoded)
+{
+    writer.Key("strictDecode"); writer.String(decoded.clean ? "passed" : "failed");
+    if (decoded.clean) {
+        writer.Key("samplesPerChannel"); writer.Uint64(decoded.samples);
+        writer.Key("format"); writer.String(decoded.format.c_str());
+        writer.Key("pcmSha256"); writer.String(decoded.pcmSha256.c_str());
+        if (!decoded.flacMd5.empty()) {writer.Key("flacPcmMd5"); writer.String(decoded.flacMd5.c_str());}
+    } else {
+        writer.Key("reason"); writer.String(decoded.error.c_str());
+        if (decoded.errorOffset) {writer.Key("offset"); writer.Uint64(*decoded.errorOffset);}
+        if (decoded.errorPacketSize) {writer.Key("packetLength"); writer.Uint64(*decoded.errorPacketSize);}
+    }
+}
+
 std::string reportJson(const AudioRepair::Plan& plan, const std::string& status, const std::string& error)
 {
     rapidjson::StringBuffer buffer;
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
     writer.StartObject();
-    writer.Key("schemaVersion"); writer.Int(2);
+    const bool extended = !plan.categories.Legacy();
+    writer.Key("schemaVersion"); writer.Int(extended ? 3 : 2);
+    if (extended) {
+        writer.Key("categories"); writer.StartObject();
+        const auto mode = [&](const char* name, RepairIntegrity::Mode value) {
+            writer.Key(name); writer.String(RepairIntegrity::ModeName(value).data());
+        };
+        mode("metadata", plan.categories.metadata);
+        mode("integrity", plan.categories.integrity);
+        mode("container", plan.categories.container);
+        mode("decode", plan.categories.decode);
+        writer.EndObject();
+        writer.Key("decodeChecks"); writer.StartArray();
+        for (const auto& [source, decoded] : plan.decoded) {
+            writer.StartObject();
+            writer.Key("source"); writer.String(utf8(source.lexically_relative(plan.input)).c_str());
+            writeDecoded(writer, decoded);
+            writer.EndObject();
+        }
+        writer.EndArray();
+    }
     writer.Key("source"); writer.String(utf8(plan.input).c_str());
     writer.Key("output"); writer.String(utf8(plan.output).c_str());
     writer.Key("status"); writer.String(status.c_str());
     writer.Key("error"); writer.String(error.c_str());
     writer.Key("rules"); writer.StartArray();
     for (const auto& rule : RepairRules::Catalog()) {
-        if (plan.rules.empty() || plan.rules.contains(rule.id)) writer.String(rule.id.c_str());
+        if (plan.rules.empty() ? RepairIntegrity::CategoryOf(rule.id) == "metadata" : plan.rules.contains(rule.id))
+            writer.String(rule.id.c_str());
     }
     writer.EndArray();
     writer.Key("inspectedFiles"); writer.Uint64(plan.inspectedFiles);
@@ -910,6 +947,27 @@ std::string reportJson(const AudioRepair::Plan& plan, const std::string& status,
         writer.Key("status"); writer.String(finding.status.c_str());
         writer.Key("count"); writer.Uint64(finding.count);
         writer.Key("detail"); writer.String(finding.detail.c_str());
+        if (extended) {
+            const auto category = RepairIntegrity::CategoryOf(finding.rule);
+            writer.Key("category"); writer.String(category.data());
+            writer.Key("kind"); writer.String(finding.status == "informational" ? "observation" : "finding");
+            writer.Key("detection"); writer.String(category == "decode" ? "strict-full-decode" :
+                category == "io" ? "input-validation" : category == "integrity" ? "frame-inspection" : "byte-parsing");
+            writer.Key("evidence"); writer.StartObject();
+            if (finding.evidence) {
+                const auto& e = *finding.evidence;
+                if (category != "decode" || (plan.decoded.contains(finding.source) &&
+                    plan.decoded.at(finding.source).errorOffset)) {writer.Key("offset"); writer.Uint64(e.offset);}
+                if (category != "decode") {writer.Key("length"); writer.Uint64(e.length);}
+                if (!e.expected.empty()) {writer.Key("expected"); writer.String(e.expected.c_str());}
+                if (!e.observed.empty()) {writer.Key("observed"); writer.String(e.observed.c_str());}
+            }
+            writer.EndObject();
+            writer.Key("proofStatus"); writer.String(!finding.proofStatus.empty() ? finding.proofStatus.c_str() :
+                RepairIntegrity::CategoryOf(finding.rule) == "integrity" && finding.status == "repaired" ? "passed" :
+                RepairIntegrity::CategoryOf(finding.rule) == "integrity" && finding.status == "repairable" ? "pending" :
+                "not-required");
+        }
         const auto impact = AudioRepair::DescribeFindingImpact(finding);
         writer.Key("risk"); writer.StartObject();
         writer.Key("label"); writer.String(impact.label.data(),
@@ -929,6 +987,35 @@ std::string reportJson(const AudioRepair::Plan& plan, const std::string& status,
         writer.Key("output"); writer.String(utf8(file.target.lexically_relative(plan.output)).c_str());
         writer.Key("action"); writer.String(file.repair ? "repair" : "copy");
         writer.Key("status"); writer.String(file.status.c_str());
+        if (extended && file.repair) {
+            writer.Key("editRegions"); writer.StartArray();
+            for (const auto& [offset, length] : file.editRanges) {
+                writer.StartObject(); writer.Key("offset"); writer.Uint64(offset);
+                writer.Key("length"); writer.Uint64(length); writer.EndObject();
+            }
+            writer.EndArray();
+            writer.Key("proof"); writer.StartObject();
+            writer.Key("status"); writer.String(file.proof.status.c_str());
+            if (!file.editDigest.empty()) {
+                writer.Key("sourceFileSha256"); writer.String(file.sourceDigest.c_str());
+                writer.Key("plannedEditSha256"); writer.String(file.editDigest.c_str());
+                writer.Key("frameSamplesPerChannel"); writer.Uint64(file.frameSamples);
+                if (file.declaredSamples) {writer.Key("originalDeclaredSamples"); writer.Uint64(file.declaredSamples);}
+                if (!file.originalMd5.empty()) {writer.Key("originalFlacMd5"); writer.String(file.originalMd5.c_str());}
+                if (file.proof.status == "passed") {writer.Key("unchangedBytes"); writer.String("verified");}
+            }
+            if (!file.proof.method.empty()) {writer.Key("method"); writer.String(file.proof.method.c_str());}
+            if (!file.proof.error.empty()) {writer.Key("reason"); writer.String(file.proof.error.c_str());}
+            const auto writePcm = [&](const char* key, const std::optional<RepairPcmProof>& decoded) {
+                if (!decoded) return;
+                writer.Key(key); writer.StartObject();
+                writeDecoded(writer, *decoded);
+                writer.EndObject();
+            };
+            writePcm("source", file.proof.source);
+            writePcm("output", file.proof.output);
+            writer.EndObject();
+        }
         if (file.repair) {
             const bool installedRepair = file.status == "installed";
             writer.Key(installedRepair ? "appliedRules" : "plannedRules"); writer.StartArray();
@@ -941,13 +1028,18 @@ std::string reportJson(const AudioRepair::Plan& plan, const std::string& status,
             writer.EndArray();
             writer.Key("impact"); writer.StartObject();
             writer.Key("audio");
-            writer.String(installedRepair
-                ? "Installed output was verified byte-identical across the audio data range; audio was not decoded."
+            writer.String(!file.editRanges.empty() ? (installedRepair ?
+                "File bytes changed; decoded PCM was verified unchanged." :
+                "An integrity edit requires strict verification before installation; no installed change is claimed.") : installedRepair
+                ? (plan.decoded.contains(file.source) ? "Metadata edit preserved the original audio data range byte-for-byte; see decodeChecks." :
+                    "Installed output was verified byte-identical across the audio data range; audio was not decoded.")
                 : plan.dryRun
                     ? "The proposed edit preserves the audio data range byte-for-byte; it has not been installed or decoded."
                     : "No audio-preservation claim is made because this repair was not verified and installed.");
             writer.Key("metadata");
-            writer.String(installedRepair
+            writer.String(!file.editRanges.empty() ? (installedRepair ?
+                "Only the declared edits were installed; all remaining bytes were compared with the source." :
+                "Only the declared edit regions are proposed.") : installedRepair
                 ? "Metadata named by the installed rules changed; FLAC padding may also change."
                 : plan.dryRun
                     ? "The listed rules describe proposed metadata changes; FLAC padding may also change."
@@ -1020,23 +1112,12 @@ std::string_view issueTitle(std::string_view rule)
     return title == titles.end() ? rule : title->second;
 }
 
-// Finding details describe completed edits ("Removed ..."); planned or unapplied edits read as proposals.
-std::string proposedWording(std::string_view detail)
-{
-    static constexpr std::pair<std::string_view, std::string_view> verbs[]{
-        { "Removed ", "Remove " }, { "Corrected ", "Correct " }, { "Replaced ", "Replace " }, { "Changed ", "Change " } };
-    for (const auto& [past, present] : verbs) {
-        if (detail.starts_with(past)) return std::string(present) + std::string(detail.substr(past.size()));
-    }
-    return std::string(detail);
-}
-
 std::string summaryHtml(const AudioRepair::Plan& plan, std::string_view status, std::string_view error,
     bool preview = false)
 {
     using AudioRepair::Finding;
     using Risk = AudioRepair::FindingImpact::Risk;
-    enum class State { Planned, Repaired, Failed, NotAttempted, Review, Unreadable };
+    enum class State { Planned, Repaired, Failed, NotAttempted, Review, Unreadable, Informational };
 
     const auto folderOf = [&](const fs::path& source) {
         return source.lexically_relative(plan.input).parent_path();
@@ -1051,6 +1132,7 @@ std::string summaryHtml(const AudioRepair::Plan& plan, std::string_view status, 
         return file != files.end() && file->second->status == "failed";
     };
     const auto stateOf = [&](const Finding& finding) {
+        if (finding.status == "informational") return State::Informational;
         if (finding.status == "unreadable") return State::Unreadable;
         if (finding.status == "manual-review") return State::Review;
         if (finding.status == "repaired") return State::Repaired;
@@ -1064,13 +1146,14 @@ std::string summaryHtml(const AudioRepair::Plan& plan, std::string_view status, 
         case State::Failed: return "Not fixed (repair failed)";
         case State::NotAttempted: return "Not fixed (not attempted)";
         case State::Review: return "Not changed (needs manual review)";
+        case State::Informational: return "Observation (no repair)";
         default: return "Not changed (file could not be read)";
         }
     };
     const auto changeText = [&](const Finding& finding) {
         const auto state = stateOf(finding);
         std::string text = state == State::Planned || state == State::Failed || state == State::NotAttempted ?
-            proposedWording(finding.detail) : finding.detail;
+            RepairRules::ProposedWording(finding.detail) : finding.detail;
         if (finding.count > 1) text += " (" + std::to_string(finding.count) + " items)";
         return std::string(stateLabel(state)) + ": " + escapeHtml(text);
     };
@@ -1087,7 +1170,7 @@ std::string summaryHtml(const AudioRepair::Plan& plan, std::string_view status, 
         AudioRepair::FindingImpact impact{};
         std::map<fs::path, std::vector<const Finding*>> albums;
         std::set<fs::path> tracks;
-        std::size_t planned{}, repaired{}, failed{}, unattempted{}, review{};
+        std::size_t planned{}, repaired{}, failed{}, unattempted{}, review{}, informational{};
     };
     std::map<std::string, Issue> issues;
     std::map<fs::path, std::vector<const Finding*>> trackFindings;
@@ -1111,6 +1194,7 @@ std::string summaryHtml(const AudioRepair::Plan& plan, std::string_view status, 
         case State::Repaired: ++issue.repaired; break;
         case State::Failed: ++issue.failed; break;
         case State::NotAttempted: ++issue.unattempted; break;
+        case State::Informational: ++issue.informational; break;
         default: ++issue.review; break;
         }
         trackFindings[finding.source].push_back(&finding);
@@ -1212,7 +1296,9 @@ std::string summaryHtml(const AudioRepair::Plan& plan, std::string_view status, 
     std::map<fs::path, std::string> albumAnchors;
     for (const auto* album : albumOrder) albumAnchors[album->folder] = album->anchor;
 
-    const char* title = preview ? "Metadata repair plan (preview, no files changed)" : "Metadata repair results";
+    const char* title = plan.categories.Legacy() ?
+        (preview ? "Metadata repair plan (preview, no files changed)" : "Metadata repair results") :
+        (preview ? "Audio repair plan (preview, no files changed)" : "Audio repair results");
     std::ostringstream html;
     html << R"HTML(<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1230,6 +1316,8 @@ summary {cursor: pointer} input {font: inherit; width: min(28rem, 95%)} li {marg
 </head><body><main><h1>)HTML" << title << R"HTML(</h1>
 )HTML";
     html << "<p>Source: " << escapeHtml(utf8(plan.input)) << "<br>Run status: " << escapeHtml(status) << "</p>";
+    html << "<p>Categories: " << RepairIntegrity::Describe(plan.categories)
+         << ". Audio integrity fixes change file bytes but never decoded audio.</p>";
     if (!error.empty()) html << "<p><strong>Error:</strong> " << escapeHtml(error) << "</p>";
     html << "<ul>";
     if (preview) {
@@ -1246,7 +1334,7 @@ summary {cursor: pointer} input {font: inherit; width: min(28rem, 95%)} li {marg
     html << "<li>" << issues.size() << " distinct issue(s); " << multiIssueTracks
          << " track(s) have more than one issue.</li></ul>";
     if (!preview) {
-        html << R"HTML(<p class="note">Installed repairs were verified against the original audio bytes. Severity describes metadata and player compatibility, not sound quality.
+        html << R"HTML(<p class="note">Only verified outputs are installed. Metadata-only edits preserve the original audio byte range; integrity edits require strict decoded-PCM proof.
 Unresolved findings were not fixed; another repair may have changed the same file.
 See <a href="repair-report.json">the JSON report</a> for the full file inventory.</p>
 )HTML";
@@ -1272,7 +1360,7 @@ See <a href="repair-report.json">the JSON report</a> for the full file inventory
              << issue->albums.size() << " album(s)";
         const std::pair<std::size_t, const char*> counts[]{ { issue->planned, "planned" },
             { issue->repaired, "fixed" }, { issue->failed, "failed" }, { issue->unattempted, "not attempted" },
-            { issue->review, "review only" } };
+            { issue->review, "review only" }, { issue->informational, "informational" } };
         for (const auto& [value, label] : counts) {
             if (value) html << "; " << value << ' ' << label;
         }
@@ -1445,12 +1533,20 @@ namespace AudioRepair
 FindingImpact DescribeFindingImpact(const Finding& finding)
 {
     using Risk = FindingImpact::Risk;
+    if (finding.detectionOnly)
+        return {Risk::Review, "Detection only", "The detected issue remains unchanged.",
+            "The category was set to detect. No edit was authorized or verified."};
     if (finding.status == "manual-review" || finding.status == "unreadable") {
         return { Risk::Review, "Needs review",
             "If left unchanged, the reported defect or uncertainty remains; its effect depends on the affected reader.",
             "No automatic fix is proposed because a safe, standards-preserving edit could not be established." };
     }
     const auto& rule = finding.rule;
+    if (finding.status == "informational")
+        return {Risk::Low, "Information", "This observation alone does not establish corruption.", "No edit is proposed."};
+    if (RepairIntegrity::CategoryOf(rule) == "integrity")
+        return {Risk::Compatibility, "Stream integrity", "The discrepancy may affect strict readers or seeking.",
+            "An output is installed only with frame, unchanged-byte and strict decoded-PCM proof."};
     if (rule == "mp3.redundant-id3v1") {
         return { Risk::Compatibility, "Compatibility caution",
             "Readers may display conflicting legacy values or select the wrong tag.",
@@ -1522,11 +1618,13 @@ FindingImpact DescribeFindingImpact(const Finding& finding)
 }
 
 int Prepare(const fs::path& input, const fs::path& output, bool overwrite,
-    const std::set<std::string>& rules, Plan& plan, std::size_t workers, bool dryRun)
+    const std::set<std::string>& rules, Plan& plan, std::size_t workers, bool dryRun,
+    const RepairIntegrity::Categories& categories)
 {
     spdlog::info("Repair source folder: '{}'.", utf8(input));
     plan = {};
     plan.rules = rules;
+    plan.categories = categories;
     plan.workers = workers;
     plan.dryRun = dryRun;
     if (workers == 0 || workers > 16) {
@@ -1593,22 +1691,40 @@ int Prepare(const fs::path& input, const fs::path& output, bool overwrite,
         std::vector<Finding> findings;
         FixList fixes;
         bool repair{ false };
+        std::string sourceDigest, editDigest, originalMd5;
+        std::uint64_t frameSamples{}, declaredSamples{};
+        std::vector<std::pair<std::uint64_t, std::uint64_t>> ranges;
+        std::optional<RepairPcmProof> decoded;
     };
     std::vector<Inspection> inspections(candidates.size());
-    RepairProgress inspectionProgress("inspection", candidates.size());
+    RepairProgress inspectionProgress(categories.decode == RepairIntegrity::Mode::Detect ?
+        "inspection and strict decode" : categories.integrity != RepairIntegrity::Mode::Off ?
+        "structural inspection" : "inspection", candidates.size());
     try {
         BoundedTaskRunner::ForEach(candidates.size(), workers, [&](std::size_t index) {
             const auto& path = candidates[index];
             auto& inspection = inspections[index];
             try {
-                const auto analysis = RepairRules::Analyze(path, plan.rules);
+                const auto analysis = RepairRules::AnalyzeSelected(path, plan.rules, categories);
+                inspection.decoded = analysis.decoded;
                 for (const auto& finding : analysis.findings) {
                     inspection.findings.push_back({ path, finding.rule,
-                        finding.fix ? "repairable" : "manual-review", finding.count, finding.detail });
+                        finding.fix ? "repairable" : finding.evidence && finding.evidence->informational ?
+                            "informational" : "manual-review", finding.count, finding.detail, finding.evidence,
+                            finding.proofStatus, finding.detectionOnly });
                 }
                 if (analysis.edit) {
-                    inspection.repair = true;
+                    if (analysis.edit->stream) {
+                        inspection.sourceDigest = RepairRules::FileDigest(path);
+                        inspection.editDigest = RepairRules::EditDigest(*analysis.edit->stream);
+                        inspection.frameSamples = analysis.edit->stream->samples;
+                        inspection.declaredSamples = analysis.edit->stream->declaredSamples;
+                        inspection.originalMd5 = analysis.edit->stream->md5;
+                        for (const auto& patch : analysis.edit->stream->patches)
+                            inspection.ranges.emplace_back(patch.offset, patch.removeSize ? patch.removeSize : patch.before.size());
+                    }
                     inspection.fixes = fixesOf(analysis);
+                    inspection.repair = true;
                 }
             }
             catch (const std::exception& exception) {
@@ -1629,6 +1745,7 @@ int Prepare(const fs::path& input, const fs::path& output, bool overwrite,
     }
     for (std::size_t index = 0; index < candidates.size(); ++index) {
         auto& inspection = inspections[index];
+        if (inspection.decoded) plan.decoded.emplace(candidates[index], std::move(*inspection.decoded));
         plan.findings.insert(plan.findings.end(), std::make_move_iterator(inspection.findings.begin()),
             std::make_move_iterator(inspection.findings.end()));
         if (inspection.repair) {
@@ -1731,6 +1848,16 @@ int Prepare(const fs::path& input, const fs::path& output, bool overwrite,
                 plan.files.push_back({ entry.path(), target, {}, size, modified, repair,
                     repair ? fixes->second : FixList{}, "not-attempted" });
                 plan.files.back().temporary = temporaryPath(target);
+                if (repair && !categories.Legacy()) {
+                    const auto idx = std::lower_bound(candidates.begin(), candidates.end(), entry.path()) - candidates.begin();
+                    plan.files.back().sourceDigest = inspections[idx].sourceDigest;
+                    plan.files.back().editDigest = inspections[idx].editDigest;
+                    plan.files.back().originalMd5 = inspections[idx].originalMd5;
+                    plan.files.back().frameSamples = inspections[idx].frameSamples;
+                    plan.files.back().declaredSamples = inspections[idx].declaredSamples;
+                    plan.files.back().editRanges = inspections[idx].ranges;
+                    plan.files.back().proof.status = inspections[idx].ranges.empty() ? "not-required" : "pending";
+                }
             }
         }
     }
@@ -1964,12 +2091,28 @@ int Execute(Plan& plan, std::size_t* repaired, std::size_t* copied)
                 try {
                     if (file.repair) {
                         spdlog::info("Checking repair candidate: {}", utf8(file.source.lexically_relative(plan.input)));
-                        auto analysis = RepairRules::Analyze(file.source, plan.rules);
+                        auto analysis = RepairRules::AnalyzeSelected(file.source, plan.rules, plan.categories);
                         if (!analysis.edit || fixesOf(analysis) != file.fixes) {
                             result.error = "repair finding changed after preview: " + utf8(file.source);
                             return;
                         }
                         result.edit = std::move(analysis.edit);
+                        if (result.edit->stream) {
+                            std::vector<std::pair<std::uint64_t, std::uint64_t>> ranges;
+                            for (const auto& patch : result.edit->stream->patches)
+                                ranges.emplace_back(patch.offset, patch.removeSize ? patch.removeSize : patch.before.size());
+                            if (ranges != file.editRanges || RepairRules::EditDigest(*result.edit->stream) != file.editDigest ||
+                                RepairRules::FileDigest(file.source) != file.sourceDigest) {
+                                result.error = "Source or edit regions changed after structural inspection.";
+                                return;
+                            }
+                            spdlog::info("Repair proof: strict source decode for '{}'.", utf8(file.source));
+                            execution.SetDetail("Strict source decode: " + utf8(relative));
+                            if (!RepairRules::PrepareProof(file.source, *result.edit->stream, file.proof)) {
+                                result.error = file.proof.error;
+                                return;
+                            }
+                        }
                         result.output = safeOutput->CreateOutputFile(temporary);
                         RepairRules::Write(file.source, *result.edit, [&](const char* data, std::size_t size) {
                             result.output->Write(data, size);
@@ -1979,6 +2122,15 @@ int Execute(Plan& plan, std::size_t* repaired, std::size_t* copied)
                         if (!RepairRules::Verify(file.source, result.output->VerificationPath(),
                                 *result.edit, plan.rules, verificationError)) {
                             result.error = "repair verification failed for '" + utf8(file.source) + "': " + verificationError;
+                            if (result.edit->stream) {
+                                file.proof.status = "failed";
+                                file.proof.error = verificationError;
+                            }
+                        } else if (result.edit->stream) {
+                            spdlog::info("Repair proof: strict staged decode for '{}'.", utf8(file.source));
+                            execution.SetDetail("Strict staged decode: " + utf8(relative));
+                            if (!RepairRules::VerifyProof(result.output->VerificationPath(), *result.edit->stream, file.proof))
+                                result.error = file.proof.error;
                         }
                     }
                     else {
@@ -2004,6 +2156,15 @@ int Execute(Plan& plan, std::size_t* repaired, std::size_t* copied)
             if (!result.error.empty()) {
                 file.status = "failed";
                 error = result.error;
+                if (!file.editRanges.empty()) {
+                    if (file.proof.status != "refused") file.proof.status = "failed";
+                    file.proof.error = error;
+                    for (auto& f : plan.findings) if (f.source == file.source && f.status == "repairable") {
+                        f.status = "manual-review";
+                        f.proofStatus = file.proof.status;
+                        f.detail += " Not installed: " + error;
+                    }
+                }
                 break;
             }
             bool outputValid = false;
@@ -2022,6 +2183,13 @@ int Execute(Plan& plan, std::size_t* repaired, std::size_t* copied)
                 break;
             }
             try {
+                if (!file.editRanges.empty()) execution.SetDetail("Installing verified output: " + utf8(file.target.filename()));
+                if (!file.sourceDigest.empty() && RepairRules::FileDigest(file.source) != file.sourceDigest) {
+                    file.status = "failed";
+                    file.proof.status = "failed";
+                    error = file.proof.error = "Source changed before verified output installation.";
+                    break;
+                }
                 if (!result.output->Install(file.target.filename(), plan.overwrite)) {
                     file.status = "failed";
                     error = "cannot install verified repair output: " + utf8(file.target);
@@ -2048,11 +2216,20 @@ int Execute(Plan& plan, std::size_t* repaired, std::size_t* copied)
                     break;
                 }
                 for (auto& finding : plan.findings) {
-                    if (finding.source == file.source && finding.status == "repairable") finding.status = "repaired";
+                    if (finding.source != file.source) continue;
+                    if (finding.status == "repairable") finding.status = "repaired";
+                    else if (finding.rule == "decode.strict" && result.edit->stream && result.edit->stream->suffixOnly &&
+                        file.proof.status == "passed" && file.proof.source && !file.proof.source->clean) {
+                        finding.status = "informational";
+                        finding.proofStatus = "passed";
+                        finding.detail += " The source failed; removing the verified suffix resolved the error in the installed output.";
+                    }
                 }
                 if (repaired) ++*repaired;
-                spdlog::info("Repaired '{}' ({}); audio bytes are unchanged (no decode/re-encode).",
-                    utf8(file.source.lexically_relative(plan.input)), describeFixes(file.fixes));
+                spdlog::info("Repaired '{}' ({}); {}.",
+                    utf8(file.source.lexically_relative(plan.input)), describeFixes(file.fixes),
+                    result.edit->stream ? "file bytes changed; decoded PCM was verified unchanged" :
+                        "audio bytes are unchanged (no decode/re-encode)");
             }
             else {
                 if (!PreservationAudit::VerifyCopy(file.source, installed)) {

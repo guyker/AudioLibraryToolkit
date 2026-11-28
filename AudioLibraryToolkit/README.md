@@ -182,8 +182,10 @@ metadata sidecars and copied companions, never to source files. Settings are per
 to safe defaults when selecting option `6` again; they do not modify config.json.
 Option `7` checks FLAC and MP3 files for common metadata defects (redundant ID3/APE tags, duplicate or empty tags,
 wrong picture MIME types or FLAC picture dimensions/depth, invalid FLAC seek tables, ID3v2.3 encoding errors, and more). It writes repaired copies to
-`OutDirectory\repaired-metadata\<mediaName>`, copying only affected folders and keeping other files unchanged; audio bytes are
-copied unchanged and repair code does not write to source files. Conflicting values, invalid comments, unsupported
+`OutDirectory\repaired-metadata\<mediaName>`, copying only affected folders and keeping other files unchanged. By default
+the inferred audio range is copied unchanged, without decoding. At the menu prompt enter `CATEGORIES` to change this run's
+checks before choosing overwrite or ID3v1 removal; normal answers still work. Audio integrity fixes change file bytes but
+never decoded audio. Repair does not write to source files. Conflicting values, invalid comments, unsupported
 ID3 layouts and unreadable files are left for manual review and listed in `repair-report.json`. Before `RUN`, option 7
 shows counts by rule and prints the path to a searchable HTML preview with every planned change and unresolved finding,
 grouped by issue with separate risks of leaving each finding unchanged or applying its fix. The preview is saved outside the source libraries;
@@ -204,7 +206,7 @@ The console menu options are:
    `OutDirectory\converted-mp3\<mediaName>` (defaults to the source folder name). It defaults to VBR quality 0,
    preserves metadata/companions, never changes sources, and rejects existing destinations or
    multichannel input unless overwrite or stereo downmix is explicitly enabled.
-- `7` validates and repairs recognized FLAC/MP3 metadata defects into `OutDirectory\repaired-metadata\<mediaName>` without
+- `7` validates FLAC/MP3 metadata and optionally stream integrity and container structure into `OutDirectory\repaired-metadata\<mediaName>` without
    changing sources; it requires `RUN` after preview.
 
 ## Build
@@ -385,6 +387,8 @@ AudioLibraryToolkit repair "D:\Music" --output-dir "E:\Repaired"
 AudioLibraryToolkit repair "D:\Music" --rules flac.duplicate-comments,mp3.redundant-id3v1
 AudioLibraryToolkit repair "D:\Music" --dry-run --jobs 2
 AudioLibraryToolkit repair "D:\Music" --remove-id3v1
+AudioLibraryToolkit repair "D:\Music" --metadata-mode off --integrity-mode detect --container-mode detect --dry-run
+AudioLibraryToolkit repair "D:\Music" --integrity-mode fix --rules flac.trailing-data
 ```
 
 `convert` writes FLAC files to a separate output tree and preserves source files. Sources below 16-bit or 44.1 kHz, or
@@ -408,11 +412,15 @@ even when archiving is disabled; a failed scan preserves the previous set. Conve
 separately by `MetadataSidecars`. Duplicate detection, database import, and incremental cache reuse validate the
 manifest before using marked batches. `DecodeWorkers` caps the independent full-decode stage. `duplicates` reports matches without
 opening folders; pass `--open` to open matched folders in Explorer. `db import` creates or updates a library-named
-`catalog-v2.sqlite` database and leaves legacy `.db` files untouched. `repair` writes metadata-only FLAC/MP3 fixes to
+`catalog-v2.sqlite` database and leaves legacy `.db` files untouched. `repair` writes verified FLAC/MP3 copies to
 `<output-root>\repaired-metadata\<input-folder-name>`; `--rules` limits it to listed rule ids (see `AudioLibraryToolkit repair --help`).
 `--dry-run` prints a complete JSON report without writing repair output, and `--jobs` selects 1–16 workers
-(default 4). Normal session logs still apply. It verifies byte-identical audio before installation and reports
-unresolved findings rather than guessing.
+(default 4). Normal session logs still apply. `--metadata-mode` and `--integrity-mode` accept `off`, `detect` or
+`fix`; `--container-mode` and `--decode-mode` accept `off` or `detect`. Optional `RepairCategories` configuration
+uses the keys `metadata`, `integrity`, `container`, `decode` (defaults `fix`, `off`, `off`, `off`).
+Explicit per-run fields override only those configured fields. Structural detection does not decode. Every stream edit
+requires strict PCM verification even when `--decode-mode off`. MP3 stream anomalies are reported, not rewritten.
+See [F-011](../docs/features/F-011-metadata-repair.md) for proof limits and reports.
 
 ### FLAC output preservation
 
